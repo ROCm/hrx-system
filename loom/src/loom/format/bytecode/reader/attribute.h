@@ -82,21 +82,21 @@ typedef struct loom_bytecode_attribute_ssa_materialization_scope_t {
 } loom_bytecode_attribute_ssa_materialization_scope_t;
 
 // Validates and resolves a static ordinal or a prior complete scope node.
-iree_status_t loom_bytecode_type_project_completed(
+bool loom_bytecode_type_project_completed(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
     uint64_t reference, loom_type_id_t* out_type);
 
 // Constructs complete scoped records using ordered full-reader tables.
-iree_status_t loom_bytecode_type_materialize_bindings(
+bool loom_bytecode_type_materialize_bindings(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
     uint64_t source_type_id, loom_type_id_t* out_type_id);
 
 // Constructs a complete parameterized type from scratch-owned parameter slots.
-iree_status_t loom_bytecode_attribute_decode_complete_type(
+bool loom_bytecode_attribute_decode_complete_type(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* values,
@@ -104,7 +104,7 @@ iree_status_t loom_bytecode_attribute_decode_complete_type(
 
 // Decodes into scratch-owned slots referencing completed native table entries.
 // The owning constructor canonicalizes the aggregate once before scratch reset.
-iree_status_t loom_bytecode_attribute_decode_named(
+bool loom_bytecode_attribute_decode_named(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
@@ -112,9 +112,8 @@ iree_status_t loom_bytecode_attribute_decode_named(
 
 // Skips a bounded scoped-type payload during symbol indexing. The full or
 // selected materializer owns validation and construction of reached records.
-iree_status_t loom_bytecode_skip_type_bindings(
-    loom_bytecode_reader_decoder_t* decoder,
-    loom_bytecode_reader_cursor_t* cursor);
+bool loom_bytecode_skip_type_bindings(loom_bytecode_reader_decoder_t* decoder,
+                                      loom_bytecode_reader_cursor_t* cursor);
 
 // One decoded predicate with source-domain VALUE arguments and diagnostics.
 typedef struct loom_bytecode_wire_predicate_t {
@@ -135,50 +134,51 @@ typedef struct loom_bytecode_wire_signed_enum_set_t {
 } loom_bytecode_wire_signed_enum_set_t;
 
 // Reads and validates one attribute wire-kind tag.
-static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
-loom_bytecode_attribute_read_kind(loom_bytecode_reader_decoder_t* decoder,
-                                  loom_bytecode_reader_cursor_t* cursor,
-                                  loom_bytecode_attr_kind_t* out_kind) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool loom_bytecode_attribute_read_kind(
+    loom_bytecode_reader_decoder_t* decoder,
+    loom_bytecode_reader_cursor_t* cursor,
+    loom_bytecode_attr_kind_t* out_kind) {
   const uint64_t kind_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   uint8_t kind = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u8(decoder, cursor, &kind));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
+      loom_bytecode_reader_read_u8(decoder, cursor, &kind));
   if (kind >= LOOM_BYTECODE_ATTR_COUNT) {
     return loom_bytecode_reader_emit_enum_value(
         decoder, IREE_SV("attribute_kind"), kind, LOOM_BYTECODE_ATTR_COUNT,
         kind_offset);
   }
   *out_kind = (loom_bytecode_attr_kind_t)kind;
-  return iree_ok_status();
+  return true;
 }
 
 // Checks a decoded wire kind against its field descriptor before consuming the
 // payload. A NULL descriptor permits any kind accepted by read_kind.
-iree_status_t loom_bytecode_attribute_validate_kind(
+bool loom_bytecode_attribute_validate_kind(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind);
 
 // Reads a bounded BYTES or UTF8 payload, validating the latter's encoding.
 // The returned attribute borrows the input bytes until canonicalized.
-iree_status_t loom_bytecode_attribute_read_bytes(
-    loom_bytecode_reader_decoder_t* decoder,
-    loom_bytecode_reader_cursor_t* cursor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr);
+bool loom_bytecode_attribute_read_bytes(loom_bytecode_reader_decoder_t* decoder,
+                                        loom_bytecode_reader_cursor_t* cursor,
+                                        loom_bytecode_attr_kind_t kind,
+                                        loom_attribute_t* out_attr);
 
 // Reads one predicate payload without projecting VALUE arguments.
-iree_status_t loom_bytecode_attribute_read_predicate(
+bool loom_bytecode_attribute_read_predicate(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t predicate_index,
     loom_bytecode_wire_predicate_t* out_predicate);
 
 // Reads and validates a predicate-list count.
-iree_status_t loom_bytecode_attribute_read_predicate_count(
+bool loom_bytecode_attribute_read_predicate_count(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint16_t* out_predicate_count);
 
 // Reads and validates one canonical descriptor-backed signed enum set.
-iree_status_t loom_bytecode_attribute_read_signed_enum_set(
+bool loom_bytecode_attribute_read_signed_enum_set(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor,
@@ -192,7 +192,7 @@ uint8_t loom_bytecode_attribute_find_parameter_index(
     uint8_t start_index);
 
 // Validates a global type parameter, which cannot contain predicate SSA values.
-iree_status_t loom_bytecode_attribute_validate_type_parameter(
+bool loom_bytecode_attribute_validate_type_parameter(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
@@ -201,21 +201,21 @@ iree_status_t loom_bytecode_attribute_validate_type_parameter(
 // Validates a complete descriptor-backed scoped type without constructing IR.
 // TYPE parameters refer directly to static types or prior completed nodes;
 // predicate VALUE parameters use the signature's ordinary SSA coordinates.
-iree_status_t loom_bytecode_attribute_validate_complete_type(
+bool loom_bytecode_attribute_validate_complete_type(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
     uint64_t completed_type_count);
 
 // Validates an attribute whose predicate VALUE arguments are STRINGS ordinals.
-iree_status_t loom_bytecode_attribute_validate_named(
+bool loom_bytecode_attribute_validate_named(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
     iree_host_size_t available_type_count);
 
 // Validates an attribute whose predicate VALUE arguments are SSA numbers.
-iree_status_t loom_bytecode_attribute_validate_ssa(
+bool loom_bytecode_attribute_validate_ssa(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
@@ -224,7 +224,7 @@ iree_status_t loom_bytecode_attribute_validate_ssa(
 
 // Validates a predicate list with SSA-number VALUE arguments and returns its
 // encoded predicate count.
-iree_status_t loom_bytecode_attribute_validate_predicate_list_ssa(
+bool loom_bytecode_attribute_validate_predicate_list_ssa(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
@@ -235,7 +235,7 @@ iree_status_t loom_bytecode_attribute_validate_predicate_list_ssa(
 // The returned predicates are allocated from |retained_arena| and preserve
 // wire VALUE arguments as validated signature-local ordinals. Passing NULL for
 // |retained_arena| and |out_predicates| performs validation without retention.
-iree_status_t loom_bytecode_attribute_retain_predicate_list_ssa(
+bool loom_bytecode_attribute_retain_predicate_list_ssa(
     loom_bytecode_attribute_validator_t* validator,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
@@ -244,14 +244,14 @@ iree_status_t loom_bytecode_attribute_retain_predicate_list_ssa(
 
 // Materializes an attribute whose predicate VALUE arguments are STRINGS
 // ordinals.
-iree_status_t loom_bytecode_attribute_materialize_named(
+bool loom_bytecode_attribute_materialize_named(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
     iree_host_size_t available_type_count, loom_attribute_t* out_attr);
 
 // Materializes an attribute whose predicate VALUE arguments are SSA numbers.
-iree_status_t loom_bytecode_attribute_materialize_ssa(
+bool loom_bytecode_attribute_materialize_ssa(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,

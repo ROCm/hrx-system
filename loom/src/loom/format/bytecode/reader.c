@@ -26,16 +26,15 @@ static iree_status_t loom_bytecode_read_module_impl(
       options ? options->diagnostic_sink : (loom_diagnostic_sink_t){0},
       &reader);
 
-  iree_status_t status = loom_bytecode_file_reader_validate(&reader);
-  if (iree_status_is_ok(status) && require_single_module &&
-      reader.module_count != 1) {
-    status = loom_bytecode_reader_emit_invalid_field(
+  bool accepted = loom_bytecode_file_reader_validate(&reader);
+  if (accepted && require_single_module && reader.module_count != 1) {
+    accepted = loom_bytecode_reader_emit_invalid_field(
         &reader.decoder, IREE_SV("FILE"), IREE_SV("header"), 0,
         IREE_SV("module_count"), 0,
         IREE_SV("module_materialization_requires_exactly_one_module"));
   }
-  if (iree_status_is_ok(status) && module_ordinal >= reader.module_count) {
-    status = loom_bytecode_reader_emit_invalid_field(
+  if (accepted && module_ordinal >= reader.module_count) {
+    accepted = loom_bytecode_reader_emit_invalid_field(
         &reader.decoder, IREE_SV("FILE"), IREE_SV("module_directory"),
         module_ordinal, IREE_SV("module_ordinal"), 0,
         IREE_SV("requested_module_ordinal_is_out_of_range"));
@@ -43,15 +42,15 @@ static iree_status_t loom_bytecode_read_module_impl(
 
   loom_bytecode_reader_module_view_t module_view = {0};
   loom_module_t* output_module = NULL;
-  if (iree_status_is_ok(status)) {
-    status = loom_bytecode_module_validate(
+  if (accepted) {
+    accepted = loom_bytecode_module_validate(
         &reader, &reader.modules[module_ordinal],
         LOOM_BYTECODE_MODULE_VALIDATION_PREPARE_MATERIALIZATION, &module_view);
     if (module_ordinal == 0) {
       reader.result.first_module = module_view.summary;
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (accepted) {
     const loom_bytecode_module_materializer_t materializer = {
         .decoder = &reader.decoder,
         .bytecode = bytecode,
@@ -63,14 +62,13 @@ static iree_status_t loom_bytecode_read_module_impl(
                                         : (loom_low_repr_environment_t){0},
         .host_allocator = host_allocator,
     };
-    status = loom_bytecode_module_materialize(&materializer, &output_module);
+    accepted = loom_bytecode_module_materialize(&materializer, &output_module);
   }
-  status = loom_bytecode_reader_normalize_diagnosed_error(
-      status, reader.result.error_count);
 
+  iree_status_t status = loom_bytecode_reader_consume_status(&reader.decoder);
   if (iree_status_is_ok(status)) {
     *out_result = reader.result;
-    if (reader.result.error_count == 0) {
+    if (accepted) {
       *out_module = output_module;
       output_module = NULL;
     }

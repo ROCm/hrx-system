@@ -23,8 +23,8 @@ extern "C" {
 
 // State for materializing validated symbol facts and bodies.
 typedef struct loom_bytecode_symbol_materializer_t {
-  // Bounded decoder copied from the owning public read.
-  loom_bytecode_reader_decoder_t decoder;
+  // Borrowed decoder owned by the public read.
+  loom_bytecode_reader_decoder_t* decoder;
   // Finalized dialect and attribute registry context.
   loom_context_t* context;
   // Invocation storage for symbol scopes and completed binding identities.
@@ -43,7 +43,7 @@ typedef struct loom_bytecode_symbol_materializer_t {
 
 // Initializes full symbol materialization over an immutable validated view.
 void loom_bytecode_symbol_materializer_initialize(
-    const loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
+    loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     iree_arena_block_pool_t* block_pool,
     const loom_bytecode_reader_module_view_t* module_view,
@@ -56,7 +56,7 @@ iree_status_t loom_bytecode_symbols_predeclare(
     loom_bytecode_symbol_materializer_t* materializer);
 
 // Materializes the complete SYMBOLS table and every referenced IR body.
-iree_status_t loom_bytecode_symbols_materialize(
+bool loom_bytecode_symbols_materialize(
     loom_bytecode_symbol_materializer_t* materializer,
     const loom_bytecode_reader_section_t* symbols_section,
     const loom_bytecode_reader_section_t* ir_section);

@@ -100,26 +100,26 @@ typedef struct loom_bytecode_value_scope_t {
 // Decodes and validates the allocation summary prefix of one exact root-region
 // payload. The returned payload offset lets callers retain the summary and
 // later materialize the region without decoding the prefix again.
-iree_status_t loom_bytecode_region_summary_read(
+bool loom_bytecode_region_summary_read(
     loom_bytecode_reader_decoder_t* decoder, iree_string_view_t symbol_name,
     iree_const_byte_span_t payload_bytes, uint64_t payload_absolute_offset,
     loom_bytecode_region_summary_t* out_summary);
 
 // Initializes a value scope whose entire map consists of fresh module values.
-iree_status_t loom_bytecode_value_scope_initialize_fresh(
+bool loom_bytecode_value_scope_initialize_fresh(
     loom_bytecode_body_materializer_t* materializer,
     iree_arena_allocator_t* arena, iree_string_view_t symbol_name,
     uint64_t payload_offset, loom_value_id_t* value_map,
     iree_host_size_t value_count, loom_bytecode_value_scope_t* out_scope);
 
 // Materializes the next reserved value definition from |cursor|.
-iree_status_t loom_bytecode_value_scope_materialize_definition(
+bool loom_bytecode_value_scope_materialize_definition(
     loom_bytecode_value_scope_t* value_scope,
     loom_bytecode_reader_cursor_t* cursor, loom_value_id_t* out_value_id);
 
 // Materializes one bounded root-region payload into |region_index| on
 // |parent_op| using a summary returned by loom_bytecode_region_summary_read.
-iree_status_t loom_bytecode_body_materialize_region(
+bool loom_bytecode_body_materialize_region(
     loom_bytecode_body_materializer_t* materializer,
     iree_string_view_t symbol_name, iree_const_byte_span_t payload_bytes,
     uint64_t payload_absolute_offset,

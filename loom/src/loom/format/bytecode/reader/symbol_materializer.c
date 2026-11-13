@@ -26,7 +26,7 @@ static loom_bytecode_attribute_materializer_t
 loom_bytecode_symbol_attribute_materializer(
     loom_bytecode_symbol_policy_materializer_t* materializer) {
   return (loom_bytecode_attribute_materializer_t){
-      .decoder = &materializer->decoder,
+      .decoder = materializer->decoder,
       .context = materializer->context,
       .module_view = &materializer->view,
       .scratch_arena = materializer->scratch_arena,
@@ -52,12 +52,12 @@ static uint16_t loom_bytecode_symbol_policy_flags(
   return materializer->view.symbols.flags[symbol_ordinal];
 }
 
-static iree_status_t loom_bytecode_symbol_policy_resolve_source_string(
+static bool loom_bytecode_symbol_policy_resolve_source_string(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     uint64_t source_string_id, iree_string_view_t field_name, uint64_t offset,
     iree_string_view_t* out_string) {
   return loom_bytecode_symbol_validate_string_ref(
-      &materializer->decoder, &materializer->view, source_string_id, field_name,
+      materializer->decoder, &materializer->view, source_string_id, field_name,
       offset, out_string);
 }
 
@@ -85,12 +85,12 @@ static uint16_t loom_bytecode_symbol_policy_lookup_symbol(
                               (loom_string_id_t)source_name_id);
 }
 
-static iree_status_t loom_bytecode_symbol_policy_project_location(
+static bool loom_bytecode_symbol_policy_project_location(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     loom_location_id_t source_location, loom_location_id_t* out_location) {
   (void)materializer;
   *out_location = source_location;
-  return iree_ok_status();
+  return true;
 }
 
 static iree_status_t loom_bytecode_symbol_policy_project_symbol_ordinal(
@@ -117,7 +117,7 @@ static void loom_bytecode_symbol_policy_resolve_defining_op(
   *out_kind = materializer->view.ops.kinds[op_ordinal];
 }
 
-static iree_status_t loom_bytecode_symbol_policy_value_scope_initialize_fresh(
+static bool loom_bytecode_symbol_policy_value_scope_initialize_fresh(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     iree_arena_allocator_t* arena, iree_string_view_t symbol_name,
     uint64_t payload_offset, loom_value_id_t* value_map,
@@ -128,15 +128,14 @@ static iree_status_t loom_bytecode_symbol_policy_value_scope_initialize_fresh(
       value_map, value_count, out_scope);
 }
 
-static iree_status_t
-loom_bytecode_symbol_policy_value_scope_materialize_definition(
+static bool loom_bytecode_symbol_policy_value_scope_materialize_definition(
     loom_bytecode_symbol_policy_value_scope_t* value_scope,
     loom_bytecode_reader_cursor_t* cursor, loom_value_id_t* out_value_id) {
   return loom_bytecode_value_scope_materialize_definition(value_scope, cursor,
                                                           out_value_id);
 }
 
-static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_named(
+static bool loom_bytecode_symbol_policy_materialize_attribute_named(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
@@ -148,7 +147,7 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_named(
       out_attr);
 }
 
-static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_ssa(
+static bool loom_bytecode_symbol_policy_materialize_attribute_ssa(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
@@ -161,7 +160,7 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_ssa(
       ssa_scope, out_attr);
 }
 
-static iree_status_t loom_bytecode_symbol_policy_materialize_region(
+static bool loom_bytecode_symbol_policy_materialize_region(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     iree_string_view_t symbol_name,
     const loom_bytecode_symbol_policy_body_source_t* body_source,
@@ -173,8 +172,8 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_region(
     const loom_low_repr_descriptor_set_t* low_descriptor_set) {
   (void)symbol_ordinal;
   (void)region_payload_ordinal;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_range(
-      &materializer->decoder, IREE_SV("IR root region"), payload->offset,
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_validate_range(
+      materializer->decoder, IREE_SV("IR root region"), payload->offset,
       payload->length, body_source ? body_source->length : 0));
   const iree_const_byte_span_t payload_bytes = iree_make_const_byte_span(
       body_source->bytes.data + (iree_host_size_t)payload->offset,
@@ -182,8 +181,8 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_region(
   const uint64_t payload_absolute_offset =
       body_source->absolute_offset + payload->offset;
   loom_bytecode_region_summary_t summary;
-  IREE_RETURN_IF_ERROR(loom_bytecode_region_summary_read(
-      &materializer->decoder, symbol_name, payload_bytes,
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_region_summary_read(
+      materializer->decoder, symbol_name, payload_bytes,
       payload_absolute_offset, &summary));
   return loom_bytecode_body_materialize_region(
       &materializer->body_materializer, symbol_name, payload_bytes,
@@ -193,7 +192,7 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_region(
 }
 
 void loom_bytecode_symbol_materializer_initialize(
-    const loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
+    loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     iree_arena_block_pool_t* block_pool,
     const loom_bytecode_reader_module_view_t* module_view,
@@ -201,7 +200,7 @@ void loom_bytecode_symbol_materializer_initialize(
     const loom_low_repr_environment_t* low_repr_environment,
     loom_bytecode_symbol_materializer_t* out_materializer) {
   *out_materializer = (loom_bytecode_symbol_materializer_t){
-      .decoder = *decoder,
+      .decoder = decoder,
       .context = context,
       .arena = arena,
       .scratch_arena = scratch_arena,
@@ -212,7 +211,7 @@ void loom_bytecode_symbol_materializer_initialize(
   out_materializer->body_materializer = (loom_bytecode_body_materializer_t){
       .attributes =
           {
-              .decoder = &out_materializer->decoder,
+              .decoder = out_materializer->decoder,
               .context = context,
               .module_view = &out_materializer->view,
               .scratch_arena = scratch_arena,
@@ -247,7 +246,7 @@ static loom_symbol_kind_t loom_bytecode_reader_decode_symbol_kind(
   }
 }
 
-static iree_status_t loom_bytecode_reader_symbol_cursor_to_entries(
+static bool loom_bytecode_reader_symbol_cursor_to_entries(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     const loom_bytecode_reader_section_t* symbols_section,
     loom_bytecode_reader_cursor_t* cursor) {
@@ -258,21 +257,21 @@ static iree_status_t loom_bytecode_reader_symbol_cursor_to_entries(
   uint64_t import_count = 0;
   uint64_t export_count = 0;
   uint64_t region_payload_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(&materializer->decoder,
-                                                         cursor, &count));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &materializer->decoder, cursor, &import_count));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &materializer->decoder, cursor, &export_count));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &materializer->decoder, cursor, &region_payload_count));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
+      loom_bytecode_reader_read_uvarint(materializer->decoder, cursor, &count));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
+      materializer->decoder, cursor, &import_count));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
+      materializer->decoder, cursor, &export_count));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
+      materializer->decoder, cursor, &region_payload_count));
   (void)region_payload_count;
   for (uint64_t i = 0; i < import_count + export_count; ++i) {
     uint64_t unused_offset = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u64_le(
-        &materializer->decoder, cursor, &unused_offset));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_u64_le(
+        materializer->decoder, cursor, &unused_offset));
   }
-  return iree_ok_status();
+  return true;
 }
 
 iree_status_t loom_bytecode_symbols_predeclare(
@@ -304,22 +303,23 @@ iree_status_t loom_bytecode_symbols_predeclare(
 
 #include "loom/format/bytecode/reader/symbol_materializer_impl.inl"
 
-iree_status_t loom_bytecode_symbols_materialize(
+bool loom_bytecode_symbols_materialize(
     loom_bytecode_symbol_materializer_t* materializer,
     const loom_bytecode_reader_section_t* symbols_section,
     const loom_bytecode_reader_section_t* ir_section) {
   loom_bytecode_reader_cursor_t cursor;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_symbol_cursor_to_entries(
-      materializer, symbols_section, &cursor));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
+      loom_bytecode_reader_symbol_cursor_to_entries(materializer,
+                                                    symbols_section, &cursor));
 
   loom_builder_t builder;
   loom_builder_initialize(
       materializer->output_module, &materializer->output_module->arena,
       loom_module_block(materializer->output_module), &builder);
   for (iree_host_size_t i = 0; i < materializer->view.symbols.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_symbol_materialize_entry(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_symbol_materialize_entry(
         materializer, &cursor, ir_section, i, &builder));
   }
-  return loom_bytecode_reader_expect_empty(&materializer->decoder, &cursor,
+  return loom_bytecode_reader_expect_empty(materializer->decoder, &cursor,
                                            IREE_SV("SYMBOLS"));
 }

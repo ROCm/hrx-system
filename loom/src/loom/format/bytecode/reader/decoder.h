@@ -20,13 +20,17 @@ extern "C" {
 
 // Diagnostic state shared by bounded bytecode cursors in one public read.
 //
-// The decoder owns no input, arena, table, context, or IR state. The error
-// counter remains owned by the caller's public result object.
+// The decoder borrows all input, storage, and result state. Private readers
+// return boolean completion; false stops decoding after a diagnostic or an
+// infrastructure failure. Only the latter owns a status, consumed exactly once
+// by the public invocation. Subordinate readers borrow this same decoder.
 typedef struct loom_bytecode_reader_decoder_t {
   // Structured diagnostic destination and input identity.
   loom_bytecode_reader_diagnostic_context_t diagnostic_context;
   // Caller-owned number of emitted error diagnostics.
   uint32_t* error_count;
+  // Owned allocation or sink failure, transferred by consume_status.
+  iree_status_t status;
 } loom_bytecode_reader_decoder_t;
 
 // Initializes a bounded decoder over caller-owned diagnostic state.
@@ -40,8 +44,38 @@ static inline void loom_bytecode_reader_decoder_initialize(
           /*.filename=*/filename,
       },
       /*.error_count=*/error_count,
+      /*.status=*/iree_ok_status(),
   };
 }
+
+// Transfers the pending infrastructure failure and clears its ownership.
+// Diagnosed malformed input does not produce a status.
+static inline iree_status_t loom_bytecode_reader_consume_status(
+    loom_bytecode_reader_decoder_t* decoder) {
+  iree_status_t status = decoder->status;
+  decoder->status = iree_ok_status();
+  return status;
+}
+
+// Takes an infrastructure operation's status. A failure terminates the private
+// read immediately, so the decoder owns at most one failure at a time.
+static inline bool loom_bytecode_reader_check_status(
+    loom_bytecode_reader_decoder_t* decoder, iree_status_t status) {
+  if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+    decoder->status = status;
+    return false;
+  }
+  return true;
+}
+
+// Propagates private decoding completion without encoding rejection in a
+// status. Allocation and other infrastructure calls use check_status first.
+#define LOOM_BYTECODE_RETURN_IF_REJECTED(expr) \
+  do {                                         \
+    if (IREE_UNLIKELY(!(expr))) {              \
+      return false;                            \
+    }                                          \
+  } while (0)
 
 // Bounded cursor over one named bytecode range.
 typedef struct loom_bytecode_reader_cursor_t {
@@ -68,48 +102,60 @@ static inline uint64_t loom_bytecode_reader_cursor_absolute_position(
   return cursor->absolute_offset + (uint64_t)cursor->cursor.position;
 }
 
+// Error emitters stay out of line so parameter and diagnostic construction
+// cannot inflate the hot parsing paths under LTO.
+//
 // Emits a structured bytecode error and increments the public error count.
 //
-// Returns code-only IREE_STATUS_DEFERRED after the diagnostic sink accepts the
-// error. Private reader functions propagate that marker through ordinary
-// status macros; only public bytecode-reader boundaries consume it. Actual
-// diagnostic sink failures propagate unchanged.
-iree_status_t loom_bytecode_reader_emit_error(
-    loom_bytecode_reader_decoder_t* decoder, const loom_error_def_t* error,
-    const loom_diagnostic_param_t* params, iree_host_size_t param_count,
-    uint64_t offset, uint64_t length);
+// Always returns false. Successful diagnostic delivery leaves the status OK;
+// a sink failure is retained unchanged for the owning public invocation.
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD bool
+loom_bytecode_reader_emit_error(loom_bytecode_reader_decoder_t* decoder,
+                                const loom_error_def_t* error,
+                                const loom_diagnostic_param_t* params,
+                                iree_host_size_t param_count, uint64_t offset,
+                                uint64_t length);
 
 // Emits a truncated-range diagnostic at |offset|.
-iree_status_t loom_bytecode_reader_emit_unexpected_end(
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD bool
+loom_bytecode_reader_emit_unexpected_end(
     loom_bytecode_reader_decoder_t* decoder, uint64_t offset, uint64_t needed,
     uint64_t available);
 
 // Emits the structured diagnostic for a non-complete raw varint outcome.
-iree_status_t loom_bytecode_reader_emit_invalid_varint(
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD bool
+loom_bytecode_reader_emit_invalid_varint(
     loom_bytecode_reader_decoder_t* decoder, uint64_t offset,
     loom_varint_decode_result_t result);
 
 // Emits an invalid table-field diagnostic.
-iree_status_t loom_bytecode_reader_emit_invalid_field(
-    loom_bytecode_reader_decoder_t* decoder, iree_string_view_t section_name,
-    iree_string_view_t table_name, uint64_t record_index,
-    iree_string_view_t field_name, uint64_t offset,
-    iree_string_view_t failure_code);
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD bool
+loom_bytecode_reader_emit_invalid_field(loom_bytecode_reader_decoder_t* decoder,
+                                        iree_string_view_t section_name,
+                                        iree_string_view_t table_name,
+                                        uint64_t record_index,
+                                        iree_string_view_t field_name,
+                                        uint64_t offset,
+                                        iree_string_view_t failure_code);
 
 // Emits an invalid byte-range diagnostic.
-iree_status_t loom_bytecode_reader_emit_range_error(
-    loom_bytecode_reader_decoder_t* decoder, iree_string_view_t range_name,
-    uint64_t offset, uint64_t length, uint64_t container_length);
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD bool
+loom_bytecode_reader_emit_range_error(loom_bytecode_reader_decoder_t* decoder,
+                                      iree_string_view_t range_name,
+                                      uint64_t offset, uint64_t length,
+                                      uint64_t container_length);
 
 // Emits a table-count limit diagnostic.
-iree_status_t loom_bytecode_reader_emit_count_exceeds(
-    loom_bytecode_reader_decoder_t* decoder, iree_string_view_t table_name,
-    uint64_t count, uint64_t limit, uint64_t offset);
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD bool
+loom_bytecode_reader_emit_count_exceeds(loom_bytecode_reader_decoder_t* decoder,
+                                        iree_string_view_t table_name,
+                                        uint64_t count, uint64_t limit,
+                                        uint64_t offset);
 
 // Validates that |count| entries and required trailing bytes can fit in the
 // unread cursor range. The division-based bound avoids multiplying an
 // untrusted count and must run before any count-sized allocation.
-static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool
 loom_bytecode_reader_validate_count_bytes(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor, iree_string_view_t table_name,
@@ -128,25 +174,29 @@ loom_bytecode_reader_validate_count_bytes(
     return loom_bytecode_reader_emit_count_exceeds(decoder, table_name, count,
                                                    count_limit, count_offset);
   }
-  return iree_ok_status();
+  return true;
 }
 
 // Emits an out-of-range table-reference diagnostic.
-iree_status_t loom_bytecode_reader_emit_table_ref(
-    loom_bytecode_reader_decoder_t* decoder, iree_string_view_t table_name,
-    uint64_t reference_id, uint64_t table_count, uint64_t offset);
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD bool
+loom_bytecode_reader_emit_table_ref(loom_bytecode_reader_decoder_t* decoder,
+                                    iree_string_view_t table_name,
+                                    uint64_t reference_id, uint64_t table_count,
+                                    uint64_t offset);
 
 // Emits an out-of-range dense-enum diagnostic.
-iree_status_t loom_bytecode_reader_emit_enum_value(
-    loom_bytecode_reader_decoder_t* decoder, iree_string_view_t field_name,
-    uint64_t actual_value, uint64_t case_count, uint64_t offset);
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD bool
+loom_bytecode_reader_emit_enum_value(loom_bytecode_reader_decoder_t* decoder,
+                                     iree_string_view_t field_name,
+                                     uint64_t actual_value, uint64_t case_count,
+                                     uint64_t offset);
 
 // Reads an unsigned byte from |cursor|.
-static inline iree_status_t loom_bytecode_reader_read_u8(
+static inline bool loom_bytecode_reader_read_u8(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint8_t* out_value) {
   if (IREE_LIKELY(loom_bytecode_cursor_read_u8(&cursor->cursor, out_value))) {
-    return iree_ok_status();
+    return true;
   }
   return loom_bytecode_reader_emit_unexpected_end(
       decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 1,
@@ -154,12 +204,12 @@ static inline iree_status_t loom_bytecode_reader_read_u8(
 }
 
 // Reads a little-endian unsigned 16-bit integer from |cursor|.
-static inline iree_status_t loom_bytecode_reader_read_u16_le(
+static inline bool loom_bytecode_reader_read_u16_le(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint16_t* out_value) {
   if (IREE_LIKELY(
           loom_bytecode_cursor_read_u16_le(&cursor->cursor, out_value))) {
-    return iree_ok_status();
+    return true;
   }
   return loom_bytecode_reader_emit_unexpected_end(
       decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 2,
@@ -167,12 +217,12 @@ static inline iree_status_t loom_bytecode_reader_read_u16_le(
 }
 
 // Reads a little-endian unsigned 32-bit integer from |cursor|.
-static inline iree_status_t loom_bytecode_reader_read_u32_le(
+static inline bool loom_bytecode_reader_read_u32_le(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint32_t* out_value) {
   if (IREE_LIKELY(
           loom_bytecode_cursor_read_u32_le(&cursor->cursor, out_value))) {
-    return iree_ok_status();
+    return true;
   }
   return loom_bytecode_reader_emit_unexpected_end(
       decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 4,
@@ -180,12 +230,12 @@ static inline iree_status_t loom_bytecode_reader_read_u32_le(
 }
 
 // Reads a little-endian unsigned 64-bit integer from |cursor|.
-static inline iree_status_t loom_bytecode_reader_read_u64_le(
+static inline bool loom_bytecode_reader_read_u64_le(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {
   if (IREE_LIKELY(
           loom_bytecode_cursor_read_u64_le(&cursor->cursor, out_value))) {
-    return iree_ok_status();
+    return true;
   }
   return loom_bytecode_reader_emit_unexpected_end(
       decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 8,
@@ -194,7 +244,7 @@ static inline iree_status_t loom_bytecode_reader_read_u64_le(
 
 // Reads a canonical unsigned LEB128 integer with guaranteed successful-path
 // inlining for measured parser inner loops.
-static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+static IREE_ATTRIBUTE_ALWAYS_INLINE bool
 loom_bytecode_reader_read_uvarint_inline(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {
@@ -202,32 +252,32 @@ loom_bytecode_reader_read_uvarint_inline(
   const loom_varint_decode_result_t result =
       loom_uvarint_decode(&cursor->cursor, out_value);
   if (IREE_LIKELY(result == LOOM_VARINT_DECODE_COMPLETE)) {
-    return iree_ok_status();
+    return true;
   }
   return loom_bytecode_reader_emit_invalid_varint(decoder, offset, result);
 }
 
 // Reads a canonical unsigned LEB128 integer from |cursor| while allowing the
 // compiler to outline the wrapper in code-size-sensitive grammars.
-static inline iree_status_t loom_bytecode_reader_read_uvarint(
+static inline bool loom_bytecode_reader_read_uvarint(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {
   return loom_bytecode_reader_read_uvarint_inline(decoder, cursor, out_value);
 }
 
 // Reads a canonical zigzag-encoded signed LEB128 integer from |cursor|.
-static inline iree_status_t loom_bytecode_reader_read_svarint(
+static inline bool loom_bytecode_reader_read_svarint(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, int64_t* out_value) {
   uint64_t zigzag = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_uvarint(decoder, cursor, &zigzag));
   *out_value = (int64_t)((zigzag >> 1) ^ -(zigzag & 1));
-  return iree_ok_status();
+  return true;
 }
 
 // Reads a borrowed byte span from |cursor|.
-static inline iree_status_t loom_bytecode_reader_read_span(
+static inline bool loom_bytecode_reader_read_span(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t length,
     iree_const_byte_span_t* out_span) {
@@ -240,7 +290,7 @@ static inline iree_status_t loom_bytecode_reader_read_span(
   const iree_host_size_t host_length = (iree_host_size_t)length;
   if (IREE_LIKELY(loom_bytecode_cursor_read_span(&cursor->cursor, host_length,
                                                  out_span))) {
-    return iree_ok_status();
+    return true;
   }
   return loom_bytecode_reader_emit_unexpected_end(
       decoder, loom_bytecode_reader_cursor_absolute_position(cursor), length,
@@ -248,11 +298,11 @@ static inline iree_status_t loom_bytecode_reader_read_span(
 }
 
 // Requires that |cursor| has no unread trailing bytes.
-static inline iree_status_t loom_bytecode_reader_expect_empty(
+static inline bool loom_bytecode_reader_expect_empty(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, iree_string_view_t table_name) {
   if (IREE_LIKELY(loom_bytecode_cursor_is_empty(&cursor->cursor))) {
-    return iree_ok_status();
+    return true;
   }
   return loom_bytecode_reader_emit_invalid_field(
       decoder, cursor->range_name, table_name, 0, IREE_SV("trailing_bytes"),
@@ -261,7 +311,7 @@ static inline iree_status_t loom_bytecode_reader_expect_empty(
 }
 
 // Validates a relative byte range against its containing byte length.
-static inline iree_status_t loom_bytecode_reader_validate_range(
+static inline bool loom_bytecode_reader_validate_range(
     loom_bytecode_reader_decoder_t* decoder, iree_string_view_t range_name,
     uint64_t offset, uint64_t length, uint64_t container_length) {
   if (IREE_UNLIKELY(length > UINT64_MAX - offset ||
@@ -269,7 +319,7 @@ static inline iree_status_t loom_bytecode_reader_validate_range(
     return loom_bytecode_reader_emit_range_error(decoder, range_name, offset,
                                                  length, container_length);
   }
-  return iree_ok_status();
+  return true;
 }
 
 #ifdef __cplusplus

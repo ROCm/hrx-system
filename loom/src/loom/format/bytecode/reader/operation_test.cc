@@ -46,6 +46,7 @@ class BytecodeOperationTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&retained_arena_);
     iree_arena_deinitialize(&scratch_arena_);
@@ -90,7 +91,7 @@ TEST_F(BytecodeOperationTest, ValidatesAndResolvesDenseTable) {
   const loom_bytecode_reader_section_t section =
       MakeSection(data, sizeof(data));
 
-  IREE_ASSERT_OK(loom_bytecode_operation_table_validate(
+  ASSERT_TRUE(loom_bytecode_operation_table_validate(
       &decoder_, &context_, &module_view_, &scratch_arena_, &section));
 
   ASSERT_EQ(module_view_.ops.count, 1u);
@@ -111,7 +112,7 @@ TEST_F(BytecodeOperationTest, RetainsResolvedOperations) {
 
   loom_bytecode_op_metadata_t* entries = nullptr;
   iree_host_size_t count = 0;
-  IREE_ASSERT_OK(loom_bytecode_operation_table_index(
+  ASSERT_TRUE(loom_bytecode_operation_table_index(
       &decoder_, &context_, &module_view_, &scratch_arena_, &section,
       &retained_arena_, &entries, &count));
 
@@ -128,10 +129,8 @@ TEST_F(BytecodeOperationTest, RejectsCountBeforeResolvingOperations) {
   const loom_bytecode_reader_section_t section =
       MakeSection(data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_operation_table_validate(
-          &decoder_, &context_, &module_view_, &scratch_arena_, &section));
+  EXPECT_FALSE(loom_bytecode_operation_table_validate(
+      &decoder_, &context_, &module_view_, &scratch_arena_, &section));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);

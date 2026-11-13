@@ -3108,7 +3108,7 @@ TEST_F(ReaderTest, DiagnosticSinkFailureEscapesPublicBoundary) {
   EXPECT_EQ(result.error_count, 123u);
 }
 
-TEST_F(ReaderTest, DiagnosticSinkCannotUsePrivateDeferredMarker) {
+TEST_F(ReaderTest, DiagnosticSinkDeferredStatusIsPreserved) {
   const uint8_t bytes[] = {0x00};
   loom_bytecode_read_result_t result = {
       .error_count = 123,
@@ -3122,7 +3122,7 @@ TEST_F(ReaderTest, DiagnosticSinkCannotUsePrivateDeferredMarker) {
   };
 
   IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
+      IREE_STATUS_DEFERRED,
       loom_bytecode_read_metadata(
           iree_make_const_byte_span(bytes, IREE_ARRAYSIZE(bytes)),
           IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result));
@@ -4075,15 +4075,26 @@ TEST_F(ReaderTest, PreservesLinkOnceRodataSymbolPolicy) {
   loom_module_free(module);
 }
 
-TEST_F(ReaderTest, RejectsLinkOnceRecordWithoutLinkageAttribute) {
-  loom_module_t* module = CreateTestRecordWithFutureEnumOrdinal();
-  auto bytes = WriteModule(module);
-  const size_t flags_offset = FirstSymbolFlagsOffset(bytes);
-  const uint16_t flags = ReadU16LE(bytes, flags_offset);
-  WriteU16LE(&bytes, flags_offset, flags | LOOM_BYTECODE_SYMBOL_FLAG_LINK_ONCE);
-
-  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
-  loom_module_free(module);
+TEST_F(ReaderTest, IndexRejectsPoliciesWithoutDestinationAttributes) {
+  for (bool record : {false, true}) {
+    loom_module_t* module = record ? CreateTestRecordWithFutureEnumOrdinal()
+                                   : CreateFunctionModule();
+    const auto original = WriteModule(module);
+    for (const auto flag : {LOOM_BYTECODE_SYMBOL_FLAG_LINK_ONCE,
+                            LOOM_BYTECODE_SYMBOL_FLAG_RETAIN}) {
+      SCOPED_TRACE(record);
+      SCOPED_TRACE(flag);
+      auto bytes = original;
+      const size_t flags_offset = FirstSymbolFlagsOffset(bytes);
+      WriteU16LE(&bytes, flags_offset, ReadU16LE(bytes, flags_offset) | flag);
+      ExpectInvalidFieldFailureCode(
+          bytes, flag == LOOM_BYTECODE_SYMBOL_FLAG_RETAIN
+                     ? "retained_symbol_op_has_no_retain_attr"
+                     : "link_once_symbol_op_has_no_linkage_attr");
+      ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+    }
+    loom_module_free(module);
+  }
 }
 
 TEST_F(ReaderTest, RejectsImportedSymbolWithExportFlag) {

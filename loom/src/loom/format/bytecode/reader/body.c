@@ -54,7 +54,7 @@ loom_bytecode_body_policy_low_repr_environment(
   return materializer->low_repr_environment;
 }
 
-static iree_status_t loom_bytecode_body_policy_resolve_source_string(
+static bool loom_bytecode_body_policy_resolve_source_string(
     loom_bytecode_body_policy_value_scope_t* value_scope, uint64_t string_id,
     iree_string_view_t field_name, uint64_t offset,
     iree_string_view_t* out_string) {
@@ -69,21 +69,22 @@ static iree_status_t loom_bytecode_body_policy_resolve_source_string(
                                            IREE_ARRAYSIZE(params), offset, 0);
   }
   *out_string = value_scope->module_view->strings.values[string_id];
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_body_policy_project_string(
+static bool loom_bytecode_body_policy_project_string(
     loom_bytecode_body_policy_value_scope_t* value_scope, uint64_t string_id,
     iree_string_view_t field_name, uint64_t offset,
     loom_string_id_t* out_string_id) {
   iree_string_view_t unused_string = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_bytecode_body_policy_resolve_source_string(
-      value_scope, string_id, field_name, offset, &unused_string));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
+      loom_bytecode_body_policy_resolve_source_string(
+          value_scope, string_id, field_name, offset, &unused_string));
   *out_string_id = (loom_string_id_t)string_id;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_body_policy_materialize_type_bindings(
+static bool loom_bytecode_body_policy_materialize_type_bindings(
     loom_bytecode_body_policy_value_scope_t* values,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_attribute_ssa_materialization_scope_t* scope,
@@ -92,7 +93,7 @@ static iree_status_t loom_bytecode_body_policy_materialize_type_bindings(
       values->attributes, cursor, scope, source_type_id, out_type_id);
 }
 
-static iree_status_t loom_bytecode_body_policy_materialize_location(
+static bool loom_bytecode_body_policy_materialize_location(
     loom_bytecode_body_policy_value_scope_t* value_scope, uint64_t location_id,
     uint64_t offset, loom_location_id_t* out_location_id) {
   if (location_id >= value_scope->module_view->locations.count) {
@@ -101,10 +102,10 @@ static iree_status_t loom_bytecode_body_policy_materialize_location(
         value_scope->module_view->locations.count, offset);
   }
   *out_location_id = (loom_location_id_t)location_id;
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_body_policy_resolve_op(
+static bool loom_bytecode_body_policy_resolve_op(
     loom_bytecode_body_policy_value_scope_t* value_scope,
     uint64_t op_table_index_plus1, uint64_t offset,
     const loom_op_vtable_t** out_vtable, loom_op_kind_t* out_kind) {
@@ -118,10 +119,10 @@ static iree_status_t loom_bytecode_body_policy_resolve_op(
       (iree_host_size_t)op_table_index_plus1 - 1;
   *out_vtable = value_scope->module_view->ops.values[op_ordinal];
   *out_kind = value_scope->module_view->ops.kinds[op_ordinal];
-  return iree_ok_status();
+  return true;
 }
 
-static iree_status_t loom_bytecode_body_policy_materialize_attribute_ssa(
+static bool loom_bytecode_body_policy_materialize_attribute_ssa(
     loom_bytecode_body_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,

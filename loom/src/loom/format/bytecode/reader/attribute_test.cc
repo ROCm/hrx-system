@@ -52,6 +52,7 @@ class BytecodeAttributeTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&scratch_arena_);
@@ -110,7 +111,7 @@ TEST_F(BytecodeAttributeTest, NamedPredicatesValidateAndMaterialize) {
   loom_bytecode_attribute_validator_t validator = MakeValidator();
   loom_bytecode_reader_cursor_t validation_cursor =
       MakeCursor(data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_attribute_validate_named(
+  ASSERT_TRUE(loom_bytecode_attribute_validate_named(
       &validator, &validation_cursor, /*descriptor=*/nullptr,
       LOOM_BYTECODE_ATTR_PREDICATE_LIST, /*available_type_count=*/0));
   EXPECT_EQ(validation_cursor.cursor.position, sizeof(data));
@@ -119,7 +120,7 @@ TEST_F(BytecodeAttributeTest, NamedPredicatesValidateAndMaterialize) {
   loom_bytecode_reader_cursor_t materialization_cursor =
       MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
-  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
+  ASSERT_TRUE(loom_bytecode_attribute_materialize_named(
       &materializer, &materialization_cursor, /*descriptor=*/nullptr,
       LOOM_BYTECODE_ATTR_PREDICATE_LIST,
       /*available_type_count=*/0, &attr));
@@ -147,10 +148,9 @@ TEST_F(BytecodeAttributeTest, RejectsCountBeforeRetainingPredicates) {
   const loom_predicate_t* predicates = nullptr;
   uint16_t predicate_count = 0;
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        loom_bytecode_attribute_retain_predicate_list_ssa(
-                            &validator, &cursor, &scope, &scratch_arena_,
-                            &predicates, &predicate_count));
+  EXPECT_FALSE(loom_bytecode_attribute_retain_predicate_list_ssa(
+      &validator, &cursor, &scope, &scratch_arena_, &predicates,
+      &predicate_count));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -193,11 +193,9 @@ TEST_F(BytecodeAttributeTest, RejectsAggregateCountsBeforeScratchAllocation) {
     loom_attribute_t attr = loom_attr_absent();
     const uint32_t previous_error_count = error_count_;
 
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_DEFERRED,
-        loom_bytecode_attribute_decode_named(
-            &materializer, &cursor, test_case.descriptor, test_case.kind,
-            /*available_type_count=*/0, &attr));
+    EXPECT_FALSE(loom_bytecode_attribute_decode_named(
+        &materializer, &cursor, test_case.descriptor, test_case.kind,
+        /*available_type_count=*/0, &attr));
 
     EXPECT_EQ(error_count_, previous_error_count + 1);
     EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -213,13 +211,13 @@ TEST_F(BytecodeAttributeTest, ByteFormsValidateAndMaterializeExactPayloads) {
          {LOOM_BYTECODE_ATTR_BYTES, LOOM_BYTECODE_ATTR_UTF8}) {
       auto validator = MakeValidator();
       auto cursor = MakeCursor(data.data(), data.size());
-      IREE_ASSERT_OK(loom_bytecode_attribute_validate_named(&validator, &cursor,
-                                                            nullptr, kind, 0));
+      ASSERT_TRUE(loom_bytecode_attribute_validate_named(&validator, &cursor,
+                                                         nullptr, kind, 0));
       EXPECT_EQ(cursor.cursor.position, data.size());
       auto materializer = MakeMaterializer();
       cursor = MakeCursor(data.data(), data.size());
       loom_attribute_t attribute;
-      IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
+      ASSERT_TRUE(loom_bytecode_attribute_materialize_named(
           &materializer, &cursor, nullptr, kind, 0, &attribute));
       EXPECT_EQ(loom_attr_is_utf8(attribute), kind == LOOM_BYTECODE_ATTR_UTF8);
       EXPECT_EQ(attribute.reserved_1, text.size);
@@ -240,21 +238,18 @@ TEST_F(BytecodeAttributeTest, MalformedUtf8IsDiagnosedAtBothReaderBoundaries) {
     auto validator = MakeValidator();
     auto cursor = MakeCursor(data.data(), data.size());
     uint32_t previous_errors = error_count_;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_DEFERRED,
-        loom_bytecode_attribute_validate_named(&validator, &cursor, nullptr,
-                                               LOOM_BYTECODE_ATTR_UTF8, 0));
+    EXPECT_FALSE(loom_bytecode_attribute_validate_named(
+        &validator, &cursor, nullptr, LOOM_BYTECODE_ATTR_UTF8, 0));
     EXPECT_EQ(error_count_, previous_errors + 1);
     auto materializer = MakeMaterializer();
     cursor = MakeCursor(data.data(), data.size());
     loom_attribute_t attribute;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                          loom_bytecode_attribute_materialize_named(
-                              &materializer, &cursor, nullptr,
-                              LOOM_BYTECODE_ATTR_UTF8, 0, &attribute));
+    EXPECT_FALSE(loom_bytecode_attribute_materialize_named(
+        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_UTF8, 0,
+        &attribute));
     EXPECT_EQ(error_count_, previous_errors + 2);
     cursor = MakeCursor(data.data(), data.size());
-    IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
+    ASSERT_TRUE(loom_bytecode_attribute_materialize_named(
         &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_BYTES, 0,
         &attribute));
     EXPECT_EQ(error_count_, previous_errors + 2);
@@ -267,7 +262,7 @@ TEST_F(BytecodeAttributeTest, GlobalTypeParametersAcceptConstantPredicates) {
   };
   auto validator = MakeValidator();
   auto cursor = MakeCursor(data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_attribute_validate_type_parameter(
+  ASSERT_TRUE(loom_bytecode_attribute_validate_type_parameter(
       &validator, &cursor, nullptr, LOOM_BYTECODE_ATTR_PREDICATE_LIST, 0));
   EXPECT_EQ(cursor.cursor.position, sizeof(data));
   EXPECT_EQ(error_count_, 0u);
@@ -280,10 +275,8 @@ TEST_F(BytecodeAttributeTest,
   };
   auto validator = MakeValidator();
   auto cursor = MakeCursor(data, sizeof(data));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_attribute_validate_type_parameter(
-          &validator, &cursor, nullptr, LOOM_BYTECODE_ATTR_PREDICATE_LIST, 0));
+  EXPECT_FALSE(loom_bytecode_attribute_validate_type_parameter(
+      &validator, &cursor, nullptr, LOOM_BYTECODE_ATTR_PREDICATE_LIST, 0));
   EXPECT_EQ(error_count_, 1u);
 }
 
@@ -304,7 +297,7 @@ TEST_F(BytecodeAttributeTest, SsaPredicatesResolveThroughConcreteValueMap) {
   loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
-  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+  ASSERT_TRUE(loom_bytecode_attribute_materialize_ssa(
       &materializer, &cursor, /*descriptor=*/nullptr,
       LOOM_BYTECODE_ATTR_PREDICATE_LIST,
       /*available_type_count=*/0, &scope, &attr));
@@ -333,7 +326,7 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
   const uint8_t second[] = {1, 2, 0, 1};
   loom_bytecode_reader_cursor_t first_cursor = MakeCursor(first, sizeof(first));
   loom_attribute_t first_attr = loom_attr_absent();
-  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+  ASSERT_TRUE(loom_bytecode_attribute_materialize_ssa(
       &materializer, &first_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
       &first_attr));
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -345,7 +338,7 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
   loom_bytecode_reader_cursor_t second_cursor =
       MakeCursor(second, sizeof(second));
   loom_attribute_t second_attr = loom_attr_absent();
-  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+  ASSERT_TRUE(loom_bytecode_attribute_materialize_ssa(
       &materializer, &second_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0,
       &scope, &second_attr));
   EXPECT_EQ(first_attr.type_id, second_attr.type_id);
@@ -391,11 +384,9 @@ TEST_F(BytecodeAttributeTest,
   };
   loom_attribute_t attr = loom_attr_absent();
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_attribute_materialize_ssa(
-          &materializer, &cursor, /*descriptor=*/nullptr,
-          LOOM_BYTECODE_ATTR_TYPE, /*available_type_count=*/0, &scope, &attr));
+  EXPECT_FALSE(loom_bytecode_attribute_materialize_ssa(
+      &materializer, &cursor, /*descriptor=*/nullptr, LOOM_BYTECODE_ATTR_TYPE,
+      /*available_type_count=*/0, &scope, &attr));
 
   EXPECT_EQ(error_count, 1u);
   EXPECT_STREQ(error_id, "ERR_BYTECODE_009");
@@ -442,7 +433,7 @@ TEST_F(BytecodeAttributeTest, ScopedRegisterRetainsCarrierAndBoundValueType) {
   loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
-  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+  ASSERT_TRUE(loom_bytecode_attribute_materialize_ssa(
       &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
       &attr));
   EXPECT_EQ(cursor.cursor.position, sizeof(data));
@@ -507,7 +498,7 @@ TEST_F(BytecodeAttributeTest, ScopedWrappersShareCompletedChildren) {
   loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
-  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+  ASSERT_TRUE(loom_bytecode_attribute_materialize_ssa(
       &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
       &attr));
   ASSERT_EQ(bindings.count, 4u);
@@ -516,7 +507,7 @@ TEST_F(BytecodeAttributeTest, ScopedWrappersShareCompletedChildren) {
   const uint8_t reuse[] = {1, 2, 0, 4};
   cursor = MakeCursor(reuse, sizeof(reuse));
   loom_attribute_t reused = loom_attr_absent();
-  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+  ASSERT_TRUE(loom_bytecode_attribute_materialize_ssa(
       &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
       &reused));
   EXPECT_EQ(reused.type_id, attr.type_id);
@@ -615,7 +606,7 @@ TEST_F(BytecodeAttributeTest, ScopedShapesBindDimensionsAndEncodingByRole) {
       auto materializer = MakeMaterializer();
       auto cursor = MakeCursor(data, data_length);
       loom_attribute_t attr = loom_attr_absent();
-      IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+      ASSERT_TRUE(loom_bytecode_attribute_materialize_ssa(
           &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
           &attr));
       EXPECT_EQ(cursor.cursor.position, data_length);
@@ -672,19 +663,19 @@ TEST_F(BytecodeAttributeTest, ScopedViewAlignmentValidatesBeforeNarrowing) {
     auto cursor = MakeCursor(data.data(), data.size());
     loom_attribute_t attr = loom_attr_absent();
     error_count_ = 0;
-    iree_status_t status = loom_bytecode_attribute_materialize_ssa(
+    bool accepted = loom_bytecode_attribute_materialize_ssa(
         &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
         &attr);
     if (alignment == 0 ||
         loom_type_view_alignment_is_valid(LOOM_SCALAR_TYPE_I64, alignment)) {
-      IREE_EXPECT_OK(status);
+      EXPECT_TRUE(accepted);
       EXPECT_EQ(error_count_, 0u);
       const loom_type_t type =
           loom_type_table_get(&module_->types, attr.type_id);
       EXPECT_EQ(loom_type_view_alignment(type), alignment ? alignment : 8);
       EXPECT_EQ(loom_dim_value_id(loom_type_dim(type, 0)), width);
     } else {
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, status);
+      EXPECT_FALSE(accepted);
       EXPECT_EQ(error_count_, 1u);
     }
     iree_arena_deinitialize(&scope_arena);
@@ -735,7 +726,7 @@ TEST_F(BytecodeAttributeTest, ScopedDialectNameUsesFullStringOrdinal) {
   loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
-  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
+  ASSERT_TRUE(loom_bytecode_attribute_materialize_ssa(
       &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
       &attr));
   iree_arena_deinitialize(&scope_arena);
@@ -762,11 +753,10 @@ TEST_F(BytecodeAttributeTest, SsaValidationRejectsOutOfRangeValue) {
   };
   loom_bytecode_attribute_validator_t validator = MakeValidator();
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        loom_bytecode_attribute_validate_ssa(
-                            &validator, &cursor, /*descriptor=*/nullptr,
-                            LOOM_BYTECODE_ATTR_PREDICATE_LIST,
-                            /*available_type_count=*/0, &scope));
+  EXPECT_FALSE(loom_bytecode_attribute_validate_ssa(
+      &validator, &cursor, /*descriptor=*/nullptr,
+      LOOM_BYTECODE_ATTR_PREDICATE_LIST,
+      /*available_type_count=*/0, &scope));
 
   EXPECT_EQ(error_count_, 1u);
 }
@@ -777,11 +767,9 @@ TEST_F(BytecodeAttributeTest, PredicateArityMustMatchKind) {
   };
   loom_bytecode_attribute_validator_t validator = MakeValidator();
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_attribute_validate_named(
-          &validator, &cursor, /*descriptor=*/nullptr,
-          LOOM_BYTECODE_ATTR_PREDICATE_LIST, /*available_type_count=*/0));
+  EXPECT_FALSE(loom_bytecode_attribute_validate_named(
+      &validator, &cursor, /*descriptor=*/nullptr,
+      LOOM_BYTECODE_ATTR_PREDICATE_LIST, /*available_type_count=*/0));
 
   EXPECT_EQ(error_count_, 1u);
 }

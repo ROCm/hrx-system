@@ -70,13 +70,14 @@ class BytecodeInputProjectionTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&arena_);
     iree_arena_block_pool_deinitialize(&pool_);
   }
 
-  iree_status_t Read(const std::vector<uint8_t>& records, uint64_t count,
-                     uint64_t root, uint32_t* out_shape) {
+  bool Read(const std::vector<uint8_t>& records, uint64_t count, uint64_t root,
+            uint32_t* out_shape) {
     std::vector<uint8_t> payload;
     Append(payload, count);
     payload.insert(payload.end(), records.begin(), records.end());
@@ -152,7 +153,7 @@ TEST_F(BytecodeInputProjectionTest, PreservesEveryCarrierRankAndAttachment) {
           Append(records, dynamic ? 2 : axis + 7);
         }
         uint32_t id = 0;
-        IREE_ASSERT_OK(Read(records, 1, 1, &id));
+        ASSERT_TRUE(Read(records, 1, 1, &id));
         ASSERT_NE(id, 0u);
         const auto* shape =
             loom_bytecode_input_projection_shape(&projection_, id);
@@ -171,7 +172,7 @@ TEST_F(BytecodeInputProjectionTest, PreservesEveryCarrierRankAndAttachment) {
         const auto used = arena_.used_allocation_size;
         loom_bytecode_input_projection_begin_signature(&projection_);
         uint32_t repeated = 0;
-        IREE_ASSERT_OK(Read(records, 1, 1, &repeated));
+        ASSERT_TRUE(Read(records, 1, 1, &repeated));
         EXPECT_EQ(repeated, id);
         EXPECT_EQ(arena_.used_allocation_size, used);
       }
@@ -205,7 +206,7 @@ TEST_F(BytecodeInputProjectionTest, CompositeNodesDoNotHideEarlierShapeRoots) {
       5,
   };
   uint32_t shape_id = 0;
-  IREE_ASSERT_OK(Read(records, 4, 1, &shape_id));
+  ASSERT_TRUE(Read(records, 4, 1, &shape_id));
   ASSERT_NE(shape_id, 0u);
   EXPECT_EQ(projection_.binding_count, 4u);
   EXPECT_EQ(loom_bytecode_input_projection_shape(&projection_, shape_id)
@@ -213,11 +214,11 @@ TEST_F(BytecodeInputProjectionTest, CompositeNodesDoNotHideEarlierShapeRoots) {
             2u);
   for (uint64_t root : {2, 3, 4}) {
     uint32_t composite = 123;
-    IREE_ASSERT_OK(Read({}, 0, root, &composite));
+    ASSERT_TRUE(Read({}, 0, root, &composite));
     EXPECT_EQ(composite, 0u);
   }
   uint32_t earlier = 0;
-  IREE_ASSERT_OK(Read({}, 0, 1, &earlier));
+  ASSERT_TRUE(Read({}, 0, 1, &earlier));
   EXPECT_EQ(earlier, shape_id);
   EXPECT_EQ(errors_, 0u);
 }
@@ -234,7 +235,7 @@ TEST_F(BytecodeInputProjectionTest, RejectsIncompleteCompositeReferences) {
     loom_bytecode_input_projection_begin_signature(&projection_);
     errors_ = 0;
     uint32_t id = 0;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, Read(record, 1, 1, &id));
+    EXPECT_FALSE(Read(record, 1, 1, &id));
     EXPECT_EQ(errors_, 1u);
     EXPECT_EQ(projection_.binding_count, 0u);
   }
@@ -250,10 +251,10 @@ TEST_F(BytecodeInputProjectionTest, ReusesStaticRootAndOwnsLargeShape) {
   };
   view_.sections.types = &section;
   loom_bytecode_type_validation_t validation;
-  IREE_ASSERT_OK(loom_bytecode_type_validation_begin(
+  ASSERT_TRUE(loom_bytecode_type_validation_begin(
       &decoder_, &context_, &view_, section.bytes, section.absolute_offset,
       LOOM_BYTECODE_TYPE_RETAIN_RANGES, &arena_, &validation));
-  IREE_ASSERT_OK(loom_bytecode_type_validation_finish(&validation));
+  ASSERT_TRUE(loom_bytecode_type_validation_finish(&validation));
   projection_.type_entries = validation.entries;
   const uint8_t extension = 0;
   const loom_bytecode_attribute_ssa_validation_scope_t scope = {};
@@ -265,8 +266,8 @@ TEST_F(BytecodeInputProjectionTest, ReusesStaticRootAndOwnsLargeShape) {
     loom_bytecode_reader_cursor_initialize(&extension, 1, 0, IREE_SV("SYMBOLS"),
                                            &cursor);
     uint32_t id = 0;
-    IREE_ASSERT_OK(loom_bytecode_input_projection_read(&projection_, &cursor, 0,
-                                                       &scope, &id));
+    ASSERT_TRUE(loom_bytecode_input_projection_read(&projection_, &cursor, 0,
+                                                    &scope, &id));
     if (i == 0) {
       first_id = id;
       used = arena_.used_allocation_size;
@@ -288,11 +289,11 @@ TEST_F(BytecodeInputProjectionTest, ReusesStaticRootAndOwnsLargeShape) {
 
 TEST_F(BytecodeInputProjectionTest, NaturalAlignmentHasOneSourceIdentity) {
   uint32_t natural = 0, explicit_natural = 0;
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(
       Read({LOOM_BYTECODE_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, 1, 0, 0, 0, 0, 16},
            1, 1, &natural));
   loom_bytecode_input_projection_begin_signature(&projection_);
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(
       Read({LOOM_BYTECODE_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, 1, 0, 0, 4, 0, 16},
            1, 1, &explicit_natural));
   EXPECT_EQ(natural, explicit_natural);
@@ -320,7 +321,7 @@ TEST_F(BytecodeInputProjectionTest,
         2,
     };
     uint32_t shape = 0;
-    IREE_ASSERT_OK(Read(records, 1, 1, &shape));
+    ASSERT_TRUE(Read(records, 1, 1, &shape));
     IREE_ASSERT_OK(
         loom_bytecode_input_projection_add_argument(&projection_, 2, shape));
     IREE_ASSERT_OK(loom_bytecode_input_projection_end_signature(
@@ -335,7 +336,7 @@ TEST_F(BytecodeInputProjectionTest,
       .symbol_count = IREE_ARRAYSIZE(symbols),
       .symbols = symbols,
   };
-  IREE_ASSERT_OK(loom_bytecode_input_projection_finish_module(
+  ASSERT_TRUE(loom_bytecode_input_projection_finish_module(
       &projection_, &retained, &metadata));
   ASSERT_EQ(metadata.input_contract_count, 4u);
   for (uint32_t i = 0; i < 3; ++i) {
@@ -381,7 +382,7 @@ TEST_F(BytecodeInputProjectionTest,
     };
     Append(records, is_family || exact ? 1 : 16 + (i / 2) % 32);
     uint32_t shape_id = 0;
-    IREE_ASSERT_OK(Read(records, 1, 1, &shape_id));
+    ASSERT_TRUE(Read(records, 1, 1, &shape_id));
     IREE_ASSERT_OK(
         loom_bytecode_input_projection_add_argument(&projection_, 1, shape_id));
     IREE_ASSERT_OK(loom_bytecode_input_projection_end_signature(
@@ -398,7 +399,7 @@ TEST_F(BytecodeInputProjectionTest,
       .symbol_count = symbols.size(),
       .symbols = symbols.data(),
   };
-  IREE_ASSERT_OK(loom_bytecode_input_projection_finish_module(
+  ASSERT_TRUE(loom_bytecode_input_projection_finish_module(
       &projection_, &retained, &metadata));
   ASSERT_EQ(metadata.input_contract_count, 33u);
   // Retained contracts have no dependency on the decoder's temporary rows.

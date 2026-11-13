@@ -25,7 +25,7 @@ extern "C" {
 
 // Validates ENCODINGS while advancing |types| through each declared prefix.
 // Entry ranges are not retained. The caller finishes the remaining TYPES tail.
-iree_status_t loom_bytecode_encoding_table_validate(
+bool loom_bytecode_encoding_table_validate(
     loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     loom_bytecode_reader_module_view_t* module_view,
     iree_arena_allocator_t* scratch_arena,
@@ -36,7 +36,7 @@ iree_status_t loom_bytecode_encoding_table_validate(
 // every instance payload, excluding its type-prefix word. Family facts needed
 // by later table validation remain scratch-owned in |module_view|. The caller
 // finishes |types| after all encoding prefixes have been consumed.
-iree_status_t loom_bytecode_encoding_table_index(
+bool loom_bytecode_encoding_table_index(
     loom_bytecode_reader_decoder_t* decoder, loom_context_t* context,
     loom_bytecode_reader_module_view_t* module_view,
     iree_arena_allocator_t* scratch_arena,
@@ -63,7 +63,7 @@ typedef struct loom_bytecode_encoding_materializer_t {
 } loom_bytecode_encoding_materializer_t;
 
 // Materializes every instance in one validated ENCODINGS section.
-iree_status_t loom_bytecode_encoding_table_materialize(
+bool loom_bytecode_encoding_table_materialize(
     loom_bytecode_encoding_materializer_t* materializer,
     const loom_bytecode_reader_section_t* section);
 

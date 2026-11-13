@@ -99,6 +99,7 @@ class BytecodeSelectedTablesTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&scratch_arena_);
@@ -209,7 +210,7 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesOnlyReachedMixedTableFacts) {
   InitializeMaterializer(bytecode, &metadata, &materializer);
 
   loom_type_id_t target_type_id = LOOM_TYPE_ID_INVALID;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_type(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_type(
       &materializer, /*source_type_id=*/1, &target_type_id));
   EXPECT_EQ(target_type_id, 1u);
   ASSERT_EQ(module_->types.count, 2u);
@@ -227,7 +228,7 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesOnlyReachedMixedTableFacts) {
   EXPECT_EQ(module_->encodings.entries[1].attributes[0].value.encoding_id, 1u);
 
   loom_location_id_t target_location_id = LOOM_LOCATION_UNKNOWN;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_location(
       &materializer, /*source_location_id=*/1, &target_location_id));
   EXPECT_EQ(target_location_id, 1u);
   ASSERT_EQ(module_->locations.count, 2u);
@@ -241,7 +242,7 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesOnlyReachedMixedTableFacts) {
   // The scalar dependency is already retained even though its source table
   // entry has not been projected yet.
   loom_type_id_t target_element_id = LOOM_TYPE_ID_INVALID;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_type(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_type(
       &materializer, /*source_type_id=*/0, &target_element_id));
   EXPECT_EQ(target_element_id, 0u);
   EXPECT_EQ(module_->types.count, 2u);
@@ -312,10 +313,10 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesCanonicalLocationVariants) {
   InitializeMaterializer(bytecode, &metadata, &materializer);
 
   loom_location_id_t tagged_id = LOOM_LOCATION_UNKNOWN;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_location(
       &materializer, /*source_location_id=*/4, &tagged_id));
   loom_location_id_t opaque_id = LOOM_LOCATION_UNKNOWN;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_location(
       &materializer, /*source_location_id=*/3, &opaque_id));
 
   ASSERT_EQ(module_->locations.count, 5u);
@@ -391,7 +392,7 @@ TEST_F(BytecodeSelectedTablesTest, ReusesInheritedSourceWhenComposingLocation) {
   InitializeMaterializer(bytecode, &metadata, &materializer);
 
   loom_location_id_t target_location_id = LOOM_LOCATION_UNKNOWN;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_location(
       &materializer, /*source_location_id=*/1, &target_location_id));
   EXPECT_EQ(target_location_id, 1u);
   ASSERT_EQ(module_->locations.count, 2u);
@@ -435,7 +436,7 @@ TEST_F(BytecodeSelectedTablesTest, InterleavedReadersShareCurrentSourceNames) {
   const loom_source_id_t expected_sources[] = {0, 1, 1, 0, 2, 2};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_locations); ++i) {
     loom_location_id_t location_id = LOOM_LOCATION_UNKNOWN;
-    IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+    ASSERT_TRUE(loom_bytecode_selected_table_materialize_location(
         &readers[reader_ordinals[i]], source_locations[i], &location_id));
     const auto* location =
         loom_location_table_const_entry(&module_->locations, location_id);
@@ -478,7 +479,7 @@ TEST_F(BytecodeSelectedTablesTest, StandaloneSourcesStayUnindexedUntilShared) {
     const auto* previous_index = module_->sources.name_index;
     for (uint32_t i = 0; i < kSourceCount; ++i) {
       loom_location_id_t location_id = LOOM_LOCATION_UNKNOWN;
-      IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+      ASSERT_TRUE(loom_bytecode_selected_table_materialize_location(
           &materializer, i + 1, &location_id));
       EXPECT_EQ(
           loom_location_table_const_entry(&module_->locations, location_id)
@@ -627,11 +628,11 @@ TEST_F(BytecodeSelectedTablesTest, ProjectsMixedStructuralPayloads) {
   loom_bytecode_selected_table_materializer_t materializer;
   InitializeMaterializer(bytecode, &metadata, &materializer);
   loom_type_id_t target_type_id = LOOM_TYPE_ID_INVALID;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_type(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_type(
       &materializer, /*source_type_id=*/3, &target_type_id));
   EXPECT_EQ(target_type_id, expected_type_id);
   loom_type_id_t repeated_type_id = LOOM_TYPE_ID_INVALID;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_type(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_type(
       &materializer, /*source_type_id=*/3, &repeated_type_id));
   EXPECT_EQ(repeated_type_id, target_type_id);
   loom_bytecode_selected_table_materializer_deinitialize(&materializer);
@@ -691,7 +692,7 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesDeepTypeChainIteratively) {
   }
   const auto header_checkpoint = iree_arena_checkpoint_save(&scratch_arena_);
   loom_type_id_t target_type_id = LOOM_TYPE_ID_INVALID;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_type(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_type(
       &materializer, kTypeCount - 1, &target_type_id));
   EXPECT_EQ(target_type_id, kTypeCount - 1);
   EXPECT_EQ(module_->types.count, kTypeCount);
@@ -756,7 +757,7 @@ TEST_F(BytecodeSelectedTablesTest, ReusesWorklistAcrossWideTypeRoots) {
   InitializeMaterializer(bytecode, &metadata, &materializer);
 
   loom_type_id_t target_type_id = LOOM_TYPE_ID_INVALID;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_type(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_type(
       &materializer, /*source_type_id=*/1, &target_type_id));
   EXPECT_EQ(target_type_id, 1u);
   ASSERT_EQ(module_->types.count, 2u);
@@ -769,7 +770,7 @@ TEST_F(BytecodeSelectedTablesTest, ReusesWorklistAcrossWideTypeRoots) {
   // Stack storage stays pooled and serves the next independent root unchanged.
   EXPECT_EQ(materializer.retained_arena.allocation_head, nullptr);
   const auto retained_bytes = materializer.retained_arena.used_allocation_size;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_type(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_type(
       &materializer, /*source_type_id=*/3, &target_type_id));
   EXPECT_EQ(target_type_id, 3u);
   EXPECT_EQ(module_->types.count, 4u);
@@ -821,7 +822,7 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesDeepLocationChainIteratively) {
   InitializeMaterializer(bytecode, &metadata, &materializer);
 
   loom_location_id_t target_location_id = LOOM_LOCATION_UNKNOWN;
-  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+  ASSERT_TRUE(loom_bytecode_selected_table_materialize_location(
       &materializer, kLocationCount - 1, &target_location_id));
   EXPECT_EQ(target_location_id, kLocationCount - 1);
   EXPECT_EQ(module_->locations.count, kLocationCount);

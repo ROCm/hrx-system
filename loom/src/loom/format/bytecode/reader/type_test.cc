@@ -98,42 +98,42 @@ class BytecodeTypeTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&scratch_arena_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  iree_status_t BuildPlan(const uint8_t* data, iree_host_size_t length) {
+  bool BuildPlan(const uint8_t* data, iree_host_size_t length) {
     loom_bytecode_type_validation_t validation;
     return Validate(data, length, LOOM_BYTECODE_TYPE_RETAIN_PLAN,
                     &scratch_arena_, &validation);
   }
 
-  iree_status_t Validate(const uint8_t* data, iree_host_size_t length,
-                         loom_bytecode_type_retention_t retention,
-                         iree_arena_allocator_t* arena,
-                         loom_bytecode_type_validation_t* out_validation) {
-    IREE_RETURN_IF_ERROR(loom_bytecode_type_validation_begin(
+  bool Validate(const uint8_t* data, iree_host_size_t length,
+                loom_bytecode_type_retention_t retention,
+                iree_arena_allocator_t* arena,
+                loom_bytecode_type_validation_t* out_validation) {
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_validation_begin(
         &decoder_, &context_, &module_view_,
         iree_make_const_byte_span(data, length), 0, retention, arena,
         out_validation));
     return loom_bytecode_type_validation_finish(out_validation);
   }
 
-  iree_status_t DecodeEntry(loom_type_id_t type_index, const uint8_t* data,
-                            iree_host_size_t length, uint64_t absolute_offset,
-                            loom_bytecode_type_plan_entry_t* out_entry,
-                            loom_bytecode_type_fact_t** out_fact) {
+  bool DecodeEntry(loom_type_id_t type_index, const uint8_t* data,
+                   iree_host_size_t length, uint64_t absolute_offset,
+                   loom_bytecode_type_plan_entry_t* out_entry,
+                   loom_bytecode_type_fact_t** out_fact) {
     return loom_bytecode_type_plan_decode_indexed_entry(
         &decoder_, &context_, &module_view_, &scratch_arena_, type_index,
         iree_make_const_byte_span(data, length), absolute_offset, out_entry,
         out_fact);
   }
 
-  iree_status_t DecodeScopedParameters(const std::vector<uint8_t>& bytes,
-                                       bool selected,
-                                       loom_type_id_t* out_type) {
+  bool DecodeScopedParameters(const std::vector<uint8_t>& bytes, bool selected,
+                              loom_type_id_t* out_type) {
     iree_string_view_t strings[] = {IREE_SV("wire.parameters"),
                                     IREE_SV("first"), IREE_SV("middle"),
                                     IREE_SV("last")};
@@ -148,8 +148,10 @@ class BytecodeTypeTest : public ::testing::Test {
     // A genuine completed static type makes TYPE-valued negative controls
     // valid references, isolating descriptor-kind validation.
     loom_type_id_t scalar_type = LOOM_TYPE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_module_intern_type_id(
-        module_, loom_type_scalar(LOOM_SCALAR_TYPE_I32), &scalar_type));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        &decoder_,
+        loom_module_intern_type_id(
+            module_, loom_type_scalar(LOOM_SCALAR_TYPE_I32), &scalar_type)));
     if (selected) {
       const uint8_t static_type[] = {LOOM_BYTECODE_TYPE_SCALAR,
                                      LOOM_SCALAR_TYPE_I32};
@@ -167,11 +169,11 @@ class BytecodeTypeTest : public ::testing::Test {
           iree_make_const_byte_span(static_type, sizeof(static_type)),
           &context_, &metadata, &scratch_arena_, module_,
           loom_bytecode_selected_symbol_resolver_empty(), &materializer);
-      const iree_status_t status =
+      const bool accepted =
           loom_bytecode_selected_attribute_decode_complete_type(
               &materializer, &cursor, &scope, out_type);
       loom_bytecode_selected_table_materializer_deinitialize(&materializer);
-      return status;
+      return accepted;
     }
     loom_bytecode_type_plan_entry_t type_entry = {
         .completed_type = scalar_type,
@@ -206,18 +208,17 @@ class BytecodeTypeTest : public ::testing::Test {
   }
 
   void CheckValidationModes(const uint8_t* data, iree_host_size_t length,
-                            iree_status_code_t expected_status) {
+                            bool expected_accepted) {
     module_view_.types = {};
     error_count_ = 0;
     diagnostic_ = {};
-    auto status = BuildPlan(data, length);
-    const auto plan_status = iree_status_code(status);
-    iree_status_ignore(status);
-    ASSERT_EQ(plan_status, expected_status);
+    auto accepted = BuildPlan(data, length);
+    ASSERT_EQ(accepted, expected_accepted);
+    IREE_ASSERT_OK(loom_bytecode_reader_consume_status(&decoder_));
     const DiagnosticSnapshot expected_diagnostic = diagnostic_;
     const auto expected_count = module_view_.types.count;
     std::vector<uint64_t> offsets;
-    if (expected_status == IREE_STATUS_OK) {
+    if (expected_accepted) {
       for (iree_host_size_t i = 0; i < expected_count; ++i) {
         offsets.push_back(module_view_.types.entries[i].bytecode_offset);
       }
@@ -228,10 +229,10 @@ class BytecodeTypeTest : public ::testing::Test {
     error_count_ = 0;
     diagnostic_ = {};
     loom_bytecode_type_validation_t validation;
-    status = Validate(data, length, LOOM_BYTECODE_TYPE_RETAIN_NONE, nullptr,
-                      &validation);
-    EXPECT_EQ(iree_status_code(status), expected_status);
-    iree_status_ignore(status);
+    accepted = Validate(data, length, LOOM_BYTECODE_TYPE_RETAIN_NONE, nullptr,
+                        &validation);
+    EXPECT_EQ(accepted, expected_accepted);
+    IREE_ASSERT_OK(loom_bytecode_reader_consume_status(&decoder_));
     EXPECT_EQ(module_view_.types.count, expected_count);
     EXPECT_EQ(module_view_.types.entries, nullptr);
     EXPECT_EQ(module_view_.types.facts, nullptr);
@@ -245,16 +246,16 @@ class BytecodeTypeTest : public ::testing::Test {
     diagnostic_ = {};
     iree_arena_allocator_t retained_arena;
     iree_arena_initialize(&block_pool_, &retained_arena);
-    status = Validate(data, length, LOOM_BYTECODE_TYPE_RETAIN_RANGES,
-                      &retained_arena, &validation);
-    EXPECT_EQ(iree_status_code(status), expected_status);
-    iree_status_ignore(status);
+    accepted = Validate(data, length, LOOM_BYTECODE_TYPE_RETAIN_RANGES,
+                        &retained_arena, &validation);
+    EXPECT_EQ(accepted, expected_accepted);
+    IREE_ASSERT_OK(loom_bytecode_reader_consume_status(&decoder_));
     EXPECT_EQ(module_view_.types.entries, nullptr);
     EXPECT_EQ(module_view_.types.facts, nullptr);
     EXPECT_EQ(diagnostic_.error, expected_diagnostic.error);
     EXPECT_EQ(diagnostic_.start, expected_diagnostic.start);
     EXPECT_EQ(diagnostic_.end, expected_diagnostic.end);
-    if (expected_status == IREE_STATUS_OK) {
+    if (expected_accepted) {
       EXPECT_EQ(validation.position, expected_count);
       EXPECT_EQ(retained_arena.used_allocation_size,
                 expected_count * sizeof(*validation.entries));
@@ -293,7 +294,7 @@ TEST_F(BytecodeTypeTest, RejectsCountBeforeRetainingPlan) {
       LOOM_BYTECODE_TYPE_NONE,  // Only one minimum record.
   };
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, BuildPlan(data, sizeof(data)));
+  EXPECT_FALSE(BuildPlan(data, sizeof(data)));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -308,9 +309,8 @@ TEST_F(BytecodeTypeTest, RejectsFunctionChildCountBeforeRetainingFact) {
   loom_bytecode_type_plan_entry_t entry = {};
   loom_bytecode_type_fact_t* fact = nullptr;
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
-                                    /*absolute_offset=*/0, &entry, &fact));
+  EXPECT_FALSE(DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                           /*absolute_offset=*/0, &entry, &fact));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -329,9 +329,8 @@ TEST_F(BytecodeTypeTest, RejectsDialectChildCountBeforeRetainingFact) {
   loom_bytecode_type_plan_entry_t entry = {};
   loom_bytecode_type_fact_t* fact = nullptr;
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
-                                    /*absolute_offset=*/0, &entry, &fact));
+  EXPECT_FALSE(DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                           /*absolute_offset=*/0, &entry, &fact));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -350,9 +349,8 @@ TEST_F(BytecodeTypeTest, RejectsParameterizedCountBeforeRetainingFact) {
   loom_bytecode_type_plan_entry_t entry = {};
   loom_bytecode_type_fact_t* fact = nullptr;
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
-                                    /*absolute_offset=*/0, &entry, &fact));
+  EXPECT_FALSE(DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                           /*absolute_offset=*/0, &entry, &fact));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -371,7 +369,7 @@ TEST_F(BytecodeTypeTest, BuildsAndMaterializesTopologicalPlan) {
       0x01,
       0x00,
   };
-  IREE_ASSERT_OK(BuildPlan(data, sizeof(data)));
+  ASSERT_TRUE(BuildPlan(data, sizeof(data)));
 
   ASSERT_EQ(module_view_.types.count, 3u);
   EXPECT_EQ(module_view_.types.entries[0].bytecode_offset, 1u);
@@ -383,8 +381,8 @@ TEST_F(BytecodeTypeTest, BuildsAndMaterializesTopologicalPlan) {
 
   loom_bytecode_type_materializer_t materializer =
       MakeMaterializer(data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_type_materialize_prefix(
-      &materializer, module_view_.types.count));
+  ASSERT_TRUE(loom_bytecode_type_materialize_prefix(&materializer,
+                                                    module_view_.types.count));
   ASSERT_EQ(module_->types.count, 3u);
   for (loom_type_id_t i = 0; i < module_view_.types.count; ++i) {
     EXPECT_EQ(module_view_.types.entries[i].completed_type, i);
@@ -417,35 +415,35 @@ TEST_F(BytecodeTypeTest, AdvancesSparseFactsAndConstructionAcrossPrefixes) {
       3,
   };
   loom_bytecode_type_validation_t validation;
-  IREE_ASSERT_OK(loom_bytecode_type_validation_begin(
+  ASSERT_TRUE(loom_bytecode_type_validation_begin(
       &decoder_, &context_, &module_view_,
       iree_make_const_byte_span(data, sizeof(data)), 0,
       LOOM_BYTECODE_TYPE_RETAIN_PLAN, &scratch_arena_, &validation));
-  IREE_ASSERT_OK(loom_bytecode_type_validation_advance(&validation, 0));
+  ASSERT_TRUE(loom_bytecode_type_validation_advance(&validation, 0));
   EXPECT_EQ(validation.position, 0u);
   EXPECT_EQ(module_view_.types.facts, nullptr);
-  IREE_ASSERT_OK(loom_bytecode_type_validation_advance(&validation, 2));
+  ASSERT_TRUE(loom_bytecode_type_validation_advance(&validation, 2));
   EXPECT_EQ(validation.position, 2u);
   EXPECT_EQ(module_view_.types.facts, nullptr);
-  IREE_ASSERT_OK(loom_bytecode_type_validation_advance(&validation, 3));
+  ASSERT_TRUE(loom_bytecode_type_validation_advance(&validation, 3));
   ASSERT_NE(module_view_.types.facts, nullptr);
   EXPECT_EQ(module_view_.types.facts->type_id, 2u);
   EXPECT_EQ(module_view_.types.facts->next, nullptr);
-  IREE_ASSERT_OK(loom_bytecode_type_validation_advance(&validation, 3));
-  IREE_ASSERT_OK(loom_bytecode_type_validation_finish(&validation));
+  ASSERT_TRUE(loom_bytecode_type_validation_advance(&validation, 3));
+  ASSERT_TRUE(loom_bytecode_type_validation_finish(&validation));
   EXPECT_EQ(validation.position, 5u);
   ASSERT_NE(module_view_.types.facts->next, nullptr);
   EXPECT_EQ(module_view_.types.facts->next->type_id, 4u);
   EXPECT_EQ(module_view_.types.facts->next->next, nullptr);
 
   auto materializer = MakeMaterializer(data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_type_materialize_prefix(&materializer, 2));
+  ASSERT_TRUE(loom_bytecode_type_materialize_prefix(&materializer, 2));
   EXPECT_EQ(materializer.position, 2u);
   EXPECT_EQ(materializer.next_fact, module_view_.types.facts);
-  IREE_ASSERT_OK(loom_bytecode_type_materialize_prefix(&materializer, 3));
+  ASSERT_TRUE(loom_bytecode_type_materialize_prefix(&materializer, 3));
   EXPECT_EQ(materializer.next_fact, module_view_.types.facts->next);
-  IREE_ASSERT_OK(loom_bytecode_type_materialize_prefix(&materializer, 3));
-  IREE_ASSERT_OK(loom_bytecode_type_materialize_prefix(&materializer, 5));
+  ASSERT_TRUE(loom_bytecode_type_materialize_prefix(&materializer, 3));
+  ASSERT_TRUE(loom_bytecode_type_materialize_prefix(&materializer, 5));
   EXPECT_EQ(materializer.position, 5u);
   EXPECT_EQ(materializer.next_fact, nullptr);
   ASSERT_EQ(module_->types.count, 5u);
@@ -484,7 +482,7 @@ TEST_F(BytecodeTypeTest, StructuralTypesRetainChildrenBeyondPlanLifetime) {
       1,
       2,
   };
-  IREE_ASSERT_OK(BuildPlan(data, sizeof(data)));
+  ASSERT_TRUE(BuildPlan(data, sizeof(data)));
 
   loom_type_id_t unused_type_id = LOOM_TYPE_ID_INVALID;
   loom_type_id_t scalar_type_id = LOOM_TYPE_ID_INVALID;
@@ -626,19 +624,16 @@ TEST_F(BytecodeTypeTest, RetainsOnlyRequestedFactsForMixedTypes) {
       LOOM_BYTECODE_ATTR_I64,
       4,
   };
-  ASSERT_NO_FATAL_FAILURE(
-      CheckValidationModes(data, sizeof(data), IREE_STATUS_OK));
+  ASSERT_NO_FATAL_FAILURE(CheckValidationModes(data, sizeof(data), true));
   for (iree_host_size_t length = 0; length < sizeof(data); ++length) {
     SCOPED_TRACE(length);
-    ASSERT_NO_FATAL_FAILURE(
-        CheckValidationModes(data, length, IREE_STATUS_DEFERRED));
+    ASSERT_NO_FATAL_FAILURE(CheckValidationModes(data, length, false));
   }
 }
 
 TEST_F(BytecodeTypeTest, EmptyValidationAndIndexNeedNoStorage) {
   const uint8_t data[] = {0};
-  ASSERT_NO_FATAL_FAILURE(
-      CheckValidationModes(data, sizeof(data), IREE_STATUS_OK));
+  ASSERT_NO_FATAL_FAILURE(CheckValidationModes(data, sizeof(data), true));
 }
 
 TEST_F(BytecodeTypeTest, RetentionDoesNotChangeParameterValidation) {
@@ -667,7 +662,7 @@ TEST_F(BytecodeTypeTest, RetentionDoesNotChangeParameterValidation) {
     std::vector<uint8_t> data = {1, LOOM_BYTECODE_TYPE_PARAMETERIZED, 0};
     data.insert(data.end(), parameters.begin(), parameters.end());
     ASSERT_NO_FATAL_FAILURE(
-        CheckValidationModes(data.data(), data.size(), IREE_STATUS_DEFERRED));
+        CheckValidationModes(data.data(), data.size(), false));
   }
 }
 
@@ -685,7 +680,7 @@ TEST_F(BytecodeTypeTest, ScopedParameterOwnershipAndOptionalSlots) {
       }
       data.insert(data.end(), {3, LOOM_BYTECODE_ATTR_I64, 6});
       loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
-      IREE_ASSERT_OK(DecodeScopedParameters(data, selected, &type_id));
+      ASSERT_TRUE(DecodeScopedParameters(data, selected, &type_id));
       iree_arena_reset(&scratch_arena_);
       data.assign(data.size(), 0);
       const loom_type_t type = loom_type_table_get(&module_->types, type_id);
@@ -733,8 +728,7 @@ TEST_F(BytecodeTypeTest,
       error_count_ = 0;
       diagnostic_ = {};
       loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                            DecodeScopedParameters(data, selected, &type_id));
+      EXPECT_FALSE(DecodeScopedParameters(data, selected, &type_id));
       EXPECT_EQ(type_id, LOOM_TYPE_ID_INVALID);
       EXPECT_EQ(error_count_, 1u);
       if (!selected) {
@@ -753,7 +747,7 @@ TEST_F(BytecodeTypeTest, RejectsNonTopologicalTypeReference) {
   const uint8_t data[] = {
       0x01, LOOM_BYTECODE_TYPE_FUNCTION, 0x01, 0x00, 0x00,
   };
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, BuildPlan(data, sizeof(data)));
+  EXPECT_FALSE(BuildPlan(data, sizeof(data)));
   EXPECT_EQ(error_count_, 1u);
 }
 
@@ -775,17 +769,16 @@ TEST_F(BytecodeTypeTest, ParameterKindsAreCheckedWithValidReferences) {
       LOOM_BYTECODE_ATTR_I64,
       2,
   };
-  ASSERT_NO_FATAL_FAILURE(
-      CheckValidationModes(data, sizeof(data), IREE_STATUS_DEFERRED));
+  ASSERT_NO_FATAL_FAILURE(CheckValidationModes(data, sizeof(data), false));
 }
 
 TEST_F(BytecodeTypeTest, MaterializesEmptyFunctionPayload) {
   const uint8_t data[] = {0x01, LOOM_BYTECODE_TYPE_FUNCTION, 0x00, 0x00};
-  IREE_ASSERT_OK(BuildPlan(data, sizeof(data)));
+  ASSERT_TRUE(BuildPlan(data, sizeof(data)));
   loom_bytecode_type_materializer_t materializer =
       MakeMaterializer(data, sizeof(data));
-  IREE_ASSERT_OK(loom_bytecode_type_materialize_prefix(
-      &materializer, module_view_.types.count));
+  ASSERT_TRUE(loom_bytecode_type_materialize_prefix(&materializer,
+                                                    module_view_.types.count));
   ASSERT_EQ(module_->types.count, 1u);
   const loom_func_type_data_t* payload =
       loom_type_func_data(loom_type_table_get(&module_->types, 0));
@@ -812,13 +805,13 @@ TEST_F(BytecodeTypeTest, MaterializesFullWidthFunctionSignature) {
   };
   data.insert(data.end(), UINT16_MAX, /*argument_type_id=*/0);
   data.insert(data.end(), UINT16_MAX, /*result_type_id=*/1);
-  IREE_ASSERT_OK(BuildPlan(data.data(), data.size()));
+  ASSERT_TRUE(BuildPlan(data.data(), data.size()));
   EXPECT_EQ(module_view_.types.entries[2].structural.dependency_count,
             2u * UINT16_MAX);
   loom_bytecode_type_materializer_t materializer =
       MakeMaterializer(data.data(), data.size());
-  IREE_ASSERT_OK(loom_bytecode_type_materialize_prefix(
-      &materializer, module_view_.types.count));
+  ASSERT_TRUE(loom_bytecode_type_materialize_prefix(&materializer,
+                                                    module_view_.types.count));
   ASSERT_EQ(module_->types.count, 3u);
   const loom_func_type_data_t* payload =
       loom_type_func_data(loom_type_table_get(&module_->types, 2));
@@ -836,14 +829,10 @@ TEST_F(BytecodeTypeTest, MaterializesFullWidthFunctionSignature) {
 TEST_F(BytecodeTypeTest, RejectsOversizedFunctionCountsBeforeAllocation) {
   const uint8_t oversized_arguments[] = {
       0x01, LOOM_BYTECODE_TYPE_FUNCTION, 0x80, 0x80, 0x04, 0x00};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      BuildPlan(oversized_arguments, sizeof(oversized_arguments)));
+  EXPECT_FALSE(BuildPlan(oversized_arguments, sizeof(oversized_arguments)));
   const uint8_t oversized_results[] = {
       0x01, LOOM_BYTECODE_TYPE_FUNCTION, 0x00, 0x80, 0x80, 0x04};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      BuildPlan(oversized_results, sizeof(oversized_results)));
+  EXPECT_FALSE(BuildPlan(oversized_results, sizeof(oversized_results)));
   EXPECT_EQ(error_count_, 2u);
   EXPECT_EQ(module_->types.count, 0u);
 }
@@ -862,8 +851,8 @@ TEST_F(BytecodeTypeTest, ViewAlignmentValidationModesAgree) {
     CheckValidationModes(data, sizeof(data),
                          alignment == 0 || loom_type_view_alignment_is_valid(
                                                LOOM_SCALAR_TYPE_I64, alignment)
-                             ? IREE_STATUS_OK
-                             : IREE_STATUS_DEFERRED);
+                             ? true
+                             : false);
   }
 }
 
@@ -874,9 +863,8 @@ TEST_F(BytecodeTypeTest, RejectsNoneScalarType) {
   };
   loom_bytecode_type_plan_entry_t entry = {};
   loom_bytecode_type_fact_t* fact = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
-                                    /*absolute_offset=*/0, &entry, &fact));
+  EXPECT_FALSE(DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                           /*absolute_offset=*/0, &entry, &fact));
   EXPECT_EQ(error_count_, 1u);
 }
 
@@ -890,9 +878,8 @@ TEST_F(BytecodeTypeTest, RejectsNoneShapedElementType) {
   };
   loom_bytecode_type_plan_entry_t entry = {};
   loom_bytecode_type_fact_t* fact = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
-                                    /*absolute_offset=*/0, &entry, &fact));
+  EXPECT_FALSE(DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                           /*absolute_offset=*/0, &entry, &fact));
   EXPECT_EQ(error_count_, 1u);
 }
 
@@ -905,7 +892,7 @@ TEST_F(BytecodeTypeTest, GlobalTypesRequireScopeIndependentEncodings) {
       LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA,
       /*encoding_instance=*/0,
   };
-  CheckValidationModes(data, sizeof(data), IREE_STATUS_DEFERRED);
+  CheckValidationModes(data, sizeof(data), false);
 }
 
 TEST_F(BytecodeTypeTest, DecodesOneIndexedEntry) {
@@ -914,8 +901,8 @@ TEST_F(BytecodeTypeTest, DecodesOneIndexedEntry) {
   };
   loom_bytecode_type_plan_entry_t entry = {};
   loom_bytecode_type_fact_t* fact = nullptr;
-  IREE_ASSERT_OK(DecodeEntry(/*type_index=*/2, data, sizeof(data),
-                             /*absolute_offset=*/41, &entry, &fact));
+  ASSERT_TRUE(DecodeEntry(/*type_index=*/2, data, sizeof(data),
+                          /*absolute_offset=*/41, &entry, &fact));
 
   EXPECT_EQ(entry.bytecode_offset, 41u);
   ASSERT_NE(fact, nullptr);
@@ -973,7 +960,7 @@ TEST_F(BytecodeTypeTest, ScopedShapesRetainSourceCoordinatesAcrossRanks) {
       loom_bytecode_reader_cursor_initialize(data.data(), data.size(), 0,
                                              IREE_SV("SCOPED_TYPES"), &cursor);
       loom_bytecode_scoped_shape_t shape;
-      IREE_ASSERT_OK(loom_bytecode_type_read_scoped_shape(
+      ASSERT_TRUE(loom_bytecode_type_read_scoped_shape(
           &decoder_, &cursor, kind, LOOM_TYPE_MAX_RANK,
           /*encoding_count=*/0, &shape));
       EXPECT_EQ(cursor.cursor.position, data.size());
@@ -1034,8 +1021,7 @@ TEST_F(BytecodeTypeTest, ScopedShapesRejectInvalidWireFields) {
                                            IREE_SV("SCOPED_TYPES"), &cursor);
     loom_bytecode_scoped_shape_t shape;
     error_count_ = 0;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_DEFERRED,
+    EXPECT_FALSE(
         loom_bytecode_type_read_scoped_shape(&decoder_, &cursor, invalid.kind,
                                              /*value_count=*/3,
                                              /*encoding_count=*/2, &shape));
@@ -1054,8 +1040,7 @@ TEST_F(BytecodeTypeTest, ScopedShapeRejectsEveryTruncatedPrefix) {
                                            IREE_SV("SCOPED_TYPES"), &cursor);
     loom_bytecode_scoped_shape_t shape;
     error_count_ = 0;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_DEFERRED,
+    EXPECT_FALSE(
         loom_bytecode_type_read_scoped_shape(&decoder_, &cursor, LOOM_TYPE_VIEW,
                                              /*value_count=*/3,
                                              /*encoding_count=*/0, &shape));
@@ -1073,20 +1058,20 @@ TEST_F(BytecodeTypeTest, ScopedRecordFramingPreservesItsEnclosingCursor) {
                                          IREE_SV("SIGNATURE"), &cursor);
   loom_bytecode_reader_cursor_t records;
   uint64_t count = UINT64_MAX;
-  IREE_ASSERT_OK(loom_bytecode_type_open_scoped_records(
+  ASSERT_TRUE(loom_bytecode_type_open_scoped_records(
       &decoder_, &cursor, /*reference=*/0, &records, &count));
   EXPECT_EQ(records.cursor.length, 0u);
   EXPECT_EQ(count, 0u);
   EXPECT_EQ(cursor.cursor.position, 1u);
 
-  IREE_ASSERT_OK(loom_bytecode_type_open_scoped_records(
+  ASSERT_TRUE(loom_bytecode_type_open_scoped_records(
       &decoder_, &cursor, /*reference=*/1, &records, &count));
   EXPECT_EQ(count, 0u);
   EXPECT_EQ(records.absolute_offset, 102u);
   EXPECT_EQ(records.cursor.length, 2u);
   EXPECT_EQ(cursor.cursor.position, 4u);
   uint64_t root = UINT64_MAX;
-  IREE_ASSERT_OK(loom_bytecode_type_close_scoped_records(
+  ASSERT_TRUE(loom_bytecode_type_close_scoped_records(
       &decoder_, &records, /*completed_count=*/2, &root));
   EXPECT_EQ(root, 1u);
   EXPECT_EQ(records.cursor.position, records.cursor.length);
@@ -1121,13 +1106,13 @@ TEST_F(BytecodeTypeTest, ScopedRecordFramingRejectsInvalidExtensions) {
     uint64_t count = 0;
     uint64_t root = UINT64_MAX;
     error_count_ = 0;
-    iree_status_t status = loom_bytecode_type_open_scoped_records(
+    bool accepted = loom_bytecode_type_open_scoped_records(
         &decoder_, &cursor, test_case.reference, &records, &count);
-    if (iree_status_is_ok(status)) {
-      status = loom_bytecode_type_close_scoped_records(
+    if (accepted) {
+      accepted = loom_bytecode_type_close_scoped_records(
           &decoder_, &records, /*completed_count=*/2, &root);
     }
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, status);
+    EXPECT_FALSE(accepted);
     EXPECT_EQ(error_count_, 1u);
     EXPECT_EQ(root, UINT64_MAX);
     EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);

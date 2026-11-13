@@ -49,6 +49,7 @@ class BytecodeLocationTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&retained_arena_);
@@ -123,8 +124,8 @@ TEST_F(BytecodeLocationTest, ValidatesWithoutRetainingEntries) {
   const loom_bytecode_reader_section_t section =
       MakeSection(kLocationTable, sizeof(kLocationTable));
 
-  IREE_ASSERT_OK(loom_bytecode_location_table_validate(&decoder_, &module_view_,
-                                                       &section));
+  ASSERT_TRUE(loom_bytecode_location_table_validate(&decoder_, &module_view_,
+                                                    &section));
 
   EXPECT_EQ(module_view_.locations.count, 5u);
   EXPECT_EQ(error_count_, 0u);
@@ -136,7 +137,7 @@ TEST_F(BytecodeLocationTest, IndexesExactEntryRanges) {
 
   loom_bytecode_table_entry_metadata_t* entries = nullptr;
   iree_host_size_t count = 0;
-  IREE_ASSERT_OK(loom_bytecode_location_table_index(
+  ASSERT_TRUE(loom_bytecode_location_table_index(
       &decoder_, &module_view_, &section, &retained_arena_, &entries, &count));
 
   ASSERT_EQ(count, 5u);
@@ -166,7 +167,7 @@ TEST_F(BytecodeLocationTest, IndexedRangesPreserveSingleOrigins) {
   loom_bytecode_module_metadata_t metadata = {
       .sources = {IREE_ARRAYSIZE(source_names_), source_names_},
   };
-  IREE_ASSERT_OK(loom_bytecode_location_table_index(
+  ASSERT_TRUE(loom_bytecode_location_table_index(
       &decoder_, &module_view_, &section, &retained_arena_,
       &metadata.locations.entries, &metadata.locations.count));
   ASSERT_EQ(error_count_, 0u);
@@ -209,7 +210,7 @@ TEST_F(BytecodeLocationTest, IndexedRangesPreserveWideCoordinates) {
   loom_bytecode_module_metadata_t metadata = {
       .sources = {IREE_ARRAYSIZE(source_names_), source_names_},
   };
-  IREE_ASSERT_OK(loom_bytecode_location_table_index(
+  ASSERT_TRUE(loom_bytecode_location_table_index(
       &decoder_, &module_view_, &section, &retained_arena_,
       &metadata.locations.entries, &metadata.locations.count));
   ASSERT_EQ(error_count_, 0u);
@@ -233,10 +234,8 @@ TEST_F(BytecodeLocationTest, RejectsCountBeforeRetainingEntryRanges) {
   loom_bytecode_table_entry_metadata_t* entries = nullptr;
   iree_host_size_t count = 0;
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_location_table_index(&decoder_, &module_view_, &section,
-                                         &retained_arena_, &entries, &count));
+  EXPECT_FALSE(loom_bytecode_location_table_index(
+      &decoder_, &module_view_, &section, &retained_arena_, &entries, &count));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(retained_arena_.used_allocation_size, 0u);
@@ -262,14 +261,14 @@ TEST_F(BytecodeLocationTest, MaterializesCoordinateBeyondCompactRange) {
   const loom_bytecode_reader_section_t section =
       MakeSection(data, sizeof(data));
 
-  IREE_ASSERT_OK(loom_bytecode_location_table_read_count(
-      &decoder_, &module_view_, &section));
+  ASSERT_TRUE(loom_bytecode_location_table_read_count(&decoder_, &module_view_,
+                                                      &section));
   loom_bytecode_location_materializer_t materializer = {
       .decoder = &decoder_,
       .module_view = &module_view_,
       .output_module = module_,
   };
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(
       loom_bytecode_location_table_materialize(&materializer, &section));
 
   ASSERT_EQ(module_->locations.count, 2u);
@@ -300,9 +299,8 @@ TEST_F(BytecodeLocationTest, RejectsCoordinateOutsideRuntimeWidth) {
   const loom_bytecode_reader_section_t section =
       MakeSection(data, sizeof(data));
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        loom_bytecode_location_table_validate(
-                            &decoder_, &module_view_, &section));
+  EXPECT_FALSE(loom_bytecode_location_table_validate(&decoder_, &module_view_,
+                                                     &section));
 
   EXPECT_EQ(error_count_, 1u);
 }
@@ -312,8 +310,8 @@ TEST_F(BytecodeLocationTest, MaterializesCanonicalTable) {
   std::memcpy(payload, kLocationTable, sizeof(payload));
   const loom_bytecode_reader_section_t section =
       MakeSection(payload, sizeof(payload));
-  IREE_ASSERT_OK(loom_bytecode_location_table_read_count(
-      &decoder_, &module_view_, &section));
+  ASSERT_TRUE(loom_bytecode_location_table_read_count(&decoder_, &module_view_,
+                                                      &section));
   EXPECT_EQ(module_view_.locations.count, 5u);
   EXPECT_EQ(module_->locations.count, 0u);
   loom_bytecode_location_materializer_t materializer = {
@@ -322,7 +320,7 @@ TEST_F(BytecodeLocationTest, MaterializesCanonicalTable) {
       .output_module = module_,
   };
 
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(
       loom_bytecode_location_table_materialize(&materializer, &section));
   std::memset(payload, 0, sizeof(payload));
   iree_arena_reset(&retained_arena_);
@@ -375,16 +373,15 @@ TEST_F(BytecodeLocationTest, MaterializationValidatesDeferredEntries) {
       2, LOOM_LOCATION_NONE, 0, LOOM_LOCATION_FILE, 0x80, 0, 1, 2, 3, 4};
   const loom_bytecode_reader_section_t section =
       MakeSection(payload, sizeof(payload));
-  IREE_ASSERT_OK(loom_bytecode_location_table_read_count(
-      &decoder_, &module_view_, &section));
+  ASSERT_TRUE(loom_bytecode_location_table_read_count(&decoder_, &module_view_,
+                                                      &section));
   EXPECT_EQ(error_count_, 0u);
   loom_bytecode_location_materializer_t materializer = {
       .decoder = &decoder_,
       .module_view = &module_view_,
       .output_module = module_,
   };
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
+  EXPECT_FALSE(
       loom_bytecode_location_table_materialize(&materializer, &section));
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(module_->locations.count, 0u);

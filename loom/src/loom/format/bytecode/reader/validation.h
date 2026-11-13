@@ -52,8 +52,7 @@ void loom_bytecode_file_reader_initialize(
     loom_bytecode_file_reader_t* out_reader);
 
 // Validates the file header, module directory, and file string pool.
-iree_status_t loom_bytecode_file_reader_validate(
-    loom_bytecode_file_reader_t* reader);
+bool loom_bytecode_file_reader_validate(loom_bytecode_file_reader_t* reader);
 
 // Projects the validated file directory into a retained index.
 iree_status_t loom_bytecode_file_reader_project_index(
@@ -74,23 +73,18 @@ typedef uint32_t loom_bytecode_module_validation_flags_t;
 // retains validation facts only. PREPARE_MATERIALIZATION produces construction
 // input, not a complete validation result: the materializer validates deferred
 // location entries while constructing tentative output.
-iree_status_t loom_bytecode_module_validate(
-    const loom_bytecode_file_reader_t* file_reader,
+bool loom_bytecode_module_validate(
+    loom_bytecode_file_reader_t* file_reader,
     const loom_bytecode_reader_module_t* module,
     loom_bytecode_module_validation_flags_t flags,
     loom_bytecode_reader_module_view_t* out_view);
 
 // Validates one module and projects its retained index state.
-iree_status_t loom_bytecode_module_index(
-    const loom_bytecode_file_reader_t* file_reader,
-    const loom_bytecode_reader_module_t* module,
-    iree_arena_allocator_t* retained_arena,
-    loom_bytecode_module_metadata_t* out_metadata,
-    loom_bytecode_reader_module_view_t* out_view);
-
-// Consumes a diagnosed malformed-input unwind marker at the public boundary.
-iree_status_t loom_bytecode_reader_normalize_diagnosed_error(
-    iree_status_t status, uint32_t error_count);
+bool loom_bytecode_module_index(loom_bytecode_file_reader_t* file_reader,
+                                const loom_bytecode_reader_module_t* module,
+                                iree_arena_allocator_t* retained_arena,
+                                loom_bytecode_module_metadata_t* out_metadata,
+                                loom_bytecode_reader_module_view_t* out_view);
 
 #ifdef __cplusplus
 }  // extern "C"

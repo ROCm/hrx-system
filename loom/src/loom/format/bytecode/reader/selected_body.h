@@ -63,7 +63,7 @@ typedef struct loom_bytecode_selected_value_scope_t {
 } loom_bytecode_selected_value_scope_t;
 
 // Initializes a selected value scope whose map consists of fresh module values.
-iree_status_t loom_bytecode_selected_value_scope_initialize_fresh(
+bool loom_bytecode_selected_value_scope_initialize_fresh(
     loom_bytecode_selected_body_materializer_t* materializer,
     iree_arena_allocator_t* arena, iree_string_view_t symbol_name,
     uint64_t payload_offset, loom_value_id_t* value_map,
@@ -71,12 +71,12 @@ iree_status_t loom_bytecode_selected_value_scope_initialize_fresh(
     loom_bytecode_selected_value_scope_t* out_scope);
 
 // Materializes the next selected reserved value definition from |cursor|.
-iree_status_t loom_bytecode_selected_value_scope_materialize_definition(
+bool loom_bytecode_selected_value_scope_materialize_definition(
     loom_bytecode_selected_value_scope_t* value_scope,
     loom_bytecode_reader_cursor_t* cursor, loom_value_id_t* out_value_id);
 
 // Materializes one selected bounded root-region payload into |parent_op|.
-iree_status_t loom_bytecode_selected_body_materialize_region(
+bool loom_bytecode_selected_body_materialize_region(
     loom_bytecode_selected_body_materializer_t* materializer,
     iree_string_view_t symbol_name, iree_const_byte_span_t payload_bytes,
     uint64_t payload_absolute_offset,

@@ -286,6 +286,32 @@ TEST_F(ManagedTypeBytecodeTest, DeclarationKeyFieldsAreRequiredStrings) {
   }
 }
 
+TEST_F(ManagedTypeBytecodeTest, SelectedTypesRequireTheirDeclarationClosure) {
+  const auto& metadata = metadata_.modules[0];
+  const iree_host_size_t selected =
+      metadata.symbol_ordinal_by_string_index[StringIndex("consume")];
+  for (bool capture : {false, true}) {
+    std::string failure;
+    const loom_bytecode_read_options_t options = {
+        .diagnostic_sink =
+            capture ? loom_diagnostic_sink_t{CaptureFailure, &failure}
+                    : loom_diagnostic_sink_t{},
+    };
+    loom_bytecode_read_result_t result = {};
+    loom_module_t* output = nullptr;
+    IREE_ASSERT_OK(loom_bytecode_materialize_module_symbols(
+        Bytes(), IREE_SV("objects.loombc"), &context_, &pool_, &metadata_, 0,
+        {1, &selected}, &options, iree_allocator_system(), &result, &output));
+    EXPECT_EQ(result.error_count, 1u);
+    EXPECT_EQ(output, nullptr);
+    if (capture) {
+      EXPECT_EQ(failure,
+                "managed_type_declaration_is_outside_selected_symbol_closure");
+    }
+    loom_module_free(output);
+  }
+}
+
 TEST_F(ManagedTypeBytecodeTest, SelectedTypesReuseDestinationAliasAndOwnKeys) {
   loom_module_t* destination = Allocate();
   const auto existing = Declare(destination, "Existing", "input");

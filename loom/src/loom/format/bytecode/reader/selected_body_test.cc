@@ -39,6 +39,7 @@ class BytecodeSelectedBodyTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&table_arena_);
@@ -99,7 +100,7 @@ TEST_F(BytecodeSelectedBodyTest, ProjectsHighValueReferencesToCompactIds) {
   iree_arena_initialize(&block_pool_, &body_arena);
   loom_value_id_t value_map[1] = {LOOM_VALUE_ID_INVALID};
   loom_bytecode_selected_value_scope_t value_scope;
-  IREE_ASSERT_OK(loom_bytecode_selected_value_scope_initialize_fresh(
+  ASSERT_TRUE(loom_bytecode_selected_value_scope_initialize_fresh(
       &materializer, &body_arena, IREE_SV("@selected"),
       /*payload_offset=*/4096, value_map, IREE_ARRAYSIZE(value_map),
       &value_scope));
@@ -114,9 +115,9 @@ TEST_F(BytecodeSelectedBodyTest, ProjectsHighValueReferencesToCompactIds) {
                                          /*absolute_offset=*/4096,
                                          IREE_SV("IR"), &cursor);
   loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-  IREE_ASSERT_OK(loom_bytecode_selected_value_scope_materialize_definition(
+  ASSERT_TRUE(loom_bytecode_selected_value_scope_materialize_definition(
       &value_scope, &cursor, &value_id));
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(
       loom_bytecode_reader_expect_empty(&decoder_, &cursor, IREE_SV("IR")));
 
   ASSERT_EQ(module_->strings.count, 2u);

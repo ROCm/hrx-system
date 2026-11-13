@@ -31,6 +31,7 @@ class BytecodeSourceTriviaTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     iree_arena_deinitialize(&arena_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
@@ -47,7 +48,7 @@ TEST_F(BytecodeSourceTriviaTest, ValidationAdvancesWithoutAllocation) {
   loom_bytecode_reader_cursor_initialize(data, sizeof(data), 4096,
                                          IREE_SV("TEST"), &cursor);
 
-  IREE_ASSERT_OK(loom_bytecode_source_trivia_validate(&decoder_, &cursor));
+  ASSERT_TRUE(loom_bytecode_source_trivia_validate(&decoder_, &cursor));
 
   EXPECT_EQ(cursor.cursor.position, sizeof(data) - 1);
   EXPECT_EQ(data[cursor.cursor.position], 0xA5u);
@@ -61,8 +62,8 @@ TEST_F(BytecodeSourceTriviaTest, MaterializationPublishesConcreteTrivia) {
                                          IREE_SV("TEST"), &cursor);
 
   loom_bytecode_source_trivia_t source_trivia = {};
-  IREE_ASSERT_OK(loom_bytecode_source_trivia_materialize(
-      &decoder_, &cursor, &arena_, &source_trivia));
+  ASSERT_TRUE(loom_bytecode_source_trivia_materialize(&decoder_, &cursor,
+                                                      &arena_, &source_trivia));
 
   EXPECT_TRUE(source_trivia.leading_blank_line);
   ASSERT_EQ(source_trivia.comment_count, 2u);
@@ -81,9 +82,8 @@ TEST_F(BytecodeSourceTriviaTest, RejectsCountBeforeRetainingComments) {
                                          IREE_SV("TEST"), &cursor);
   loom_bytecode_source_trivia_t source_trivia = {};
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        loom_bytecode_source_trivia_materialize(
-                            &decoder_, &cursor, &arena_, &source_trivia));
+  EXPECT_FALSE(loom_bytecode_source_trivia_materialize(
+      &decoder_, &cursor, &arena_, &source_trivia));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(arena_.used_allocation_size, 0u);
@@ -98,8 +98,8 @@ TEST_F(BytecodeSourceTriviaTest, MaterializationNormalizesCommentPrefix) {
                                          IREE_SV("TEST"), &cursor);
 
   loom_bytecode_source_trivia_t source_trivia = {};
-  IREE_ASSERT_OK(loom_bytecode_source_trivia_materialize(
-      &decoder_, &cursor, &arena_, &source_trivia));
+  ASSERT_TRUE(loom_bytecode_source_trivia_materialize(&decoder_, &cursor,
+                                                      &arena_, &source_trivia));
 
   ASSERT_EQ(source_trivia.comment_count, 1u);
   EXPECT_TRUE(
@@ -113,9 +113,7 @@ TEST_F(BytecodeSourceTriviaTest, InvalidUtf8FailsValidation) {
   loom_bytecode_reader_cursor_initialize(data, sizeof(data), 11264,
                                          IREE_SV("TEST"), &cursor);
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_source_trivia_validate(&decoder_, &cursor));
+  EXPECT_FALSE(loom_bytecode_source_trivia_validate(&decoder_, &cursor));
 
   EXPECT_EQ(error_count_, 1u);
 }
@@ -127,9 +125,8 @@ TEST_F(BytecodeSourceTriviaTest, TruncatedCommentFailsThroughDecoder) {
                                          IREE_SV("TEST"), &cursor);
 
   loom_bytecode_source_trivia_t source_trivia = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
-                        loom_bytecode_source_trivia_materialize(
-                            &decoder_, &cursor, &arena_, &source_trivia));
+  EXPECT_FALSE(loom_bytecode_source_trivia_materialize(
+      &decoder_, &cursor, &arena_, &source_trivia));
 
   EXPECT_EQ(error_count_, 1u);
   EXPECT_EQ(source_trivia.comment_count, 0u);

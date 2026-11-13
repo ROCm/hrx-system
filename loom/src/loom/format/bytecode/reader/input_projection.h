@@ -69,7 +69,7 @@ void loom_bytecode_input_projection_begin_signature(
 
 // Consumes the extension after a validated signature type reference. Returns
 // zero for a non-shaped root, or a canonical shape ID valid until arena reset.
-iree_status_t loom_bytecode_input_projection_read(
+bool loom_bytecode_input_projection_read(
     loom_bytecode_input_projection_t* projection,
     loom_bytecode_reader_cursor_t* cursor, uint64_t source_reference,
     const loom_bytecode_attribute_ssa_validation_scope_t* scope,
@@ -94,7 +94,7 @@ iree_status_t loom_bytecode_input_projection_end_signature(
 // Freezes family obligations and provider-only differences after all symbols
 // have been read, including forward family references. Only reached input
 // requirements survive admission; the source projection remains scratch-owned.
-iree_status_t loom_bytecode_input_projection_finish_module(
+bool loom_bytecode_input_projection_finish_module(
     loom_bytecode_input_projection_t* projection,
     iree_arena_allocator_t* retained_arena,
     loom_bytecode_module_metadata_t* metadata);

@@ -25,7 +25,7 @@ typedef struct loom_bytecode_module_materialization_t {
   // Checkpointed construction payloads never own completed scope bindings.
   iree_arena_allocator_t construction_arena;
   // Bounded decoder sharing the public diagnostic result state.
-  loom_bytecode_reader_decoder_t decoder;
+  loom_bytecode_reader_decoder_t* decoder;
   // Validated module facts whose type-plan slots become completed identities.
   loom_bytecode_reader_module_view_t view;
   // Block source for the output module and root-region-local arenas.
@@ -54,31 +54,38 @@ static iree_status_t loom_bytecode_module_allocate_output(
                               reader->host_allocator, &reader->output_module);
 }
 
-static iree_status_t loom_bytecode_module_materialize_tables(
+static bool loom_bytecode_module_materialize_tables(
     loom_bytecode_module_materialization_t* reader) {
   loom_bytecode_symbol_materializer_t symbol_materializer;
   loom_bytecode_symbol_materializer_initialize(
-      &reader->decoder, reader->context, reader->arena,
+      reader->decoder, reader->context, reader->arena,
       &reader->construction_arena, reader->block_pool, &reader->view,
       reader->output_module, &reader->low_repr_environment,
       &symbol_materializer);
-  IREE_RETURN_IF_ERROR(loom_bytecode_string_table_materialize(
-      &reader->view, reader->output_module));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      reader->decoder, loom_bytecode_string_table_materialize(
+                           &reader->view, reader->output_module)));
   loom_string_id_t module_name_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_module_intern_string(
-      reader->output_module, reader->view.directory_entry->name,
-      &module_name_id));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      reader->decoder,
+      loom_module_intern_string(reader->output_module,
+                                reader->view.directory_entry->name,
+                                &module_name_id)));
   reader->output_module->name_id = module_name_id;
   if (reader->view.file_header.comment_count > 0) {
-    IREE_RETURN_IF_ERROR(loom_module_attach_file_header(
-        reader->output_module, reader->view.file_header.comments,
-        reader->view.file_header.comment_count));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        reader->decoder,
+        loom_module_attach_file_header(
+            reader->output_module, reader->view.file_header.comments,
+            reader->view.file_header.comment_count)));
   }
-  IREE_RETURN_IF_ERROR(loom_bytecode_source_table_materialize(
-      &reader->view, reader->output_module));
-  IREE_RETURN_IF_ERROR(loom_bytecode_symbols_predeclare(&symbol_materializer));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      reader->decoder, loom_bytecode_source_table_materialize(
+                           &reader->view, reader->output_module)));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      reader->decoder, loom_bytecode_symbols_predeclare(&symbol_materializer)));
   loom_bytecode_type_materializer_t type_materializer = {
-      .decoder = &reader->decoder,
+      .decoder = reader->decoder,
       .bytecode = reader->bytecode,
       .context = reader->context,
       .module_view = &reader->view,
@@ -87,24 +94,24 @@ static iree_status_t loom_bytecode_module_materialize_tables(
       .next_fact = reader->view.types.facts,
   };
   loom_bytecode_encoding_materializer_t encoding_materializer = {
-      .decoder = &reader->decoder,
+      .decoder = reader->decoder,
       .context = reader->context,
       .module_view = &reader->view,
       .scratch_arena = &reader->construction_arena,
       .output_module = reader->output_module,
       .types = &type_materializer,
   };
-  IREE_RETURN_IF_ERROR(loom_bytecode_encoding_table_materialize(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_encoding_table_materialize(
       &encoding_materializer, reader->view.sections.encodings));
-  IREE_RETURN_IF_ERROR(loom_bytecode_type_materialize_prefix(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_materialize_prefix(
       &type_materializer, reader->view.types.count));
   if (reader->view.sections.locations) {
     loom_bytecode_location_materializer_t location_materializer = {
-        .decoder = &reader->decoder,
+        .decoder = reader->decoder,
         .module_view = &reader->view,
         .output_module = reader->output_module,
     };
-    IREE_RETURN_IF_ERROR(loom_bytecode_location_table_materialize(
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_location_table_materialize(
         &location_materializer, reader->view.sections.locations));
   }
   return loom_bytecode_symbols_materialize(&symbol_materializer,
@@ -112,7 +119,7 @@ static iree_status_t loom_bytecode_module_materialize_tables(
                                            reader->view.sections.ir);
 }
 
-iree_status_t loom_bytecode_module_materialize(
+bool loom_bytecode_module_materialize(
     const loom_bytecode_module_materializer_t* materializer,
     loom_module_t** out_module) {
   *out_module = NULL;
@@ -120,7 +127,7 @@ iree_status_t loom_bytecode_module_materialize(
       .bytecode = materializer->bytecode,
       .context = materializer->context,
       .arena = materializer->scratch_arena,
-      .decoder = *materializer->decoder,
+      .decoder = materializer->decoder,
       .view = *materializer->module_view,
       .block_pool = materializer->block_pool,
       .host_allocator = materializer->host_allocator,
@@ -128,11 +135,12 @@ iree_status_t loom_bytecode_module_materialize(
   };
 
   iree_arena_initialize(materializer->block_pool, &state.construction_arena);
-  iree_status_t status = loom_bytecode_module_allocate_output(&state);
-  if (iree_status_is_ok(status)) {
-    status = loom_bytecode_module_materialize_tables(&state);
+  bool accepted = loom_bytecode_reader_check_status(
+      materializer->decoder, loom_bytecode_module_allocate_output(&state));
+  if (accepted) {
+    accepted = loom_bytecode_module_materialize_tables(&state);
   }
-  if (iree_status_is_ok(status)) {
+  if (accepted) {
     *out_module = state.output_module;
     state.output_module = NULL;
   }
@@ -140,5 +148,5 @@ iree_status_t loom_bytecode_module_materialize(
     loom_module_free(state.output_module);
   }
   iree_arena_deinitialize(&state.construction_arena);
-  return status;
+  return accepted;
 }

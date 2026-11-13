@@ -21,24 +21,23 @@ iree_status_t loom_bytecode_read_metadata(
       options ? options->diagnostic_sink : (loom_diagnostic_sink_t){0},
       &reader);
 
-  iree_status_t status = loom_bytecode_file_reader_validate(&reader);
-  if (iree_status_is_ok(status)) {
+  bool accepted = loom_bytecode_file_reader_validate(&reader);
+  if (accepted) {
     for (iree_host_size_t i = 0; i < reader.module_count; ++i) {
       loom_bytecode_reader_module_view_t module_view;
-      status = loom_bytecode_module_validate(
+      accepted = loom_bytecode_module_validate(
           &reader, &reader.modules[i], LOOM_BYTECODE_MODULE_VALIDATION_NONE,
           &module_view);
       if (i == 0) {
         reader.result.first_module = module_view.summary;
       }
-      if (!iree_status_is_ok(status)) {
+      if (!accepted) {
         break;
       }
     }
   }
 
-  status = loom_bytecode_reader_normalize_diagnosed_error(
-      status, reader.result.error_count);
+  iree_status_t status = loom_bytecode_reader_consume_status(&reader.decoder);
   if (iree_status_is_ok(status)) {
     *out_result = reader.result;
   }
@@ -59,6 +58,7 @@ iree_status_t loom_bytecode_read_index(
   IREE_ASSERT_ARGUMENT(out_metadata);
   *out_metadata = (loom_bytecode_file_metadata_t){0};
 
+  loom_bytecode_file_metadata_t metadata = {0};
   iree_arena_allocator_t arena;
   iree_arena_initialize(block_pool, &arena);
   loom_bytecode_file_reader_t reader;
@@ -67,28 +67,31 @@ iree_status_t loom_bytecode_read_index(
       options ? options->diagnostic_sink : (loom_diagnostic_sink_t){0},
       &reader);
 
-  iree_status_t status = loom_bytecode_file_reader_validate(&reader);
-  if (iree_status_is_ok(status)) {
-    status = loom_bytecode_file_reader_project_index(&reader, metadata_arena,
-                                                     out_metadata);
+  bool accepted = loom_bytecode_file_reader_validate(&reader);
+  if (accepted) {
+    accepted = loom_bytecode_reader_check_status(
+        &reader.decoder, loom_bytecode_file_reader_project_index(
+                             &reader, metadata_arena, &metadata));
   }
-  if (iree_status_is_ok(status)) {
+  if (accepted) {
     for (iree_host_size_t i = 0; i < reader.module_count; ++i) {
       loom_bytecode_reader_module_view_t module_view;
-      status = loom_bytecode_module_index(
-          &reader, &reader.modules[i], metadata_arena,
-          &out_metadata->modules[i], &module_view);
+      accepted = loom_bytecode_module_index(&reader, &reader.modules[i],
+                                            metadata_arena,
+                                            &metadata.modules[i], &module_view);
       if (i == 0) {
         reader.result.first_module = module_view.summary;
       }
-      if (!iree_status_is_ok(status)) {
+      if (!accepted) {
         break;
       }
     }
   }
 
-  status = loom_bytecode_reader_normalize_diagnosed_error(
-      status, reader.result.error_count);
+  if (accepted) {
+    *out_metadata = metadata;
+  }
+  iree_status_t status = loom_bytecode_reader_consume_status(&reader.decoder);
   if (iree_status_is_ok(status)) {
     *out_result = reader.result;
   }

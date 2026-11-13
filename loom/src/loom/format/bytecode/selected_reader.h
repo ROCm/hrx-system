@@ -23,7 +23,8 @@ typedef struct loom_bytecode_symbol_ordinal_list_t {
   const iree_host_size_t* ordinals;
 } loom_bytecode_symbol_ordinal_list_t;
 
-// Resolves a reached source symbol to a predeclared output-module symbol.
+// Resolves a reached source symbol to a valid predeclared output-module symbol.
+// The compiler-owned resolver reports only infrastructure failures.
 typedef iree_status_t (*loom_bytecode_source_symbol_resolver_fn_t)(
     void* user_data, uint32_t source_symbol_ordinal,
     loom_symbol_ref_t* out_target_symbol_ref);
@@ -45,10 +46,10 @@ typedef struct loom_bytecode_source_symbol_resolver_t {
 // symbol entries, selected bodies, and transitively reached shared-table facts
 // are decoded into the returned ordinary standalone module.
 //
-// Selection shape is validated as an API precondition. Malformed selected
-// payloads follow the same diagnostic, result, and ownership contract as
-// loom_bytecode_read_module_ordinal. Rejected symbol entries and bodies are
-// never read. Output symbol ID |i| corresponds exactly to
+// Module and selection ordinals are produced by the indexed link plan.
+// Malformed selected payloads follow the same diagnostic, result, and ownership
+// contract as loom_bytecode_read_module_ordinal. Rejected symbol entries and
+// bodies are never read. Output symbol ID |i| corresponds exactly to
 // |selection.ordinals[i]|, allowing later source projections to bind the
 // compact module without string lookup. Callers verify the complete
 // materialized module explicitly when required by their boundary.

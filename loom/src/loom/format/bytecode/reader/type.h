@@ -66,7 +66,7 @@ typedef struct loom_bytecode_type_parameters_t {
 } loom_bytecode_type_parameters_t;
 
 // Reads the registered family and bounded present-parameter count.
-iree_status_t loom_bytecode_type_parameters_begin(
+bool loom_bytecode_type_parameters_begin(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, loom_context_t* context,
     const iree_string_view_t* strings, iree_host_size_t string_count,
@@ -74,7 +74,7 @@ iree_status_t loom_bytecode_type_parameters_begin(
 
 // Diagnoses an invalid source name reference or a name outside the remaining
 // descriptor suffix. Kept off the per-parameter decoding path.
-IREE_ATTRIBUTE_COLD iree_status_t loom_bytecode_type_parameters_reject_name(
+IREE_ATTRIBUTE_COLD bool loom_bytecode_type_parameters_reject_name(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_type_parameters_t* parameters, uint64_t name_id,
@@ -82,13 +82,13 @@ IREE_ATTRIBUTE_COLD iree_status_t loom_bytecode_type_parameters_reject_name(
 
 // Reads the next ordered name and returns its descriptor slot. The owning
 // reader consumes the associated attribute kind and value afterward.
-static inline iree_status_t loom_bytecode_type_parameters_next(
+static inline bool loom_bytecode_type_parameters_next(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor,
     loom_bytecode_type_parameters_t* parameters, uint8_t* out_index) {
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t name_id = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_uvarint_inline(decoder, cursor, &name_id));
   if (name_id < parameters->string_count) {
     const iree_string_view_t name = parameters->strings[name_id];
@@ -100,7 +100,7 @@ static inline iree_status_t loom_bytecode_type_parameters_next(
           &descriptor->parameter_descriptors[parameters->next_parameter_index];
       if (iree_string_view_equal(loom_attr_descriptor_name(candidate), name)) {
         *out_index = parameters->next_parameter_index++;
-        return iree_ok_status();
+        return true;
       }
       parameters->missing_required_parameter |=
           !iree_any_bit_set(candidate->flags, LOOM_ATTR_OPTIONAL);
@@ -111,14 +111,14 @@ static inline iree_status_t loom_bytecode_type_parameters_next(
 }
 
 // Diagnoses a required parameter absent from the decoded source slots.
-IREE_ATTRIBUTE_COLD iree_status_t loom_bytecode_type_parameters_reject_missing(
+IREE_ATTRIBUTE_COLD bool loom_bytecode_type_parameters_reject_missing(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_type_parameters_t* parameters);
 
 // Checks required slots after every present value has been consumed, preserving
 // malformed-value precedence over missing-parameter diagnostics.
-static inline iree_status_t loom_bytecode_type_parameters_finish(
+static inline bool loom_bytecode_type_parameters_finish(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor,
     const loom_bytecode_type_parameters_t* parameters) {
@@ -134,7 +134,7 @@ static inline iree_status_t loom_bytecode_type_parameters_finish(
     return loom_bytecode_type_parameters_reject_missing(decoder, cursor,
                                                         parameters);
   }
-  return iree_ok_status();
+  return true;
 }
 
 // State required to materialize a validated type plan into a module.
@@ -158,13 +158,13 @@ typedef struct loom_bytecode_type_materializer_t {
 } loom_bytecode_type_materializer_t;
 
 // Validates a wire kind and maps it to the independent native type kind.
-iree_status_t loom_bytecode_type_decode_kind(
-    loom_bytecode_reader_decoder_t* decoder, uint8_t kind_byte, uint64_t offset,
-    loom_type_kind_t* out_kind);
+bool loom_bytecode_type_decode_kind(loom_bytecode_reader_decoder_t* decoder,
+                                    uint8_t kind_byte, uint64_t offset,
+                                    loom_type_kind_t* out_kind);
 
 // Reads and validates the two target register carrier words shared by static
 // and scoped type records. |type_index| identifies the record in diagnostics.
-iree_status_t loom_bytecode_type_read_register_carrier(
+bool loom_bytecode_type_read_register_carrier(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t type_index,
     uint64_t out_payload[2]);
@@ -174,19 +174,19 @@ iree_status_t loom_bytecode_type_read_register_carrier(
 // read separately by their owning static or scoped reference domain. Register
 // headers describe one child; the static grammar's following presence byte may
 // select an untyped carrier instead. No storage is allocated.
-iree_status_t loom_bytecode_type_read_structural_header(
+bool loom_bytecode_type_read_structural_header(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, loom_type_kind_t kind,
     uint64_t type_index, iree_host_size_t string_count,
     loom_bytecode_structural_type_plan_t* out_plan, uint64_t out_payload[2]);
 
 // Emits a malformed scoped-record diagnostic without constructing native IR.
-iree_status_t loom_bytecode_type_emit_invalid_scoped_record(
+bool loom_bytecode_type_emit_invalid_scoped_record(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, iree_string_view_t reason);
 
 // Validates a static type ordinal or a prior completed scope-local node.
-static inline iree_status_t loom_bytecode_type_validate_completed_reference(
+static inline bool loom_bytecode_type_validate_completed_reference(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t reference,
     iree_host_size_t static_count, uint64_t completed_count) {
@@ -200,18 +200,18 @@ static inline iree_status_t loom_bytecode_type_validate_completed_reference(
     return loom_bytecode_type_emit_invalid_scoped_record(
         decoder, cursor, IREE_SV("unknown_static_type"));
   }
-  return iree_ok_status();
+  return true;
 }
 
 // Opens the bounded extension following a type reference. Static references
 // return an empty cursor without entering the scoped decoder. Otherwise the
 // cursor starts at the first completed-type record and borrows the input bytes.
-static inline iree_status_t loom_bytecode_type_open_scoped_records(
+static inline bool loom_bytecode_type_open_scoped_records(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t reference,
     loom_bytecode_reader_cursor_t* out_records, uint64_t* out_count) {
   uint64_t length = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_uvarint(decoder, cursor, &length));
   if (length == 0) {
     if (reference & 1) {
@@ -221,7 +221,7 @@ static inline iree_status_t loom_bytecode_type_open_scoped_records(
     loom_bytecode_reader_cursor_initialize(NULL, 0, 0, iree_string_view_empty(),
                                            out_records);
     *out_count = 0;
-    return iree_ok_status();
+    return true;
   }
   if (reference != 1) {
     return loom_bytecode_type_emit_invalid_scoped_record(
@@ -229,7 +229,7 @@ static inline iree_status_t loom_bytecode_type_open_scoped_records(
   }
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   iree_const_byte_span_t payload;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_span(decoder, cursor, length, &payload));
   loom_bytecode_reader_cursor_initialize(payload.data, payload.data_length,
                                          offset, IREE_SV("SCOPED_TYPES"),
@@ -240,26 +240,26 @@ static inline iree_status_t loom_bytecode_type_open_scoped_records(
 // Finishes a nonempty extension after its records have completed. Returns the
 // zero-based root ordinal in the enclosing completed-type scope and requires
 // that no bytes remain in the extension.
-static inline iree_status_t loom_bytecode_type_close_scoped_records(
+static inline bool loom_bytecode_type_close_scoped_records(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* records, uint64_t completed_count,
     uint64_t* out_root) {
   uint64_t root = 0;
-  IREE_RETURN_IF_ERROR(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_uvarint(decoder, records, &root));
   if (!root || root > completed_count) {
     return loom_bytecode_type_emit_invalid_scoped_record(decoder, records,
                                                          IREE_SV("root"));
   }
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_expect_empty(
       decoder, records, IREE_SV("SCOPED_TYPES")));
   *out_root = root - 1;
-  return iree_ok_status();
+  return true;
 }
 
 // Decodes a group, tensor, tile, vector, or view after its wire kind. Validates
 // source references against their owning scope/table without constructing IR.
-iree_status_t loom_bytecode_type_read_scoped_shape(
+bool loom_bytecode_type_read_scoped_shape(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, loom_type_kind_t kind,
     uint64_t value_count, iree_host_size_t encoding_count,
@@ -279,7 +279,7 @@ iree_status_t loom_bytecode_type_materialize_structural(
 // canonical output identity. Sparse structural child slots are consumed too.
 // The caller supplies a monotonic prefix after constructing its prior encoding
 // dependencies. Initialize |next_fact| to the plan's first fact before use.
-iree_status_t loom_bytecode_type_materialize_prefix(
+bool loom_bytecode_type_materialize_prefix(
     loom_bytecode_type_materializer_t* materializer,
     iree_host_size_t type_count);
 

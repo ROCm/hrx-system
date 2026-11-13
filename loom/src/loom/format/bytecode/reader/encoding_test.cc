@@ -72,6 +72,7 @@ class BytecodeEncodingTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_bytecode_reader_consume_status(&decoder_));
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&scratch_arena_);
@@ -136,7 +137,7 @@ TEST_F(BytecodeEncodingTest, MaterializesCanonicalTable) {
       .types = &types,
   };
 
-  IREE_ASSERT_OK(
+  ASSERT_TRUE(
       loom_bytecode_encoding_table_materialize(&materializer, &section));
 
   ASSERT_EQ(module_->encodings.count, 1u);
