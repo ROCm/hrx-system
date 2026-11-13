@@ -30,6 +30,7 @@
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/initializer_lists.h"
 #include "loom/import/cxx/source/objects.h"
 #include "loom/import/cxx/source/range_loops.h"
 
@@ -1003,6 +1004,11 @@ bool ControlFlow::initializes_range(cxx::InitDeclaratorAST* declaration) const {
   return range_loops_ && range_loops_->initializes_range(declaration);
 }
 
+const InitializerList* ControlFlow::initializer_list(
+    cxx::BracedInitListAST* source) const {
+  return initializer_lists_ ? initializer_lists_->get(source) : nullptr;
+}
+
 ExitFlow ControlFlow::continues(cxx::StatementAST* statement) const {
   return exits(statement, Continue);
 }
@@ -1042,7 +1048,14 @@ bool ControlFlow::preVisit(cxx::AST* ast) {
 
 void ControlFlow::postVisit(cxx::AST* ast) {
   if (auto* expression = cxx::ast_cast<cxx::ExpressionAST>(ast)) {
-    temporary_origins_.retain(expression, retain_reference_materializations_);
+    auto* list = cxx::ast_cast<cxx::BracedInitListAST>(expression);
+    auto* initialized = list ? initializer_list(list) : nullptr;
+    if (initialized) {
+      temporary_origins_.retain_initializer_list(
+          list, initialized->backing, retain_reference_materializations_);
+    } else {
+      temporary_origins_.retain(expression, retain_reference_materializations_);
+    }
     cxx::Symbol* owner = nullptr;
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
       record_member_binding_read(expression);
@@ -1444,12 +1457,6 @@ void ControlFlow::visit(cxx::ForStatementAST* ast) {
 }
 
 void ControlFlow::visit(cxx::ForRangeStatementAST* ast) {
-  if (cxx::ast_cast<cxx::BracedInitListAST>(ast->rangeInitializer)) {
-    diagnostics_.reject(
-        unit_, ast->rangeInitializer,
-        "braced range initializers require initializer-list backing storage; "
-        "declare an array and iterate over it instead");
-  }
   if (!range_loops_) {
     range_loops_ = std::make_unique<RangeLoops>(unit_);
   }
@@ -4510,6 +4517,15 @@ void ControlFlow::visit(cxx::ConditionExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::BracedInitListAST* ast) {
+  if (unit_.typeTraits().initializer_list_element_type(ast->type)) {
+    if (!initializer_lists_) {
+      initializer_lists_ =
+          std::make_unique<InitializerLists>(unit_, diagnostics_);
+    }
+    auto* backing = initializer_lists_->retain(ast).backing;
+    accept(backing);
+    return;
+  }
   cxx::ASTVisitor::visit(ast);
   if (!ast->implicitElement) {
     return;

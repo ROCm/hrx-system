@@ -33,6 +33,8 @@ namespace loom::cxx_import {
 
 struct DirectOperatorCall;
 class RangeLoops;
+class InitializerLists;
+struct InitializerList;
 
 // Builtin fixed-array selection retained by the owning source traversal.
 // Subscripts preserve written evaluation order, including i[array] syntax.
@@ -267,6 +269,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Ordinary scopes retained from checked range loops during this walk.
   cxx::CompoundStatementAST* range_scope(cxx::ForRangeStatementAST* loop) const;
   bool initializes_range(cxx::InitDeclaratorAST* declaration) const;
+  // Const-array constructions retained for checked initializer-list values.
+  const InitializerList* initializer_list(cxx::BracedInitListAST* source) const;
 
   // Unique bindings mutated under a structured statement, direct for-loop body,
   // or conditional value expression, in encounter order. Includes mutations in
@@ -825,6 +829,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::ForStatementAST*, CountedLoop> counted_;
   // Source adapters allocated only for functions containing range loops.
   std::unique_ptr<RangeLoops> range_loops_;
+  // Backing-array adapters allocated only for functions constructing lists.
+  std::unique_ptr<InitializerLists> initializer_lists_;
   // Sparse path sets retain statements with function or iteration exits.
   std::unordered_map<cxx::StatementAST*, unsigned> paths_;
   // Statements requiring callable exits, including divergent continuations.

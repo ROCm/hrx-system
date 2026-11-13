@@ -2741,6 +2741,34 @@ Temporaries written in explicit element initializers retain their enclosing
 full-expression lifetime. Binding a reference to an element of a temporary
 array extends the lifetime of the complete array.
 
+`std::initializer_list<T>` constructs a const backing array in source order.
+Each element is initialized directly at its final address, including when its
+constructor exposes `this`. A local list initialized from braces, or a local
+reference bound to that temporary list, keeps the array through its scope. A
+list used as a call argument keeps it through that full expression. Copying the
+list copies its nonowning range without extending the array's lifetime.
+Nontrivial elements are destroyed in reverse order:
+
+```cpp
+#include <initializer_list>
+
+static long largest(std::initializer_list<long> values) {
+  long result = *values.begin();
+  for (long value : values) if (result < value) result = value;
+  return result;
+}
+
+long select(long a, long b, long c) { return largest({a, b, c}); }
+```
+
+The list itself stays in SSA as a buffer identity, byte offset, and count (or
+end pointer for caller-provided pointer-pair library layouts). Its elements use
+ordinary private array storage, which standard inlining and promotion can
+eliminate. Scalars, vectors, and records without pointer or reference fields
+are addressable element types. Pointer-containing elements and nested lists
+require reference-bearing object storage and receive a source diagnostic;
+opaque references are never stored as readable pointer bytes.
+
 ### Ordinary overloaded operators
 
 Admitted values can use ordinary member and free operator functions. The C++
@@ -3259,6 +3287,11 @@ The importer embeds `<initializer_list>`, `<stdfloat>`, `<type_traits>`,
 User and system include paths take precedence over the embedded system root. The HIP
 facade maps topology, synchronization, scalar half conversions and math onto
 the Loom vocabulary; it does not load the HIP runtime or a host SDK.
+
+The embedded `<initializer_list>` provides the standard list type and its
+`size`, `begin`, and `end` methods, plus free `std::begin` and `std::end`
+overloads. It supports ordinary list deduction, braced range loops, and
+constant evaluation without additional headers.
 
 The embedded `<type_traits>` provides `std::enable_if` and `std::enable_if_t`,
 including the default `void` result and substitution failure for false

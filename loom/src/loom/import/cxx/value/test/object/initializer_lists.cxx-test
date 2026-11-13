@@ -1,0 +1,42 @@
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// A list carries an opaque backing root, its byte origin, and an element
+// count. The pointed-to array is initialized from source values in order.
+#include <initializer_list>
+unsigned first(unsigned value) {
+  std::initializer_list<unsigned> values{value, 9};
+  return *values.begin();
+}
+unsigned empty() {
+  std::initializer_list<unsigned> values{};
+  return values.size();
+}
+
+// ----
+func.def public @first(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @empty() -> (i32) {
+  %30 = scalar.constant 0 : i32
+  func.return %30 : i32
+}
+
+// ====
+// Constant-evaluated list construction still follows the facade's ordinary
+// constexpr methods and frontend element conversions.
+#include <initializer_list>
+static constexpr unsigned sum(std::initializer_list<unsigned> values) {
+  unsigned result = 0;
+  for (unsigned value : values) result += value;
+  return result;
+}
+static_assert(sum({2u, 5u, 7u}) == 14);
+unsigned converted(unsigned value) {
+  std::initializer_list<unsigned long long> values{value, 1};
+  return static_cast<unsigned>(*values.begin());
+}
+
+// ----
+func.def public @converted(%value: i32) -> (i32) {
+  func.return %value : i32
+}

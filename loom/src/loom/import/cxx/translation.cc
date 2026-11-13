@@ -893,34 +893,43 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
-  void materialize_conditional_temporary(DestructionAction& action) {
-    IREE_ASSERT(!conditional_cleanup_anchors_.empty());
-    IREE_ASSERT(action.value);
-    IREE_ASSERT(!action.storage);
-    IREE_ASSERT(!action.activity);
+  void allocate_temporary_storage(DestructionAction& action) {
     auto saved = loom_builder_save(&builder_);
-    loom_builder_restore(&builder_, conditional_cleanup_anchors_.front());
+    if (!conditional_cleanup_anchors_.empty()) {
+      loom_builder_restore(&builder_, conditional_cleanup_anchors_.front());
+    }
     auto object_allocation = storage_.allocate(
         action.object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0,
         action.source);
-    auto object = storage_.project(object_allocation.pointer,
-                                   action.object_type, action.source);
-    auto* bool_type = unit_.control()->getBoolType();
-    auto activity_allocation = storage_.allocate(
-        bool_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, action.source);
-    StorageAccess activity = {activity_allocation.view, std::nullopt};
-    auto inactive = scalars_.integer(false, LOOM_SCALAR_TYPE_I1,
-                                     locations_.get(action.source));
-    storage_.store(activity, inactive, bool_type, action.source);
-    loom_builder_restore(&builder_, saved);
+    action.storage = storage_.project(object_allocation.pointer,
+                                      action.object_type, action.source);
+    if (!conditional_cleanup_anchors_.empty()) {
+      auto* bool_type = unit_.control()->getBoolType();
+      auto activity_allocation = storage_.allocate(
+          bool_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, action.source);
+      action.activity = StorageAccess{activity_allocation.view, std::nullopt};
+      auto inactive = scalars_.integer(false, LOOM_SCALAR_TYPE_I1,
+                                       locations_.get(action.source));
+      storage_.store(*action.activity, inactive, bool_type, action.source);
+      loom_builder_restore(&builder_, saved);
+    }
+  }
 
-    objects_.store(object, *action.value, action.object_type, action.source);
-    auto active = scalars_.integer(true, LOOM_SCALAR_TYPE_I1,
-                                   locations_.get(action.source));
-    storage_.store(activity, active, bool_type, action.source);
+  void activate_temporary_storage(const DestructionAction& action) {
+    if (action.activity) {
+      auto active = scalars_.integer(true, LOOM_SCALAR_TYPE_I1,
+                                     locations_.get(action.source));
+      storage_.store(*action.activity, active, unit_.control()->getBoolType(),
+                     action.source);
+    }
+  }
+
+  void materialize_temporary_value(DestructionAction& action) {
+    allocate_temporary_storage(action);
+    objects_.store(*action.storage, *action.value, action.object_type,
+                   action.source);
+    activate_temporary_storage(action);
     action.value.reset();
-    action.storage = object;
-    action.activity = activity;
   }
 
   void materialize_conditional_temporaries(size_t mark) {
@@ -929,7 +938,7 @@ class Translator final : private Initialization::Evaluation {
     for (size_t index = mark; index < temporary_destructions_.size(); ++index) {
       auto& action = temporary_destructions_[index];
       if (action && action->value) {
-        materialize_conditional_temporary(*action);
+        materialize_temporary_value(*action);
       }
     }
   }
@@ -950,6 +959,15 @@ class Translator final : private Initialization::Evaluation {
       temporary_results_.erase(found);
     }
     temporary_destructions_[index].reset();
+  }
+
+  void extend_materialized_temporary(size_t index) {
+    auto& action = *temporary_destructions_[index];
+    if (!extends_temporaries_ &&
+        control_->temporary_origins().extended(action.origin)) {
+      active_destructions_.push_back(action);
+      forget_temporary(index);
+    }
   }
 
   Value retain_temporary(cxx::ExpressionAST* expression, Value value,
@@ -1073,29 +1091,14 @@ class Translator final : private Initialization::Evaluation {
     if (temporary) {
       auto& action = *temporary_destructions_[temporary->index];
       if (!action.storage) {
-        if (conditional_cleanup_anchors_.empty()) {
-          auto allocation = storage_.allocate(
-              action.object_type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0,
-              expression);
-          action.storage = storage_.project(allocation.pointer,
-                                            action.object_type, expression);
-          objects_.store(*action.storage, *action.value, action.object_type,
-                         expression);
-          action.value.reset();
-        } else {
-          materialize_conditional_temporary(action);
-        }
+        materialize_temporary_value(action);
       }
       auto storage = *action.storage;
       if (temporary->byte_offset) {
         storage =
             storage_.subobject(storage, temporary->byte_offset, expression);
       }
-      if (!extends_temporaries_ &&
-          control_->temporary_origins().extended(action.origin)) {
-        active_destructions_.push_back(action);
-        forget_temporary(temporary->index);
-      }
+      extend_materialized_temporary(temporary->index);
       return storage;
     }
     auto allocation = storage_.allocate(
@@ -4563,6 +4566,42 @@ class Translator final : private Initialization::Evaluation {
 
   const ArrayCopyInitialization* array_copy(cxx::AST* owner) override {
     return control_->array_copy(owner);
+  }
+
+  const InitializerList* initializer_list(
+      cxx::BracedInitListAST* expression) const override {
+    return control_->initializer_list(expression);
+  }
+
+  Pointer materialize_array(cxx::BracedInitListAST* expression) override {
+    std::optional<DestructionAction> cleanup;
+    StorageProjection storage;
+    if (auto* origin = control_->temporary_origins().result(expression)) {
+      cleanup.emplace(DestructionAction{
+          .destruction = control_->temporary_origins().destruction(origin),
+          .object_type = expression->type,
+          .origin = origin,
+          .source = expression,
+      });
+      allocate_temporary_storage(*cleanup);
+      storage = *cleanup->storage;
+    } else {
+      auto allocation = storage_.allocate(expression->type,
+                                          LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
+                                          0, expression);
+      storage =
+          storage_.project(allocation.pointer, expression->type, expression);
+    }
+    initialization_.object(storage, expression->type, expression, nullptr,
+                           expression);
+    if (cleanup) {
+      activate_temporary_storage(*cleanup);
+      auto index = temporary_destructions_.size();
+      temporary_results_.insert_or_assign(cleanup->origin, index);
+      temporary_destructions_.push_back(std::move(*cleanup));
+      extend_materialized_temporary(index);
+    }
+    return storage.pointer;
   }
 
   void call_copy_constructor(
