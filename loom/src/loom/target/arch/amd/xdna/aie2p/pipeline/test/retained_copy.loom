@@ -4,12 +4,13 @@
 // The scalar reference observes all input/output guards and unmodified tails.
 aie2p.target<array> @array_target
 
-func.def inline @ingress(%input: buffer, %incoming: channel<tile<16xi32>>, %records: index) {
+func.def inline @ingress(%input: buffer, %incoming: channel<tile<16xi32>>, %records: index, %relative: offset) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %bytes = index.constant 64 : offset
   scf.for %record = [%begin to %records step %step] {
-    %offset = index.scale %record, %bytes : index, offset -> offset
+    %base = index.scale %record, %bytes : index, offset -> offset
+    %offset = index.add %base, %relative : offset
     %external = buffer.view %input[%offset] : buffer -> view<16xi32>
     %write, %payload = channel.reserve %incoming : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
     %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
@@ -108,7 +109,7 @@ pipeline.def<kernel> @distributed_retained_batch(%cache_row: index, %batches: in
   %right_slots = buffer.view %right_storage[%origin] : buffer -> view<1x16xi32>
   %right = channel.bind<fifo> %right_slots, %single_slot : view<1x16xi32>, index -> channel<tile<16xi32>>
   pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
-    func.call @ingress(%input, %prepared, %records) : (buffer, channel<tile<16xi32>>, index)
+    func.call @ingress(%input, %prepared, %records, %origin) : (buffer, channel<tile<16xi32>>, index, offset)
   }
   pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
     func.call @retain_copy(%prepared, %batch, %records) : (channel<tile<16xi32>>, channel<tile<16xi32>>, index)
@@ -121,6 +122,66 @@ pipeline.def<kernel> @distributed_retained_batch(%cache_row: index, %batches: in
   }
   pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
     func.call @egress(%right, %output, %right_offset, %copies) : (channel<tile<16xi32>>, buffer, offset, index)
+  }
+}
+
+// Each complete preparation child retires before the retained cache is read.
+// The same root storage and DMA paths then accept a second, different batch.
+pipeline.def<kernel> @distributed_retained_phases(%cache_row: index) run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %batches = index.constant 2 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epoch_output_bytes = index.constant 384 : offset
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %batch_bytes = index.constant 128 : offset
+  %right_offset = index.constant 768 : offset
+  %single_slot = index.constant 1 : index
+  %batch_records = index.constant 2 : index
+  %cache_pool = pipeline.memory<workgroup>[0, %cache_row] : pool
+  %first_core = pipeline.memory<workgroup>[0, 2] : pool
+  %second_core = pipeline.memory<workgroup>[1, 2] : pool
+  %replays = index.constant 3 : index
+  %copies = index.mul %batch_records, %replays : index
+  %prepared_memory = buffer.alloca<workgroup> pool(%first_core) align(64) %batch_bytes : buffer
+  %prepared_slots = buffer.view %prepared_memory[%origin] : buffer -> view<2x16xi32>
+  %prepared = channel.bind<fifo> %prepared_slots, %batch_records : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %batch_storage = buffer.alloca<workgroup> pool(%cache_pool) align(64) %batch_bytes : buffer
+  %batch_slots = buffer.view %batch_storage[%origin] : buffer -> view<2x16xi32>
+  %batch = channel.bind<fifo> %batch_slots, %batch_records : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %left_storage = buffer.alloca<workgroup> pool(%first_core) align(64) %bytes : buffer
+  %left_slots = buffer.view %left_storage[%origin] : buffer -> view<1x16xi32>
+  %left = channel.bind<fifo> %left_slots, %single_slot : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %right_storage = buffer.alloca<workgroup> pool(%second_core) align(64) %bytes : buffer
+  %right_slots = buffer.view %right_storage[%origin] : buffer -> view<1x16xi32>
+  %right = channel.bind<fifo> %right_slots, %single_slot : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.serial {
+    scf.for %epoch = [%begin to %batches step %step] {
+      %input_offset = index.scale %epoch, %batch_bytes : index, offset -> offset
+      %left_offset = index.scale %epoch, %epoch_output_bytes : index, offset -> offset
+      %second_offset = index.add %left_offset, %right_offset : offset
+      pipeline.concurrent {
+        pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+          func.call @ingress(%input, %prepared, %batch_records, %input_offset) : (buffer, channel<tile<16xi32>>, index, offset)
+        }
+        pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+          func.call @retain_copy(%prepared, %batch, %batch_records) : (channel<tile<16xi32>>, channel<tile<16xi32>>, index)
+        }
+      }
+      pipeline.concurrent {
+        pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+          func.call @distribute(%batch, %left, %right, %step) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, index)
+        }
+        pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+          func.call @egress(%left, %output, %left_offset, %copies) : (channel<tile<16xi32>>, buffer, offset, index)
+        }
+        pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+          func.call @egress(%right, %output, %second_offset, %copies) : (channel<tile<16xi32>>, buffer, offset, index)
+        }
+      }
+    }
   }
 }
 
@@ -240,6 +301,46 @@ check.scenario public @repeated_core_copy {
     %output_storage = check.generate.fill value(-9999) : tensor<416xi32>
     %output = check.tensor.view %output_storage offset(64) : tensor<416xi32> -> tensor<384xi32>
     check.compare<@repeated_core, @reference_repeated>(%input, %output) : (tensor<64xi32>, tensor<384xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<96xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<416xi32>
+    }
+  }
+  check.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @phased_sram() run(%input: buffer, %output: buffer) {
+  %cache_row = index.constant 1 : index
+  pipeline.compose @distributed_retained_phases[%cache_row](%input, %output) : [index](buffer, buffer)
+}
+
+check.scenario public @phased_sram_copy {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<96xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<96xi32> -> tensor<64xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<416xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<416xi32> -> tensor<384xi32>
+    check.compare<@phased_sram, @reference_repeated>(%input, %output) : (tensor<64xi32>, tensor<384xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<96xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<416xi32>
+    }
+  }
+  check.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @phased_core() run(%input: buffer, %output: buffer) {
+  %cache_row = index.constant 2 : index
+  pipeline.compose @distributed_retained_phases[%cache_row](%input, %output) : [index](buffer, buffer)
+}
+
+check.scenario public @phased_core_copy {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<96xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<96xi32> -> tensor<64xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<416xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<416xi32> -> tensor<384xi32>
+    check.compare<@phased_core, @reference_repeated>(%input, %output) : (tensor<64xi32>, tensor<384xi32>) -> () {
       check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<96xi32>
       check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<416xi32>
     }

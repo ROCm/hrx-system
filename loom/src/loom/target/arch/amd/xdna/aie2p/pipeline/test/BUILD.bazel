@@ -20,6 +20,7 @@ loom_check_test_suite(
     srcs = [
         "external_metadata.loom-test",
         "packet_iterator_constraints.loom-test",
+        "phased_controller.loom-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/arch:aie2p"]),
 )

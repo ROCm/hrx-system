@@ -1305,20 +1305,19 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
         iree_host_size_t engine = cursor == UINT32_MAX
                                       ? IREE_HOST_SIZE_MAX
                                       : context->core_engines[cursor];
-        // An autonomous distributor has no instruction cursor owner. Its
-        // compute-memory endpoint is controlled by that tile's core.
-        if (engine == IREE_HOST_SIZE_MAX &&
-            endpoint->tile->facts->kind == LOOM_XDNA_TILE_KIND_COMPUTE) {
-          engine = (iree_host_size_t)(endpoint->tile - context->tiles);
+        // Autonomous endpoints have no instruction cursor owner. Compute
+        // memory uses its local core; SRAM uses the distributor's placement.
+        // Both still require a participating core in this complete phase.
+        if (engine == IREE_HOST_SIZE_MAX) {
+          const loom_aie2p_native_tile_t* controller_tile =
+              endpoint->tile->facts->kind == LOOM_XDNA_TILE_KIND_COMPUTE
+                  ? endpoint->tile
+                  : context->workers[i].tile;
+          engine = (iree_host_size_t)(controller_tile - context->tiles);
         }
-        iree_host_size_t controller =
-            engine == IREE_HOST_SIZE_MAX
-                ? IREE_HOST_SIZE_MAX
-                : loom_pipeline_participants_worker(
-                      context->execution.invocations[invocation->ordinal],
-                      engine);
-        if (controller == IREE_HOST_SIZE_MAX && engine != IREE_HOST_SIZE_MAX &&
-            invocation->schedule) {
+        iree_host_size_t controller = loom_pipeline_participants_worker(
+            context->execution.invocations[invocation->ordinal], engine);
+        if (controller == IREE_HOST_SIZE_MAX && invocation->schedule) {
           controller = loom_pipeline_participants_worker(
               context->execution.invocations[invocation->parent->ordinal],
               engine);

@@ -1,0 +1,54 @@
+// RUN: emit source-low @missing_controller target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 output=low
+
+// An SRAM distributor's placement needs a real instruction participant in its
+// complete child. The preceding child's core cannot execute this boundary.
+pipeline.def<kernel> public @missing_controller() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %core = pipeline.memory<workgroup>[0, 2] : pool
+  %sram = pipeline.memory<workgroup>[0, 1] : pool
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %capacity = index.constant 1 : index
+  %prepared_memory = buffer.alloca<workgroup> pool(%core) align(64) %record_bytes : buffer
+  %cache_memory = buffer.alloca<workgroup> pool(%sram) align(64) %record_bytes : buffer
+  %result_memory = buffer.alloca<workgroup> pool(%core) align(64) %record_bytes : buffer
+  %prepared_slots = buffer.view %prepared_memory[%origin] : buffer -> view<1x16xi32>
+  %cache_slots = buffer.view %cache_memory[%origin] : buffer -> view<1x16xi32>
+  %result_slots = buffer.view %result_memory[%origin] : buffer -> view<1x16xi32>
+  %prepared = channel.bind<fifo> %prepared_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %cache = channel.bind<fifo> %cache_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %result = channel.bind<fifo> %result_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.serial {
+    pipeline.concurrent {
+      pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+        %write, %payload = channel.reserve %prepared : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+        %values = vector.splati 7 : vector<16xi32>
+        vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+        channel.publish %write : write<tile<16xi32>>
+      }
+      pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+        %read, %source = channel.acquire %prepared : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+        %write, %destination = channel.reserve %cache : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+        channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+      }
+    }
+    pipeline.concurrent {
+      pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+        // ERROR@+1: XDNA/051 {requirement="a producer and each receiver controlled by the complete child or its concurrent parent invocation"}
+        %read, %source = channel.acquire %cache : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+        %keep, %copy = channel.fanout %read : read<tile<16xi32>> -> (read<tile<16xi32>>, read<tile<16xi32>>)
+        %write, %destination = channel.reserve %result : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+        channel.copy %copy -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+        channel.release %keep : read<tile<16xi32>>
+      }
+      pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+        %read, %payload = channel.acquire %result : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+        %destination = buffer.view %output[%origin] : buffer -> view<16xi32>
+        %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+        %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+        kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+        channel.release %read : read<tile<16xi32>>
+      }
+    }
+  }
+}
