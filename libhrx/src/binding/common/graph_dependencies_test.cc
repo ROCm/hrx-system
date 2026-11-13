@@ -132,7 +132,8 @@ TEST(GraphDependenciesTest, WideDependenciesSurviveRemovalRenumberingAndClone) {
       auto* join = nodes[i];
       std::vector<uint32_t> source_ids;
       for (uint32_t j = 0; j < join->dependency_count; ++j) {
-        source_ids.push_back(join->dependencies[j]->clone_source_node_index);
+        source_ids.push_back(iree_hal_streaming_graph_node_dependencies(join)[j]
+                                 ->clone_source_node_index);
       }
       for (auto* edge = iree_hal_streaming_graph_additional_dependencies(join);
            edge; edge = edge->next) {

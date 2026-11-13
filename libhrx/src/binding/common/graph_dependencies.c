@@ -79,7 +79,7 @@ static bool iree_hal_streaming_graph_dependency_exists(
   }
   *out_predecessor_count = to_node->dependency_count;
   for (uint32_t i = 0; i < to_node->dependency_count; ++i) {
-    if (to_node->dependencies[i] == from_node) {
+    if (iree_hal_streaming_graph_node_dependencies(to_node)[i] == from_node) {
       return true;
     }
   }
@@ -138,7 +138,9 @@ static iree_status_t iree_hal_streaming_graph_prepare_dependency_index(
   } else {
     for (uint32_t i = 0; i < node->dependency_count; ++i) {
       iree_hal_streaming_graph_dependency_index_insert(
-          index, node->dependencies[i]->clone_source_node_index + 1);
+          index, iree_hal_streaming_graph_node_dependencies(node)[i]
+                         ->clone_source_node_index +
+                     1);
     }
     for (const iree_hal_streaming_graph_dependency_t* edge = index->head; edge;
          edge = edge->next) {
@@ -464,10 +466,12 @@ static void iree_hal_streaming_graph_remove_dependency_pair(
   if (index && !index->count) {
     iree_hal_streaming_graph_release_dependency_index(to);
   }
+  iree_hal_streaming_graph_node_t** dependencies =
+      iree_hal_streaming_graph_node_dependencies(to);
   for (uint32_t i = 0; i < to->dependency_count; ++i) {
-    if (to->dependencies[i] == from) {
-      memmove(to->dependencies + i, to->dependencies + i + 1,
-              (--to->dependency_count - i) * sizeof(to->dependencies[0]));
+    if (dependencies[i] == from) {
+      memmove(dependencies + i, dependencies + i + 1,
+              (--to->dependency_count - i) * sizeof(dependencies[0]));
       return;
     }
   }
@@ -522,11 +526,12 @@ void iree_hal_streaming_graph_remove_dependency_refs(
       if (index && !index->count) {
         iree_hal_streaming_graph_release_dependency_index(existing);
       }
+      iree_hal_streaming_graph_node_t** dependencies =
+          iree_hal_streaming_graph_node_dependencies(existing);
       for (uint32_t j = 0; j < existing->dependency_count; ++j) {
-        if (existing->dependencies[j] == node) {
-          memmove(existing->dependencies + j, existing->dependencies + j + 1,
-                  (--existing->dependency_count - j) *
-                      sizeof(existing->dependencies[0]));
+        if (dependencies[j] == node) {
+          memmove(dependencies + j, dependencies + j + 1,
+                  (--existing->dependency_count - j) * sizeof(dependencies[0]));
           break;
         }
       }

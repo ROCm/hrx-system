@@ -228,118 +228,6 @@ typedef struct iree_hal_streaming_graph_memory_claim_t {
   iree_hal_streaming_graph_t* graph;
 } iree_hal_streaming_graph_memory_claim_t;
 
-static iree_status_t iree_hal_streaming_graph_record_memcpy_node(
-    iree_hal_command_buffer_t* command_buffer,
-    const iree_hal_streaming_graph_memcpy_node_attrs_t* attrs) {
-  const iree_device_size_t width =
-      attrs->execution_extent_width
-          ? attrs->execution_extent_width
-          : (attrs->hip_extent_width ? attrs->hip_extent_width : attrs->size);
-  const iree_device_size_t height =
-      attrs->execution_extent_height
-          ? attrs->execution_extent_height
-          : (attrs->hip_extent_height ? attrs->hip_extent_height : 1);
-  const iree_device_size_t depth =
-      attrs->execution_extent_depth
-          ? attrs->execution_extent_depth
-          : (attrs->hip_extent_depth ? attrs->hip_extent_depth : 1);
-  if (width == 0 || height == 0 || depth == 0) {
-    return iree_ok_status();
-  }
-
-  const iree_device_size_t src_pitch =
-      attrs->execution_src_pitch
-          ? attrs->execution_src_pitch
-          : (attrs->hip_src_pitch ? attrs->hip_src_pitch : width);
-  const iree_device_size_t dst_pitch =
-      attrs->execution_dst_pitch
-          ? attrs->execution_dst_pitch
-          : (attrs->hip_dst_pitch ? attrs->hip_dst_pitch : width);
-  const iree_device_size_t src_rows_per_slice =
-      attrs->execution_src_ysize
-          ? attrs->execution_src_ysize
-          : (attrs->hip_src_ysize ? attrs->hip_src_ysize : height);
-  const iree_device_size_t dst_rows_per_slice =
-      attrs->execution_dst_ysize
-          ? attrs->execution_dst_ysize
-          : (attrs->hip_dst_ysize ? attrs->hip_dst_ysize : height);
-
-  iree_device_size_t total_size = 0;
-  iree_device_size_t src_slice_pitch = 0;
-  iree_device_size_t dst_slice_pitch = 0;
-  if (IREE_UNLIKELY(
-          !iree_device_size_checked_mul(width, height, &total_size) ||
-          !iree_device_size_checked_mul(total_size, depth, &total_size) ||
-          !iree_device_size_checked_mul(src_pitch, src_rows_per_slice,
-                                        &src_slice_pitch) ||
-          !iree_device_size_checked_mul(dst_pitch, dst_rows_per_slice,
-                                        &dst_slice_pitch))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "graph memcpy node geometry overflows");
-  }
-
-  const bool compact_layout = src_pitch == width && dst_pitch == width &&
-                              src_rows_per_slice == height &&
-                              dst_rows_per_slice == height;
-  if (compact_layout) {
-    if (attrs->src_ref.buffer == attrs->dst_ref.buffer &&
-        attrs->src_ref.offset == attrs->dst_ref.offset) {
-      return iree_ok_status();
-    }
-    return iree_hal_command_buffer_copy_buffer(
-        command_buffer,
-        iree_hal_streaming_convert_range_buffer_ref(attrs->src_ref, total_size),
-        iree_hal_streaming_convert_range_buffer_ref(attrs->dst_ref, total_size),
-        attrs->flags);
-  }
-
-  for (iree_device_size_t z = 0; z < depth; ++z) {
-    iree_device_size_t src_slice_offset = 0;
-    iree_device_size_t dst_slice_offset = 0;
-    if (IREE_UNLIKELY(!iree_device_size_checked_mul(z, src_slice_pitch,
-                                                    &src_slice_offset) ||
-                      !iree_device_size_checked_mul(z, dst_slice_pitch,
-                                                    &dst_slice_offset))) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "graph memcpy slice offset overflows");
-    }
-    for (iree_device_size_t y = 0; y < height; ++y) {
-      iree_device_size_t src_row_offset = 0;
-      iree_device_size_t dst_row_offset = 0;
-      iree_device_size_t src_offset = 0;
-      iree_device_size_t dst_offset = 0;
-      if (IREE_UNLIKELY(
-              !iree_device_size_checked_mul(y, src_pitch, &src_row_offset) ||
-              !iree_device_size_checked_mul(y, dst_pitch, &dst_row_offset) ||
-              !iree_device_size_checked_add(src_slice_offset, src_row_offset,
-                                            &src_offset) ||
-              !iree_device_size_checked_add(dst_slice_offset, dst_row_offset,
-                                            &dst_offset) ||
-              !iree_device_size_checked_add(attrs->src_ref.offset, src_offset,
-                                            &src_offset) ||
-              !iree_device_size_checked_add(attrs->dst_ref.offset, dst_offset,
-                                            &dst_offset))) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "graph memcpy row offset overflows");
-      }
-      if (attrs->src_ref.buffer == attrs->dst_ref.buffer &&
-          src_offset == dst_offset) {
-        continue;
-      }
-      iree_hal_streaming_buffer_ref_t src_ref = attrs->src_ref;
-      src_ref.offset = src_offset;
-      iree_hal_streaming_buffer_ref_t dst_ref = attrs->dst_ref;
-      dst_ref.offset = dst_offset;
-      IREE_RETURN_IF_ERROR(iree_hal_command_buffer_copy_buffer(
-          command_buffer,
-          iree_hal_streaming_convert_range_buffer_ref(src_ref, width),
-          iree_hal_streaming_convert_range_buffer_ref(dst_ref, width),
-          attrs->flags));
-    }
-  }
-  return iree_ok_status();
-}
-
 static void iree_hal_streaming_graph_exec_destroy(
     iree_hal_streaming_graph_exec_t* exec);
 static void iree_hal_streaming_graph_exec_release_child_blocks(
@@ -403,9 +291,11 @@ static iree_status_t iree_hal_streaming_graph_memory_acquire_claims(
       iree_hal_streaming_graph_node_t* node = block->nodes[i];
       if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC) {
         IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_memory_acquire_claim(
-            exec, node->attrs.mem_alloc.allocation_owner
-                      ? node->attrs.mem_alloc.allocation_owner
-                      : node->graph));
+            exec,
+            iree_hal_streaming_graph_node_mem_alloc(node)->allocation_owner
+                ? iree_hal_streaming_graph_node_mem_alloc(node)
+                      ->allocation_owner
+                : node->graph));
       }
     }
   }
@@ -862,8 +752,9 @@ iree_status_t iree_hal_streaming_graph_exec_set_event_node_event(
       old_event = block->attrs.event.event;
       block->attrs.event.event = event;
       iree_hal_streaming_event_retain(event);
-      iree_hal_streaming_event_release(node->attrs.event.event);
-      node->attrs.event.event = event;
+      iree_hal_streaming_event_release(
+          iree_hal_streaming_graph_node_event(node)->event);
+      iree_hal_streaming_graph_node_event(node)->event = event;
       found = true;
       break;
     }
@@ -940,20 +831,28 @@ static iree_status_t iree_hal_streaming_graph_allocate_host_call_block(
   attrs->callback = callback;
   attrs->user_data = user_data;
   attrs->user_data_size =
-      source_node ? source_node->attrs.host.user_data_size : 0;
-  attrs->resource = source_node ? source_node->attrs.host.resource : NULL;
+      source_node
+          ? iree_hal_streaming_graph_node_host(source_node)->user_data_size
+          : 0;
+  attrs->resource =
+      source_node ? iree_hal_streaming_graph_node_host(source_node)->resource
+                  : NULL;
   if (attrs->resource) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0,
         iree_hal_resource_set_insert(exec->resource_set, 1, &attrs->resource));
   }
-  if (source_node && source_node->attrs.host.user_data_size > 0 && user_data) {
+  if (source_node &&
+      iree_hal_streaming_graph_node_host(source_node)->user_data_size > 0 &&
+      user_data) {
     void* copied_data = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_arena_allocate(&exec->arena_allocator,
-                                source_node->attrs.host.user_data_size,
-                                (void**)&copied_data));
-    memcpy(copied_data, user_data, source_node->attrs.host.user_data_size);
+        z0, iree_arena_allocate(
+                &exec->arena_allocator,
+                iree_hal_streaming_graph_node_host(source_node)->user_data_size,
+                (void**)&copied_data));
+    memcpy(copied_data, user_data,
+           iree_hal_streaming_graph_node_host(source_node)->user_data_size);
     attrs->user_data = copied_data;
   }
   attrs->flags = flags;
@@ -1148,8 +1047,26 @@ static iree_status_t iree_hal_streaming_graph_allocate_child_graph_block(
   return status;
 }
 
-static iree_status_t iree_hal_streaming_graph_record_dependency_barrier(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_barrier_flags_t flags) {
+// Helper to record nodes from a partition into a command buffer.
+static iree_status_t iree_hal_streaming_graph_record_partition(
+    iree_hal_streaming_graph_exec_t* exec, const hrx_graph_schedule_t* schedule,
+    uint32_t node_start_index, uint32_t node_count, uint8_t stream_id,
+    iree_hal_command_buffer_t* command_buffer) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Begin recording command buffer.
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_command_buffer_begin(command_buffer));
+
+  // Scope the partition into a debug group.
+  // TODO: propagate graph information (name, origin, etc).
+  const iree_string_view_t label_name = iree_make_cstring_view("tbd_partition");
+  const iree_hal_label_location_t* location = NULL;
+  const iree_hal_label_color_t label_color = iree_hal_label_color_unspecified();
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_command_buffer_begin_debug_group(command_buffer, label_name,
+                                                    label_color, location));
+
   // A dependency orders both command execution and memory visibility. Graph
   // nodes can alternate between dispatches, transfers, and atomics, so make
   // writes from any operation class available to reads by any class.
@@ -1174,143 +1091,19 @@ static iree_status_t iree_hal_streaming_graph_record_dependency_barrier(
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
                            IREE_HAL_EXECUTION_STAGE_TRANSFER |
                            IREE_HAL_EXECUTION_STAGE_ATOMIC,
-      .flags = flags,
       .memory_barrier_count = 1,
       .memory_barriers = &memory_barrier,
   };
-  return iree_hal_command_buffer_barrier(command_buffer, &execution_barrier);
-}
-
-// Helper to record nodes from a partition into a command buffer.
-static iree_status_t iree_hal_streaming_graph_record_partition(
-    iree_hal_streaming_graph_exec_t* exec, const hrx_graph_schedule_t* schedule,
-    uint32_t node_start_index, uint32_t node_count, uint8_t stream_id,
-    iree_hal_command_buffer_t* command_buffer) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Begin recording command buffer.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_command_buffer_begin(command_buffer));
-
-  // Scope the partition into a debug group.
-  // TODO: propagate graph information (name, origin, etc).
-  const iree_string_view_t label_name = iree_make_cstring_view("tbd_partition");
-  const iree_hal_label_location_t* location = NULL;
-  const iree_hal_label_color_t label_color = iree_hal_label_color_unspecified();
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_command_buffer_begin_debug_group(command_buffer, label_name,
-                                                    label_color, location));
-
-  iree_status_t status = iree_ok_status();
-  bool release_to_host = false;
-  for (uint32_t i = 0; iree_status_is_ok(status) && i < node_count; ++i) {
-    const uint32_t index = schedule->order[node_start_index + i];
-    const uint8_t flags = schedule->flags[index];
-    if ((flags >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT) != stream_id) {
-      continue;
-    }
-    iree_hal_streaming_graph_node_t* node = schedule->sources[index];
-    if (flags & HRX_GRAPH_ANALYSIS_NODE_BARRIER_BEFORE) {
-      status = iree_hal_streaming_graph_record_dependency_barrier(
-          command_buffer, IREE_HAL_BARRIER_FLAG_NONE);
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-    }
-    switch (node->type) {
-      case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL: {
-        const iree_hal_streaming_graph_kernel_node_attrs_t* attrs =
-            &node->attrs.kernel;
-        iree_hal_streaming_symbol_t* symbol = attrs->symbol;
-        const iree_hal_dispatch_config_t config = {
-            .workgroup_size =
-                {
-                    attrs->block_dim[0],
-                    attrs->block_dim[1],
-                    attrs->block_dim[2],
-                },
-            .workgroup_count =
-                {
-                    attrs->grid_dim[0],
-                    attrs->grid_dim[1],
-                    attrs->grid_dim[2],
-                },
-            .workitem_count =
-                {
-                    attrs->workitem_count[0],
-                    attrs->workitem_count[1],
-                    attrs->workitem_count[2],
-                },
-            .dynamic_workgroup_local_memory = attrs->shared_memory_bytes,
-        };
-        const iree_hal_dispatch_flags_t flags =
-            attrs->bindings.count
-                ? IREE_HAL_DISPATCH_FLAG_NONE
-                : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
-        const iree_hal_dispatch_flags_t exact_flags =
-            (attrs->workitem_count[0] || attrs->workitem_count[1] ||
-             attrs->workitem_count[2])
-                ? IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT
-                : IREE_HAL_DISPATCH_FLAG_NONE;
-        status = iree_hal_command_buffer_dispatch(
-            command_buffer, symbol->executable,
-            iree_hal_executable_function_from_index(symbol->export_ordinal),
-            config, attrs->constants, attrs->bindings, flags | exact_flags);
-        break;
-      }
-      case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY: {
-        const iree_hal_streaming_graph_memcpy_node_attrs_t* attrs =
-            &node->attrs.memcpy;
-        status =
-            iree_hal_streaming_graph_record_memcpy_node(command_buffer, attrs);
-        release_to_host |= attrs->dst_ref.buffer->memory_kind !=
-                           IREE_HAL_STREAMING_MEMORY_KIND_DEVICE;
-        break;
-      }
-      case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET: {
-        const iree_hal_streaming_graph_memset_node_attrs_t* attrs =
-            &node->attrs.memset;
-        iree_device_size_t fill_length = 0;
-        if (IREE_UNLIKELY(!iree_device_size_checked_mul(
-                attrs->pattern_size, attrs->count, &fill_length))) {
-          status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                    "memset node size overflows device size");
-          break;
-        }
-        status = iree_hal_command_buffer_fill_buffer(
-            command_buffer,
-            iree_hal_streaming_convert_range_buffer_ref(attrs->dst_ref,
-                                                        fill_length),
-            &attrs->pattern, attrs->pattern_size, attrs->flags);
-        break;
-      }
-      case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP: {
-        const iree_hal_streaming_graph_batch_mem_op_node_attrs_t* attrs =
-            &node->attrs.batch_mem_op;
-        status = iree_hal_streaming_command_buffer_append_value_operations(
-            command_buffer, attrs->operation_count, attrs->operations,
-            IREE_HAL_EXECUTION_STAGE_DISPATCH |
-                IREE_HAL_EXECUTION_STAGE_TRANSFER |
-                IREE_HAL_EXECUTION_STAGE_ATOMIC,
-            IREE_HAL_EXECUTION_STAGE_ATOMIC);
-        break;
-      }
-      default: {
-        // Non-recordable nodes shouldn't be here.
-        status = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "non-recordable node type %d in recordable partition",
-            (int)node->type);
-        break;
-      }
-    }
-  }
-
-  if (iree_status_is_ok(status) && release_to_host) {
-    // Publish all registered-host destinations before this partition signals
-    // completion or releases a dependent CPU graph node.
-    status = iree_hal_streaming_graph_record_dependency_barrier(
-        command_buffer, IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE);
+  iree_hal_barrier_flags_t release_flags = IREE_HAL_BARRIER_FLAG_NONE;
+  iree_status_t status = hrx_graph_record_commands(
+      schedule, node_start_index, node_count, stream_id, &execution_barrier,
+      command_buffer, &release_flags);
+  if (iree_status_is_ok(status) && release_flags) {
+    // Publish registered-host destinations before signaling completion or
+    // releasing a dependent CPU graph node.
+    iree_hal_barrier_t release_barrier = execution_barrier;
+    release_barrier.flags = release_flags;
+    status = iree_hal_command_buffer_barrier(command_buffer, &release_barrier);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end_debug_group(command_buffer);
@@ -1341,9 +1134,6 @@ static iree_status_t iree_hal_streaming_graph_compile_block(
     const uint32_t first_index = schedule->order[partition->start_index];
     const uint8_t kind =
         schedule->flags[first_index] & HRX_GRAPH_ANALYSIS_NODE_KIND_MASK;
-    iree_hal_streaming_graph_node_t* first_node =
-        schedule->sources[first_index];
-    const iree_hal_streaming_graph_node_type_t type = first_node->type;
     if (kind == HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_graph_allocate_execute_block(
@@ -1354,59 +1144,38 @@ static iree_status_t iree_hal_streaming_graph_compile_block(
                   exec, schedule, partition->start_index, partition->count,
                   plan->stream_index, block->attrs.execute.command_buffer));
     } else {
+      iree_hal_streaming_graph_node_t* first_node =
+          schedule->sources[first_index];
+      const iree_hal_streaming_graph_node_type_t type = first_node->type;
       if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL) {
         // Host call gets its own block.
         iree_hal_streaming_graph_node_t* node = first_node;
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_streaming_graph_allocate_host_call_block(
-                    exec, plan->dependencies, node->attrs.host.callback,
-                    node->attrs.host.user_data, node,
+                    exec, plan->dependencies,
+                    iree_hal_streaming_graph_node_host(node)->callback,
+                    iree_hal_streaming_graph_node_host(node)->user_data, node,
                     IREE_HAL_HOST_CALL_FLAG_NONE, &block));
       } else if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL) {
         iree_hal_streaming_graph_node_t* node = first_node;
         const iree_hal_streaming_graph_kernel_node_attrs_t* attrs =
-            &node->attrs.kernel;
-        const iree_hal_dispatch_config_t config = {
-            .workgroup_size =
-                {
-                    attrs->block_dim[0],
-                    attrs->block_dim[1],
-                    attrs->block_dim[2],
-                },
-            .workgroup_count =
-                {
-                    attrs->grid_dim[0],
-                    attrs->grid_dim[1],
-                    attrs->grid_dim[2],
-                },
-            .workitem_count =
-                {
-                    attrs->workitem_count[0],
-                    attrs->workitem_count[1],
-                    attrs->workitem_count[2],
-                },
-            .dynamic_workgroup_local_memory = attrs->shared_memory_bytes,
-        };
-        iree_hal_dispatch_flags_t flags =
-            attrs->cooperative ? IREE_HAL_DISPATCH_FLAG_COOPERATIVE
-                               : IREE_HAL_DISPATCH_FLAG_NONE;
-        if (attrs->bindings.count == 0) {
-          flags |= IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
-        }
-        if (attrs->workitem_count[0] || attrs->workitem_count[1] ||
-            attrs->workitem_count[2]) {
-          flags |= IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
-        }
+            iree_hal_streaming_graph_node_kernel(node);
+        const hrx_command_dispatch_t* dispatch = &attrs->command.dispatch;
+        const iree_hal_dispatch_flags_t flags =
+            dispatch->flags |
+            (attrs->cooperative ? IREE_HAL_DISPATCH_FLAG_COOPERATIVE : 0);
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, iree_hal_streaming_graph_allocate_dispatch_block(
-                    exec, plan->dependencies, attrs->symbol->executable,
-                    attrs->symbol->export_ordinal, config, attrs->constants,
-                    attrs->bindings, flags, &block));
+            z0,
+            iree_hal_streaming_graph_allocate_dispatch_block(
+                exec, plan->dependencies, dispatch->executable,
+                dispatch->export_ordinal, hrx_command_dispatch_config(dispatch),
+                dispatch->constants, dispatch->bindings, flags, &block));
       } else if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH) {
         iree_hal_streaming_graph_node_t* node = first_node;
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_streaming_graph_allocate_child_graph_block(
-                    exec, plan->dependencies, node->attrs.child_graph.graph,
+                    exec, plan->dependencies,
+                    iree_hal_streaming_graph_node_child_graph(node)->graph,
                     &block));
       } else {
         iree_hal_streaming_graph_node_t* node = first_node;
@@ -1422,8 +1191,9 @@ static iree_status_t iree_hal_streaming_graph_compile_block(
                            : IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_MEMORY_FREE,
                   plan->dependencies, &block));
           block->attrs.memory.allocation =
-              allocate ? node->attrs.mem_alloc.allocation
-                       : node->attrs.mem_free.allocation;
+              allocate
+                  ? iree_hal_streaming_graph_node_mem_alloc(node)->allocation
+                  : iree_hal_streaming_graph_node_mem_free(node)->allocation;
           block->attrs.memory.flags =
               allocate ? IREE_HAL_STREAMING_GRAPH_ALLOCATION_FLAG_ALLOCATE
                        : IREE_HAL_STREAMING_GRAPH_ALLOCATION_FLAG_NONE;
@@ -1445,9 +1215,10 @@ static iree_status_t iree_hal_streaming_graph_compile_block(
                   ? IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD
                   : IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT;
           IREE_RETURN_AND_END_ZONE_IF_ERROR(
-              z0, iree_hal_streaming_graph_allocate_event_block(
-                      exec, block_type, plan->dependencies, node,
-                      node->attrs.event.event, &block));
+              z0,
+              iree_hal_streaming_graph_allocate_event_block(
+                  exec, block_type, plan->dependencies, node,
+                  iree_hal_streaming_graph_node_event(node)->event, &block));
         }
       }
     }
@@ -2179,7 +1950,8 @@ iree_status_t iree_hal_streaming_graph_exec_set_child_graph(
     iree_hal_streaming_graph_exec_unlock(exec);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
   }
-  iree_hal_streaming_graph_t* old_child_graph = node->attrs.child_graph.graph;
+  iree_hal_streaming_graph_t* old_child_graph =
+      iree_hal_streaming_graph_node_child_graph(node)->graph;
   iree_hal_streaming_graph_t* replacement = NULL;
   iree_status_t status = iree_hal_streaming_graph_validate_child_graph(
       exec->source_graph, child_graph);
@@ -2201,10 +1973,10 @@ iree_status_t iree_hal_streaming_graph_exec_set_child_graph(
         &replacement);
   }
   if (iree_status_is_ok(status)) {
-    node->attrs.child_graph.graph = replacement;
+    iree_hal_streaming_graph_node_child_graph(node)->graph = replacement;
     status = iree_hal_streaming_graph_exec_rebuild_locked(exec);
     if (!iree_status_is_ok(status)) {
-      node->attrs.child_graph.graph = old_child_graph;
+      iree_hal_streaming_graph_node_child_graph(node)->graph = old_child_graph;
     }
   }
   iree_hal_streaming_graph_exec_unlock(exec);

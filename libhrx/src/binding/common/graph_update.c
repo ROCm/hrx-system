@@ -45,7 +45,8 @@ iree_hal_streaming_graph_update_next_dependency(
   while (cursor->position < cursor->node->dependency_count || cursor->edge) {
     const iree_hal_streaming_graph_node_t* predecessor;
     if (cursor->position < cursor->node->dependency_count) {
-      predecessor = cursor->node->dependencies[cursor->position++];
+      predecessor = iree_hal_streaming_graph_node_dependencies(
+          cursor->node)[cursor->position++];
     } else {
       predecessor = cursor->edge->from;
       cursor->edge = cursor->edge->next;
@@ -147,17 +148,18 @@ static bool iree_hal_streaming_graph_memcpy_update_is_compatible(
     const iree_hal_streaming_graph_memcpy_node_attrs_t* old_attrs,
     const iree_hal_streaming_graph_memcpy_node_attrs_t* new_attrs) {
   return old_attrs->hip_kind == new_attrs->hip_kind &&
-         old_attrs->size == new_attrs->size &&
-         old_attrs->execution_extent_width ==
-             new_attrs->execution_extent_width &&
-         old_attrs->execution_extent_height ==
-             new_attrs->execution_extent_height &&
-         old_attrs->execution_extent_depth ==
-             new_attrs->execution_extent_depth &&
-         old_attrs->execution_dst_pitch == new_attrs->execution_dst_pitch &&
-         old_attrs->execution_src_pitch == new_attrs->execution_src_pitch &&
-         old_attrs->execution_dst_ysize == new_attrs->execution_dst_ysize &&
-         old_attrs->execution_src_ysize == new_attrs->execution_src_ysize &&
+         old_attrs->command.copy.strided == new_attrs->command.copy.strided &&
+         old_attrs->command.copy.length == new_attrs->command.copy.length &&
+         old_attrs->command.row_count == new_attrs->command.row_count &&
+         old_attrs->command.slice_count == new_attrs->command.slice_count &&
+         old_attrs->command.source_row_stride ==
+             new_attrs->command.source_row_stride &&
+         old_attrs->command.target_row_stride ==
+             new_attrs->command.target_row_stride &&
+         old_attrs->command.source_slice_stride ==
+             new_attrs->command.source_slice_stride &&
+         old_attrs->command.target_slice_stride ==
+             new_attrs->command.target_slice_stride &&
          old_attrs->hip_extent_width == new_attrs->hip_extent_width &&
          old_attrs->hip_extent_height == new_attrs->hip_extent_height &&
          old_attrs->hip_extent_depth == new_attrs->hip_extent_depth &&
@@ -172,8 +174,8 @@ static bool iree_hal_streaming_graph_memcpy_update_is_compatible(
 static bool iree_hal_streaming_graph_memset_update_is_compatible(
     const iree_hal_streaming_graph_memset_node_attrs_t* old_attrs,
     const iree_hal_streaming_graph_memset_node_attrs_t* new_attrs) {
-  return old_attrs->pattern_size == new_attrs->pattern_size &&
-         old_attrs->count == new_attrs->count &&
+  return old_attrs->command.pattern_size == new_attrs->command.pattern_size &&
+         old_attrs->command.target.length == new_attrs->command.target.length &&
          old_attrs->hip_width == new_attrs->hip_width &&
          old_attrs->hip_height == new_attrs->hip_height &&
          old_attrs->hip_pitch == new_attrs->hip_pitch;
@@ -249,23 +251,25 @@ static iree_status_t iree_hal_streaming_graph_check_update_pair(
         switch (old_node->type) {
           case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY:
             if (!iree_hal_streaming_graph_memcpy_update_is_compatible(
-                    &old_node->attrs.memcpy, &new_node->attrs.memcpy)) {
+                    iree_hal_streaming_graph_node_memcpy(old_node),
+                    iree_hal_streaming_graph_node_memcpy(new_node))) {
               *out_result =
                   IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_PARAMETERS_CHANGED;
             }
             break;
           case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET:
             if (!iree_hal_streaming_graph_memset_update_is_compatible(
-                    &old_node->attrs.memset, &new_node->attrs.memset)) {
+                    iree_hal_streaming_graph_node_memset(old_node),
+                    iree_hal_streaming_graph_node_memset(new_node))) {
               *out_result =
                   IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_PARAMETERS_CHANGED;
             }
             break;
           case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH:
             status = iree_hal_streaming_graph_check_update(
-                old_node->attrs.child_graph.graph,
-                new_node->attrs.child_graph.graph, arena, out_error_node,
-                out_result);
+                iree_hal_streaming_graph_node_child_graph(old_node)->graph,
+                iree_hal_streaming_graph_node_child_graph(new_node)->graph,
+                arena, out_error_node, out_result);
             break;
           default:
             break;

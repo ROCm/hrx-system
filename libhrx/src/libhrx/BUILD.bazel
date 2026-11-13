@@ -25,6 +25,7 @@ HRX_SRCS = [
     "buffer.c",
     "buffer_table.c",
     "buffer_view.c",
+    "command_recording.c",
     "device.c",
     "device_group.c",
     "event.c",
@@ -53,6 +54,7 @@ HRX_HDRS = [
     "barrier.h",
     "buffer.h",
     "buffer_table.h",
+    "command_recording.h",
     "device.h",
     "device_group.h",
     "event_timestamp.h",
@@ -178,6 +180,18 @@ hrx_cc_test(
 hrx_cc_test(
     name = "stream_test",
     srcs = ["stream_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "command_recording_test",
+    srcs = ["command_recording_test.cc"],
     deps = [
         ":hrx_static",
         "//runtime/src/iree/base",

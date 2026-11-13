@@ -82,7 +82,10 @@ hrx_cc_benchmark(
         "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
         "//libhrx/cts/core:amdgpu_test_data.hpp",
     ],
-    data = ["//libhrx/src/libhrx:hrx"],
+    data = ["//libhrx/src/libhrx:hrx"] + select({
+        "@platforms//os:linux": ["//libhrx/src/binding/hip:amdhip64"],
+        "//conditions:default": [],
+    }),
     env = {"HRX_LIBRARY": "$(rootpath //libhrx/src/libhrx:hrx)"},
     resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
     tags = AMD_GPU_CTS_TAGS,

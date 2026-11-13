@@ -17,8 +17,10 @@
 IREE_FLAG(string, graph_runtime, "hrx",
           "Graph implementation: hrx, hip (HRX frontend), or rocm.");
 IREE_FLAG(string, graph_hip_library, "", "Exact selected libamdhip64 path.");
+IREE_FLAG(string, graph_operation, "dispatch",
+          "Graph operation: dispatch, copy, or fill.");
 IREE_FLAG(int32_t, graph_host_interval, 0,
-          "Insert a host checkpoint after each group of this many dispatches; "
+          "Insert a host checkpoint after each group of this many operations; "
           "zero records one uninterrupted device sequence.");
 
 namespace {
@@ -30,6 +32,35 @@ void Require(bool condition, const char* message) {
     std::fprintf(stderr, "%s\n", message);
     std::abort();
   }
+}
+
+enum class GraphOperation { kDispatch, kCopy, kFill };
+
+GraphOperation ParseGraphOperation() {
+  const std::string operation = FLAG_graph_operation;
+  if (operation == "dispatch") {
+    return GraphOperation::kDispatch;
+  }
+  if (operation == "copy") {
+    return GraphOperation::kCopy;
+  }
+  Require(operation == "fill", "unknown --graph_operation");
+  return GraphOperation::kFill;
+}
+
+// Copy graphs select one of two immutable input banks during updates. All
+// operations write the same output words and share the same verification.
+std::vector<uint32_t> InitialValues(size_t count, GraphOperation operation) {
+  std::vector<uint32_t> values(
+      count * (operation == GraphOperation::kCopy ? 3 : 1), 0);
+  if (operation == GraphOperation::kCopy) {
+    for (uint32_t bias = 0; bias < 2; ++bias) {
+      for (size_t i = 0; i < count; ++i) {
+        values[(bias + 1) * count + i] = kOutputBase + i + bias;
+      }
+    }
+  }
+  return values;
 }
 
 void Check(hrx_status_t status) {
@@ -57,6 +88,8 @@ void Check(hipError_t status) {
 // process. Per-row graphs differ only in node count and output memory class.
 class HrxRuntime {
  public:
+  using GraphType = hrx_graph_t;
+
   HrxRuntime() : api_(HrxLoader::instance()) {
     hrx_runtime_t runtime = nullptr;
     Check(api_.runtime_create(nullptr, api_.host_allocator_system(), &runtime));
@@ -91,7 +124,8 @@ class HrxRuntime {
     char architecture[64] = {};
     Check(api_.device_get_property(device_, HRX_DEVICE_PROPERTY_ARCHITECTURE,
                                    architecture, sizeof(architecture)));
-    label_ = std::string("HRX ") + architecture + " wait=blocking";
+    label_ = std::string("HRX ") + architecture +
+             " wait=blocking operation=" + FLAG_graph_operation;
     const auto image = hrx_cts::FindAmdgpuExecutableTestImage(architecture);
     Require(image.file != nullptr, "no configured HSACO for selected GPU");
     Check(api_.executable_load_data(device_, image.file->data, image.file->size,
@@ -113,6 +147,8 @@ class HrxRuntime {
     host_call_count_ = 0;
     launch_count_ = 0;
     values_.assign(count, 0);
+    const auto initial_values = InitialValues(count, operation_);
+    const size_t allocation_size = initial_values.size() * sizeof(uint32_t);
     hrx_buffer_params_t params = {
         .type = host ? HRX_MEMORY_TYPE_HOST_LOCAL |
                            HRX_MEMORY_TYPE_HOST_COHERENT |
@@ -123,16 +159,16 @@ class HrxRuntime {
                  (host ? HRX_BUFFER_USAGE_MAPPING_PERSISTENT : 0u),
     };
     Check(api_.allocator_allocate_buffer(api_.device_allocator(device_), params,
-                                         count * sizeof(uint32_t), &buffer_));
+                                         allocation_size, &buffer_));
     if (host) {
       void* mapped = nullptr;
       Check(api_.buffer_map(buffer_, HRX_MAP_READ | HRX_MAP_WRITE, 0,
-                            count * sizeof(uint32_t), &mapped));
+                            allocation_size, &mapped));
       mapped_ = static_cast<uint32_t*>(mapped);
-      std::fill_n(mapped_, count, 0);
+      std::copy(initial_values.begin(), initial_values.end(), mapped_);
     } else {
-      Check(api_.synchronous_h2d(transfer_queue_, values_.data(), buffer_, 0,
-                                 count * sizeof(uint32_t)));
+      Check(api_.synchronous_h2d(transfer_queue_, initial_values.data(),
+                                 buffer_, 0, allocation_size));
     }
     value_bias_ = 0;
     BuildGraph(count, 0, &graph_);
@@ -148,9 +184,19 @@ class HrxRuntime {
     value_bias_ = next_bias;
   }
 
-  void Reinstantiate() {
+  void Reinstantiate() { InstallTemplate(graph_); }
+
+  GraphType ConstructTemplate() {
+    hrx_graph_t graph = nullptr;
+    BuildGraph(values_.size(), 0, &graph);
+    return graph;
+  }
+
+  void ReleaseTemplate(GraphType graph) { api_.graph_release(graph); }
+
+  void InstallTemplate(GraphType graph) {
     hrx_graph_exec_t executable = nullptr;
-    Check(api_.graph_instantiate(graph_, dispatch_queue_, 0, &executable));
+    Check(api_.graph_instantiate(graph, dispatch_queue_, 0, &executable));
     api_.graph_exec_release(executable_);
     executable_ = executable;
   }
@@ -205,23 +251,43 @@ class HrxRuntime {
       const uint32_t value = kOutputBase + i + value_bias;
       const hrx_buffer_ref_t binding = {buffer_, i * sizeof(uint32_t),
                                         sizeof(uint32_t)};
-      const hrx_graph_kernel_node_attrs_t attrs = {
-          module_,
-          ordinal_,
-          {{1, 1, 1},
-           {info_.workgroup_size[0], info_.workgroup_size[1],
-            info_.workgroup_size[2]},
-           0},
-          &value,
-          sizeof(value),
-          &binding,
-          1,
-          HRX_DISPATCH_FLAG_NONE,
-      };
       hrx_graph_node_t node = nullptr;
-      Check(api_.graph_add_kernel_node(*out_graph,
-                                       previous ? &previous : nullptr,
-                                       previous ? 1 : 0, &attrs, &node));
+      if (operation_ == GraphOperation::kCopy) {
+        const hrx_graph_copy_buffer_node_attrs_t attrs = {
+            .src = {buffer_, ((value_bias + 1) * count + i) * sizeof(uint32_t),
+                    sizeof(uint32_t)},
+            .dst = binding,
+        };
+        Check(api_.graph_add_copy_buffer_node(*out_graph,
+                                              previous ? &previous : nullptr,
+                                              previous ? 1 : 0, &attrs, &node));
+      } else if (operation_ == GraphOperation::kFill) {
+        const hrx_graph_fill_buffer_node_attrs_t attrs = {
+            .dst = binding,
+            .pattern = value,
+            .pattern_size = sizeof(value),
+        };
+        Check(api_.graph_add_fill_buffer_node(*out_graph,
+                                              previous ? &previous : nullptr,
+                                              previous ? 1 : 0, &attrs, &node));
+      } else {
+        const hrx_graph_kernel_node_attrs_t attrs = {
+            module_,
+            ordinal_,
+            {{1, 1, 1},
+             {info_.workgroup_size[0], info_.workgroup_size[1],
+              info_.workgroup_size[2]},
+             0},
+            &value,
+            sizeof(value),
+            &binding,
+            1,
+            HRX_DISPATCH_FLAG_NONE,
+        };
+        Check(api_.graph_add_kernel_node(*out_graph,
+                                         previous ? &previous : nullptr,
+                                         previous ? 1 : 0, &attrs, &node));
+      }
       previous = node;
       if (FLAG_graph_host_interval > 0 &&
           (i + 1) % FLAG_graph_host_interval == 0) {
@@ -264,10 +330,12 @@ class HrxRuntime {
   uint32_t value_bias_ = 0;
   // Instantiated graph reused throughout one row.
   hrx_graph_exec_t executable_ = nullptr;
-  // One output word per node in the selected memory class.
+  // Output words and optional copy input banks in the selected memory class.
   hrx_buffer_t buffer_ = nullptr;
   // Persistent coherent host mapping, or null for device-local output.
   uint32_t* mapped_ = nullptr;
+  // Selected operation, fixed for all rows in this process.
+  const GraphOperation operation_ = ParseGraphOperation();
   // CPU comparison storage used only outside timed regions.
   std::vector<uint32_t> values_;
   // Architecture and wait policy included in every result.
@@ -280,6 +348,8 @@ class HrxRuntime {
 
 class HipRuntime {
  public:
+  using GraphType = hipGraph_t;
+
   HipRuntime() {
     Require(FLAG_graph_hip_library[0] != 0, "--graph_hip_library is required");
     library_.load(FLAG_graph_hip_library);
@@ -295,7 +365,8 @@ class HipRuntime {
     label_ =
         std::string(std::string(FLAG_graph_runtime) == "hip" ? "HRX HIP "
                                                              : "ROCm HIP ") +
-        properties.gcnArchName + " " + pci_address + " wait=blocking";
+        properties.gcnArchName + " " + pci_address +
+        " wait=blocking operation=" + FLAG_graph_operation;
     const auto image =
         hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
     Require(image.file != nullptr, "no configured HSACO for selected GPU");
@@ -331,23 +402,26 @@ class HipRuntime {
     host_call_count_ = 0;
     launch_count_ = 0;
     values_.assign(count, 0);
+    const auto initial_values = InitialValues(count, operation_);
+    const size_t allocation_size = initial_values.size() * sizeof(uint32_t);
     host_ = host;
     if (host) {
       // hipHostAlloc accepts only CUDA-compatible flags. The HIP-native entry
       // point accepts the explicit coherent memory requirement.
       Check(Resolve<decltype(&hipHostAlloc)>("hipHostMalloc")(
-          &output_, count * sizeof(uint32_t),
+          &output_, allocation_size,
           hipHostMallocMapped | hipHostMallocCoherent));
       Check(Resolve<decltype(&hipHostGetDevicePointer)>(
           "hipHostGetDevicePointer")(&device_output_, output_, 0));
-      std::fill_n(static_cast<uint32_t*>(output_), count, 0);
+      std::copy(initial_values.begin(), initial_values.end(),
+                static_cast<uint32_t*>(output_));
     } else {
-      Check(Resolve<decltype(&hipMalloc)>("hipMalloc")(
-          &output_, count * sizeof(uint32_t)));
+      Check(Resolve<decltype(&hipMalloc)>("hipMalloc")(&output_,
+                                                       allocation_size));
       device_output_ = output_;
-      Check(Resolve<decltype(&hipMemcpy)>("hipMemcpy")(output_, values_.data(),
-                                                       count * sizeof(uint32_t),
-                                                       hipMemcpyHostToDevice));
+      Check(Resolve<decltype(&hipMemcpy)>("hipMemcpy")(
+          output_, initial_values.data(), allocation_size,
+          hipMemcpyHostToDevice));
     }
     value_bias_ = 0;
     BuildGraph(count, 0, &graph_);
@@ -366,9 +440,21 @@ class HipRuntime {
     value_bias_ = next_bias;
   }
 
-  void Reinstantiate() {
+  void Reinstantiate() { InstallTemplate(graph_); }
+
+  GraphType ConstructTemplate() {
+    hipGraph_t graph = nullptr;
+    BuildGraph(values_.size(), 0, &graph);
+    return graph;
+  }
+
+  void ReleaseTemplate(GraphType graph) {
+    Check(Resolve<decltype(&hipGraphDestroy)>("hipGraphDestroy")(graph));
+  }
+
+  void InstallTemplate(GraphType graph) {
     hipGraphExec_t executable = nullptr;
-    Check(instantiate_(&executable, graph_, nullptr, nullptr, 0));
+    Check(instantiate_(&executable, graph, nullptr, nullptr, 0));
     Check(destroy_(executable_));
     executable_ = executable;
   }
@@ -422,13 +508,31 @@ class HipRuntime {
     Check(Resolve<decltype(&hipStreamBeginCapture)>("hipStreamBeginCapture")(
         stream_, hipStreamCaptureModeGlobal));
     const auto dispatch =
-        Resolve<decltype(&hipModuleLaunchKernel)>("hipModuleLaunchKernel");
+        operation_ == GraphOperation::kDispatch
+            ? Resolve<decltype(&hipModuleLaunchKernel)>("hipModuleLaunchKernel")
+            : nullptr;
+    const auto copy = operation_ == GraphOperation::kCopy
+                          ? Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync")
+                          : nullptr;
+    const auto fill =
+        operation_ == GraphOperation::kFill
+            ? Resolve<decltype(&hipMemsetD32Async)>("hipMemsetD32Async")
+            : nullptr;
     for (uint32_t i = 0; i < count; ++i) {
       uint32_t value = kOutputBase + i + value_bias;
       void* output = static_cast<uint32_t*>(device_output_) + i;
-      void* arguments[] = {&output, &value};
-      Check(dispatch(function_, 1, 1, 1, 1, 1, 1, 0, stream_, arguments,
-                     nullptr));
+      if (operation_ == GraphOperation::kCopy) {
+        const void* source = static_cast<uint32_t*>(device_output_) +
+                             (value_bias + 1) * count + i;
+        Check(copy(output, source, sizeof(uint32_t), hipMemcpyDeviceToDevice,
+                   stream_));
+      } else if (operation_ == GraphOperation::kFill) {
+        Check(fill(output, static_cast<int>(value), 1, stream_));
+      } else {
+        void* arguments[] = {&output, &value};
+        Check(dispatch(function_, 1, 1, 1, 1, 1, 1, 0, stream_, arguments,
+                       nullptr));
+      }
       if (FLAG_graph_host_interval > 0 &&
           (i + 1) % FLAG_graph_host_interval == 0) {
         Check(Resolve<decltype(&hipLaunchHostFunc)>("hipLaunchHostFunc")(
@@ -457,12 +561,14 @@ class HipRuntime {
   uint32_t value_bias_ = 0;
   // Replayed graph executable.
   hipGraphExec_t executable_ = nullptr;
-  // Output allocation, coherent host memory or device-local storage.
+  // Output and optional input banks, in coherent host or device-local memory.
   void* output_ = nullptr;
   // GPU-accessible address of output_.
   void* device_output_ = nullptr;
   // True when CPU verification may read output_ directly.
   bool host_ = false;
+  // Selected operation, fixed for all rows in this process.
+  const GraphOperation operation_ = ParseGraphOperation();
   // CPU comparison storage used only outside timed regions.
   std::vector<uint32_t> values_;
   // Cached public graph-launch entry point.
@@ -578,6 +684,55 @@ void GraphEdit(benchmark::State& state) {
   }
 }
 
+// Builds a bounded live set of real dispatch templates. Native HRX constructs
+// explicit nodes and HIP captures the matching dispatch sequence. Compilation,
+// completion, and releasing the live set stay outside construction timing.
+template <typename Runtime>
+void RunGraphConstruct(benchmark::State& state) {
+  auto& runtime = GetRuntime<Runtime>();
+  const size_t node_count = state.range(0);
+  const size_t retained_count = state.range(1);
+  runtime.Prepare(node_count, /*host=*/true);
+  std::vector<typename Runtime::GraphType> graphs(retained_count);
+  for (auto& graph : graphs) {
+    graph = runtime.ConstructTemplate();
+  }
+  runtime.InstallTemplate(graphs.back());
+  runtime.Launch();
+  runtime.Wait();
+  runtime.Verify();
+  for (auto graph : graphs) {
+    runtime.ReleaseTemplate(graph);
+  }
+  state.SetLabel(runtime.label() + " output=host-coherent");
+  for (auto _ : state) {
+    for (auto& graph : graphs) {
+      graph = runtime.ConstructTemplate();
+    }
+    benchmark::DoNotOptimize(graphs.data());
+    state.PauseTiming();
+    for (auto graph : graphs) {
+      runtime.ReleaseTemplate(graph);
+    }
+    state.ResumeTiming();
+  }
+  runtime.Reset();
+  state.counters["nodes"] = static_cast<double>(node_count);
+  state.counters["retained_graphs"] = static_cast<double>(retained_count);
+  state.counters["host_interval"] = FLAG_graph_host_interval;
+  state.SetItemsProcessed(state.iterations() * node_count * retained_count);
+}
+
+void GraphConstruct(benchmark::State& state) {
+  const std::string runtime = FLAG_graph_runtime;
+  if (runtime == "hrx") {
+    RunGraphConstruct<HrxRuntime>(state);
+  } else {
+    Require(runtime == "hip" || runtime == "rocm", "unknown --graph_runtime");
+    RunGraphConstruct<HipRuntime>(state);
+  }
+}
+
 // Keeps a bounded window of launches, each consuming a different recording.
 // UpdateSubmit excludes the final join; UpdateComplete includes it. Neither
 // waits on the host between replacement and the next enqueue within a batch.
@@ -652,6 +807,21 @@ void GraphArguments(benchmark::Benchmark* benchmark) {
     }
   }
 }
+
+void GraphConstructArguments(benchmark::Benchmark* benchmark) {
+  for (int count : {16, 256, 4096}) {
+    for (int retained : {1, 16, 64}) {
+      benchmark->Args({count, retained});
+    }
+  }
+}
+
+BENCHMARK(GraphConstruct)
+    ->Name("Graph/Construct")
+    ->Apply(GraphConstructArguments)
+    ->ArgNames({"nodes", "retained"})
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
 
 BENCHMARK_TEMPLATE(Graph, false)
     ->Name("Graph/Submit")
