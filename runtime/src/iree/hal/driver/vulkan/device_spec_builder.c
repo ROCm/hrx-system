@@ -497,7 +497,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_dispatch(
       .subgroup.supported_size_mask =
           iree_hal_vulkan_device_spec_subgroup_size_mask(subgroup_size_minimum,
                                                          subgroup_size_maximum),
-      .execution.unit_count = 1,
+      .execution.unit_count = params->device_plan->execution_unit_count,
       .execution.group_count = 1,
       .execution.maximum_workgroup_local_memory_size =
           limits->maxComputeSharedMemorySize,

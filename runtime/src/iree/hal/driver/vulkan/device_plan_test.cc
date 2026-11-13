@@ -179,6 +179,10 @@ class PhysicalDeviceSnapshotBuilder {
     return &snapshot_;
   }
 
+  void SetExecutionUnitCount(uint32_t unit_count) {
+    snapshot_.execution_unit_count = unit_count;
+  }
+
  private:
   // Snapshot whose pointer fields reference this builder's storage.
   iree_hal_vulkan_physical_device_snapshot_t snapshot_;
@@ -278,6 +282,28 @@ static bool PlanContainsExtension(const iree_hal_vulkan_device_plan_t& plan,
     }
   }
   return false;
+}
+
+TEST(DevicePlanTest, ExecutionUnitCountPreservesCreationScope) {
+  for (uint32_t unit_count : {0u, 37u}) {
+    SCOPED_TRACE(unit_count);
+    PhysicalDeviceSnapshotBuilder builder;
+    builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+    builder.SetExecutionUnitCount(unit_count);
+    iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+    ScopedDevicePlan owned_plan;
+    IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
+        builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+        NoFeatures(), &owned_plan));
+    EXPECT_EQ(owned_plan.execution_unit_count, unit_count);
+
+    iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
+    params.compute_queue_set.queue_indices = 1;
+    ScopedDevicePlan wrapped_plan;
+    IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
+        builder.snapshot(), &options, &params, &wrapped_plan));
+    EXPECT_EQ(wrapped_plan.execution_unit_count, 0u);
+  }
 }
 
 TEST(DevicePlanTest, OwnedCreateInventoriesEverySelectedFamilyQueue) {

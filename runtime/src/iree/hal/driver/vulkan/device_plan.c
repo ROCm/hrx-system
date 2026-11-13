@@ -756,6 +756,10 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
         "Vulkan physical device does not satisfy the Vulkan 1.3 baseline");
   }
   out_plan->request_flags = request_flags;
+  // Owned queues use the full physical device. Wrapped queues may carry
+  // creation-time core limits that their physical-device snapshot cannot
+  // reveal.
+  out_plan->execution_unit_count = snapshot->execution_unit_count;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_select_queue_assignment(
       snapshot, device_options, &out_plan->queue_assignment));
   if (!iree_any_bit_set(required_features.general,

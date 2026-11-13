@@ -484,6 +484,7 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
 
   iree_hal_vulkan_physical_device_snapshot_t physical_device = {
       .ordinal = 3,
+      .execution_unit_count = 43,
   };
   physical_device.float_controls_properties.shaderDenormPreserveFloat16 =
       GetParam().denorm_preserve.f16;
@@ -568,6 +569,7 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
       &cooperative_matrix_property;
 
   iree_hal_vulkan_device_plan_t device_plan = {
+      .execution_unit_count = 7,
       .request_flags = IREE_HAL_VULKAN_REQUEST_FLAG_TRACING,
   };
   device_plan.enabled_features.general =
@@ -700,6 +702,7 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
   EXPECT_EQ(dispatch->subgroup.minimum_size, 32);
   EXPECT_EQ(dispatch->subgroup.maximum_size, 32);
   EXPECT_EQ(dispatch->subgroup.supported_size_mask, 1ull << 32);
+  EXPECT_EQ(dispatch->execution.unit_count, 7u);
   EXPECT_EQ(dispatch->execution.maximum_workgroup_local_memory_size, 64 * 1024);
   EXPECT_EQ(dispatch->addressing.minimum_buffer_device_address_alignment, 16);
 
@@ -752,6 +755,7 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
   EXPECT_EQ(decoded_property.scope, cooperative_matrix_property.scope);
 
   iree_hal_device_spec_release(device_spec);
+  device_plan.execution_unit_count = 0;
   physical_device.subgroup_size_control_properties.requiredSubgroupSizeStages =
       VK_SHADER_STAGE_COMPUTE_BIT;
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_create(
@@ -760,6 +764,7 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
   ASSERT_NE(dispatch, nullptr);
   EXPECT_EQ(dispatch->subgroup.minimum_size, 32);
   EXPECT_EQ(dispatch->subgroup.maximum_size, 64);
+  EXPECT_EQ(dispatch->execution.unit_count, 0u);
   iree_hal_device_spec_release(device_spec);
 
   device_plan.enabled_features.general &=

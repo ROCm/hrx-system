@@ -108,6 +108,9 @@ typedef struct iree_hal_vulkan_device_plan_t {
   // Canonical inventory of every queue provisioned for the logical device.
   iree_hal_vulkan_queue_inventory_t queue_inventory;
 
+  // Logical-device execution units, or zero when the creation scope is unknown.
+  uint32_t execution_unit_count;
+
   // Non-device-feature behavior requested for the logical device.
   iree_hal_vulkan_request_flags_t request_flags;
 
