@@ -7,22 +7,26 @@
 
 set -euo pipefail
 
-: "${HRX_ROCM_ROOT:?}"
-
 expected_origin="${1:---expect-system}"
 case "${expected_origin}" in
-  --expect-system | --expect-rocm) ;;
+  --expect-system | --expect-artifact) ;;
   *)
-    echo "usage: $0 [--expect-system|--expect-rocm]" >&2
+    echo "usage: $0 [--expect-system|--expect-artifact]" >&2
     exit 2
     ;;
 esac
 if [[ "$#" -gt 1 ]]; then
-  echo "usage: $0 [--expect-system|--expect-rocm]" >&2
+  echo "usage: $0 [--expect-system|--expect-artifact]" >&2
   exit 2
 fi
 
-resolved_rocm_llvm_bin="$(realpath "${HRX_ROCM_ROOT}/lib/llvm/bin")"
+resolved_artifact_llvm_bin=""
+if [[ -n "${HRX_ROCM_ROOT:-}" ]]; then
+  resolved_artifact_llvm_bin="$(realpath "${HRX_ROCM_ROOT}/lib/llvm/bin")"
+elif [[ "${expected_origin}" == "--expect-artifact" ]]; then
+  echo "::error::HRX_ROCM_ROOT is required when expecting a fetched host toolchain."
+  exit 1
+fi
 
 check_host_tool() {
   local environment_variable="$1"
@@ -35,17 +39,18 @@ check_host_tool() {
   fi
   local resolved_tool_path
   resolved_tool_path="$(realpath "${tool_path}")"
-  local is_rocm_tool=0
-  if [[ "${tool_path}" == "${HRX_ROCM_ROOT}"/* || \
-        "${resolved_tool_path}" == "${resolved_rocm_llvm_bin}"/* ]]; then
-    is_rocm_tool=1
+  local is_artifact_tool=0
+  if [[ -n "${resolved_artifact_llvm_bin}" && \
+        ("${tool_path}" == "${HRX_ROCM_ROOT}"/* || \
+         "${resolved_tool_path}" == "${resolved_artifact_llvm_bin}"/*) ]]; then
+    is_artifact_tool=1
   fi
-  if [[ "${expected_origin}" == "--expect-system" && "${is_rocm_tool}" -ne 0 ]]; then
-    echo "::error::Host ${environment_variable} unexpectedly resolves into the ROCm toolchain: ${resolved_tool_path}"
+  if [[ "${expected_origin}" == "--expect-system" && "${is_artifact_tool}" -ne 0 ]]; then
+    echo "::error::Host ${environment_variable} unexpectedly resolves into the fetched toolchain: ${resolved_tool_path}"
     exit 1
   fi
-  if [[ "${expected_origin}" == "--expect-rocm" && "${is_rocm_tool}" -eq 0 ]]; then
-    echo "::error::Host ${environment_variable} does not resolve into the expected ROCm toolchain: ${resolved_tool_path}"
+  if [[ "${expected_origin}" == "--expect-artifact" && "${is_artifact_tool}" -eq 0 ]]; then
+    echo "::error::Host ${environment_variable} does not resolve into the expected fetched toolchain: ${resolved_tool_path}"
     exit 1
   fi
   echo "Host ${environment_variable}: ${resolved_tool_path}"

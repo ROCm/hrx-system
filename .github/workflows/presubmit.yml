@@ -36,7 +36,7 @@ jobs:
       AR: ${{ github.workspace }}/build/presubmit/rocm-root/lib/llvm/bin/llvm-ar
       CC: ${{ github.workspace }}/build/presubmit/rocm-root/lib/llvm/bin/clang
       CXX: ${{ github.workspace }}/build/presubmit/rocm-root/lib/llvm/bin/clang++
-      HRX_ARTIFACT_SET: core-with-llvm-dev
+      HRX_ARTIFACT_SET: llvm-with-dev
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/presubmit/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/presubmit
       HRX_PYTHON: ${{ github.workspace }}/build/presubmit/python/bin/python3
@@ -72,7 +72,7 @@ jobs:
       - name: Check tool versions
         run: |
           python3 dev.py bazel doctor
-          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_host_toolchain.sh --expect-artifact
           "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/clang-tidy" --version
           "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/llvm-config" --version
           "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/clang++" --version

@@ -119,7 +119,7 @@ jobs:
       - name: Check tool versions
         run: |
           bazel --version
-          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_host_toolchain.sh --expect-artifact
           bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 

@@ -99,6 +99,41 @@ class FakeS3:
 
 
 class CiCoreCommonTest(unittest.TestCase):
+    def test_llvm_host_artifacts_exclude_llvm_development_and_rocm_runtime(self):
+        artifacts = common.wanted_artifacts("llvm")
+
+        self.assertEqual(
+            artifacts,
+            [
+                "sysdeps_lib_generic",
+                "sysdeps_run_generic",
+                "sysdeps_dev_generic",
+                "base_lib_generic",
+                "base_run_generic",
+                "base_dev_generic",
+                "amd-llvm_lib_generic",
+                "amd-llvm_run_generic",
+            ],
+        )
+
+    def test_llvm_development_artifacts_exclude_rocm_runtime(self):
+        artifacts = common.wanted_artifacts("llvm-with-dev")
+
+        self.assertEqual(
+            artifacts,
+            [
+                "sysdeps_lib_generic",
+                "sysdeps_run_generic",
+                "sysdeps_dev_generic",
+                "base_lib_generic",
+                "base_run_generic",
+                "base_dev_generic",
+                "amd-llvm_lib_generic",
+                "amd-llvm_run_generic",
+                "amd-llvm_dev_generic",
+            ],
+        )
+
     def test_source_ctest_selection_requires_every_hardware_resource(self):
         gpu_labels = [
             "runtime-resource=amd-gpu",

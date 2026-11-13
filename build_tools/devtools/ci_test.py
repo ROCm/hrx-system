@@ -1777,6 +1777,73 @@ class CiTest(unittest.TestCase):
                 ):
                     self.assertNotIn(f"{variable_name}:", block)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux host tool check")
+    def test_host_toolchain_check_accepts_system_tools_without_rocm(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            tool_dir = Path(temporary_dir) / "bin"
+            tool_dir.mkdir()
+            environment = os.environ.copy()
+            environment.pop("HRX_ROCM_ROOT", None)
+            for variable_name in ("CC", "CXX", "AR"):
+                tool_path = tool_dir / variable_name.lower()
+                tool_path.write_text("#!/usr/bin/env bash\nexit 0\n")
+                tool_path.chmod(0o755)
+                environment[variable_name] = os.fspath(tool_path)
+
+            result = subprocess.run(
+                ["bash", ".github/scripts/check_host_toolchain.sh", "--expect-system"],
+                env=environment,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux host tool check")
+    def test_host_toolchain_check_requires_root_for_fetched_tools(self):
+        environment = os.environ.copy()
+        environment.pop("HRX_ROCM_ROOT", None)
+
+        result = subprocess.run(
+            ["bash", ".github/scripts/check_host_toolchain.sh", "--expect-artifact"],
+            env=environment,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HRX_ROCM_ROOT is required", result.stdout)
+
+    def test_host_workflows_select_minimal_artifact_closures(self):
+        loom_block = self.workflow_job_block(
+            ".github/workflows/ci_iree.yml", "bazel_linux"
+        )
+        libhrx_block = self.workflow_job_block(
+            ".github/workflows/ci_libhrx.yml", "bazel_linux"
+        )
+        fuzz_block = self.workflow_job_block(
+            ".github/workflows/fuzz.yml", "linux_x86_64"
+        )
+        presubmit_block = self.workflow_job_block(
+            ".github/workflows/presubmit.yml", "presubmit"
+        )
+
+        self.assertIn("IREE_CI_ARTIFACT_SET:", loom_block)
+        self.assertIn("if: env.IREE_CI_ARTIFACT_SET != ''", loom_block)
+        self.assertIn("artifact_set: llvm", loom_block)
+        self.assertIn("artifact_set: core", loom_block)
+        self.assertNotIn("fetch_rocm_toolchain", libhrx_block)
+        self.assertNotIn("check_rocm_device_toolchain", libhrx_block)
+        self.assertIn("HRX_ARTIFACT_SET: llvm", fuzz_block)
+        self.assertNotIn("HRX_ARTIFACT_SET: core", fuzz_block)
+        self.assertIn("fetch_rocm_toolchain", fuzz_block)
+        self.assertNotIn("check_rocm_device_toolchain", fuzz_block)
+        self.assertIn("HRX_ARTIFACT_SET: llvm-with-dev", presubmit_block)
+
     def test_fetch_toolchain_uses_owned_ci_entry_point(self):
         script = Path(".github/scripts/fetch_rocm_toolchain.sh").read_text()
         self.assertIn(
@@ -1805,6 +1872,7 @@ elif [[ "$1" == "-m" && "$2" == "pip" ]]; then
   exit 0
 elif [[ "$1" == "build_tools/ci/ci_core_linux.py" && "$2" == "fetch-rocm" ]]; then
   mkdir -p "${HRX_ROCM_ROOT}/lib/llvm/bin"
+  touch "${HRX_ROCM_ROOT}/lib/libhsa-runtime64.so.1"
   printf '%s\n' \
     '{"artifact_identity":"nightly-123456-linux-release-core"}' \
     >"${HRX_ROCM_ROOT}/.hrx-rocm-artifacts.json"
