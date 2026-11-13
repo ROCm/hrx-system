@@ -853,6 +853,18 @@ test_fact_subgroup_uniform = Op(
     examples=["%uniform = test.fact_subgroup_uniform %x : index -> i1"],
 )
 
+test_fact_observation_scope = Op(
+    "test.fact_observation_scope",
+    group=test_ops,
+    doc=("Exposes the uniform scope proved at this use: 0 for unknown, 1 for subgroup, 2 for workgroup, and 3 for cluster."),
+    operands=[Operand("value", ANY)],
+    results=[Result("result", INTEGER)],
+    traits=[PURE],
+    facts="loom_test_fact_observation_scope_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%scope = test.fact_observation_scope %x : index -> i32"],
+)
+
 test_fact_workgroup_uniform = Op(
     "test.fact_workgroup_uniform",
     group=test_ops,
@@ -3371,4 +3383,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_exact_float_types,
     test_f64_array_attrs,
     test_string_array_attrs,
+    test_fact_observation_scope,
 )

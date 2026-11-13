@@ -110,6 +110,26 @@ INSTANTIATE_TEST_SUITE_P(
                       LOOM_VALUE_FACT_ORIGIN_CONTEXTUAL_QUERY,
                       LOOM_VALUE_FACT_ORIGIN_LAYOUT));
 
+TEST_F(FactSnapshotTest, DefinitionScopeChangesInvalidateEqualGlobalFacts) {
+  const auto empty = Snapshot();
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table_, 7, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP));
+  const auto subgroup = Snapshot();
+  EXPECT_FALSE(loom_value_fact_auxiliary_snapshot_equal(&empty, &subgroup));
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table_, 7, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP));
+  auto current = Snapshot();
+  EXPECT_FALSE(loom_value_fact_auxiliary_snapshot_equal(&subgroup, &current));
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table_, 7, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP));
+  current = Snapshot();
+  EXPECT_TRUE(loom_value_fact_auxiliary_snapshot_equal(&subgroup, &current));
+  loom_value_fact_table_undefine(&table_, 7);
+  current = Snapshot();
+  EXPECT_TRUE(loom_value_fact_auxiliary_snapshot_equal(&empty, &current));
+  EXPECT_FALSE(loom_value_fact_auxiliary_snapshot_equal(&subgroup, &current));
+}
+
 TEST_F(FactSnapshotTest, IdentitySnapshotDoesNotFollowMutableRepresentatives) {
   IREE_ASSERT_OK(loom_value_fact_table_define_identity(&table_, 8, 7, nullptr));
   const auto first = Snapshot(8);

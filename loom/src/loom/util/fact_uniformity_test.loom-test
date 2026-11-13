@@ -1,0 +1,496 @@
+// Local agreement propagates through arithmetic; exit observations stay varying.
+// RUN: pass canonicalize
+
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @local_and_escaping() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  %increment = scalar.constant 7 : i32
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %observed = kernel.subgroup.broadcast.first %word : i32
+  %derived = scalar.addi %observed, %increment : i32
+  %local = test.fact_observation_scope %observed : i32 -> i32
+  %composed = test.fact_observation_scope %derived : i32 -> i32
+  %global = test.fact_subgroup_uniform %derived : i32 -> i1
+  test.use %local, %composed, %global : i32, i32, i1
+  %more = index.cmp ult, %counter, %lane : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %body_scope = test.fact_observation_scope %derived : i32 -> i32
+  test.use %body_scope : i32
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  %escaping = test.fact_observation_scope %observed : i32 -> i32
+  %escaping_expression = test.fact_observation_scope %derived : i32 -> i32
+  test.use %escaping, %escaping_expression : i32, i32
+  kernel.return
+}
+
+// ----
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @local_and_escaping() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %observed = kernel.subgroup.broadcast.first %word : i32
+  %local = scalar.constant 1 : i32
+  %composed = scalar.constant 1 : i32
+  %global = scalar.constant false : i1
+  test.use %local, %composed, %global : i32, i32, i1
+  %more = index.cmp ult, %counter, %lane : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %body_scope = scalar.constant 1 : i32
+  test.use %body_scope : i32
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  %escaping = scalar.constant 0 : i32
+  %escaping_expression = scalar.constant 0 : i32
+  test.use %escaping, %escaping_expression : i32, i32
+  kernel.return
+}
+
+// ====
+
+// Dominated branch uses stay in the definition iteration, including two latches.
+// RUN: pass canonicalize
+
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @branch_observation() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %observed = kernel.subgroup.broadcast.first %word : i32
+  %more = index.cmp ult, %counter, %lane : index
+  cfg.cond_br %more, ^dispatch, ^exit
+^dispatch:
+  cfg.cond_br %choice, ^left, ^right
+^left:
+  %left_scope = test.fact_observation_scope %observed : i32 -> i32
+  test.use %left_scope : i32
+  %left_next = index.add %counter, %step : index
+  cfg.br ^header(%left_next: index)
+^right:
+  %right_scope = test.fact_observation_scope %observed : i32 -> i32
+  test.use %right_scope : i32
+  %right_next = index.add %counter, %step : index
+  cfg.br ^header(%right_next: index)
+^exit:
+  %exit_scope = test.fact_observation_scope %observed : i32 -> i32
+  test.use %exit_scope : i32
+  kernel.return
+}
+
+// ----
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @branch_observation() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %observed = kernel.subgroup.broadcast.first %word : i32
+  %more = index.cmp ult, %counter, %lane : index
+  cfg.cond_br %more, ^dispatch, ^exit
+^dispatch:
+  cfg.cond_br %choice, ^left, ^right
+^left:
+  %left_scope = scalar.constant 1 : i32
+  test.use %left_scope : i32
+  %left_next = index.add %counter, %step : index
+  cfg.br ^header(%left_next: index)
+^right:
+  %right_scope = scalar.constant 1 : i32
+  test.use %right_scope : i32
+  %right_next = index.add %counter, %step : index
+  cfg.br ^header(%right_next: index)
+^exit:
+  %exit_scope = scalar.constant 0 : i32
+  test.use %exit_scope : i32
+  kernel.return
+}
+
+// ====
+
+// Exiting an inner loop loses only its observations, not the outer iteration.
+// RUN: pass canonicalize
+
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @nested_iterations() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  cfg.br ^outer(%begin: index)
+^outer(%outer_counter: index):
+  %outer_value = kernel.subgroup.broadcast.first %word : i32
+  cfg.br ^inner(%begin: index)
+^inner(%inner_counter: index):
+  %inner_value = kernel.subgroup.broadcast.first %word : i32
+  %outer_here = test.fact_observation_scope %outer_value : i32 -> i32
+  %inner_here = test.fact_observation_scope %inner_value : i32 -> i32
+  test.use %outer_here, %inner_here : i32, i32
+  %inner_more = index.cmp ult, %inner_counter, %lane : index
+  cfg.cond_br %inner_more, ^inner_body, ^outer_body
+^inner_body:
+  %inner_next = index.add %inner_counter, %step : index
+  cfg.br ^inner(%inner_next: index)
+^outer_body:
+  %outer_after_inner = test.fact_observation_scope %outer_value : i32 -> i32
+  %inner_after_inner = test.fact_observation_scope %inner_value : i32 -> i32
+  test.use %outer_after_inner, %inner_after_inner : i32, i32
+  %outer_next = index.add %outer_counter, %step : index
+  %outer_more = index.cmp ult, %outer_next, %lane : index
+  cfg.cond_br %outer_more, ^outer_latch, ^exit
+^outer_latch:
+  cfg.br ^outer(%outer_next: index)
+^exit:
+  %outer_exit = test.fact_observation_scope %outer_value : i32 -> i32
+  %inner_exit = test.fact_observation_scope %inner_value : i32 -> i32
+  test.use %outer_exit, %inner_exit : i32, i32
+  kernel.return
+}
+
+// ----
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @nested_iterations() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  cfg.br ^outer(%begin: index)
+^outer(%outer_counter: index):
+  %outer_value = kernel.subgroup.broadcast.first %word : i32
+  cfg.br ^inner(%begin: index)
+^inner(%inner_counter: index):
+  %inner_value = kernel.subgroup.broadcast.first %word : i32
+  %outer_here = scalar.constant 1 : i32
+  %inner_here = scalar.constant 1 : i32
+  test.use %outer_here, %inner_here : i32, i32
+  %inner_more = index.cmp ult, %inner_counter, %lane : index
+  cfg.cond_br %inner_more, ^inner_body, ^outer_body
+^inner_body:
+  %inner_next = index.add %inner_counter, %step : index
+  cfg.br ^inner(%inner_next: index)
+^outer_body:
+  %outer_after_inner = scalar.constant 1 : i32
+  %inner_after_inner = scalar.constant 0 : i32
+  test.use %outer_after_inner, %inner_after_inner : i32, i32
+  %outer_next = index.add %outer_counter, %step : index
+  %outer_more = index.cmp ult, %outer_next, %lane : index
+  cfg.cond_br %outer_more, ^outer_latch, ^exit
+^outer_latch:
+  cfg.br ^outer(%outer_next: index)
+^exit:
+  %outer_exit = scalar.constant 0 : i32
+  %inner_exit = scalar.constant 0 : i32
+  test.use %outer_exit, %inner_exit : i32, i32
+  kernel.return
+}
+
+// ====
+
+// A multi-entry cycle keeps only the same-block proof.
+// RUN: pass canonicalize
+
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @irreducible_observation() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  %boundary = index.constant 32 : index
+  %partition = index.cmp ult, %lane, %boundary : index
+  cfg.cond_br %partition, ^left, ^right
+^left:
+  %observed = kernel.subgroup.broadcast.first %word : i32
+  %local = test.fact_observation_scope %observed : i32 -> i32
+  test.use %local : i32
+  cfg.br ^use
+^use:
+  %cross_block = test.fact_observation_scope %observed : i32 -> i32
+  test.use %cross_block : i32
+  cfg.cond_br %partition, ^right, ^exit
+^right:
+  cfg.cond_br %choice, ^left, ^exit
+^exit:
+  kernel.return
+}
+
+// ----
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @irreducible_observation() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  %boundary = index.constant 32 : index
+  %partition = index.cmp ult, %lane, %boundary : index
+  cfg.cond_br %partition, ^left, ^right
+^left:
+  %observed = kernel.subgroup.broadcast.first %word : i32
+  %local = scalar.constant 1 : i32
+  test.use %local : i32
+  cfg.br ^use
+^use:
+  %cross_block = scalar.constant 0 : i32
+  test.use %cross_block : i32
+  cfg.cond_br %partition, ^right, ^exit
+^right:
+  cfg.cond_br %choice, ^left, ^exit
+^exit:
+  kernel.return
+}
+
+// ====
+
+// Predicates, wide words, and packed vectors retain the same local contract.
+// RUN: pass canonicalize
+
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @structured_shapes() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  %wide = scalar.extui %word : i32 to i64
+  %packed = vector.splat %word : vector<3xi32>
+  %boundary = index.constant 32 : index
+  %lane_predicate = index.cmp ult, %lane, %boundary : index
+  %counter, %final_predicate, %final_wide, %final_packed = scf.while(%counter = %begin : index) -> (index, i1, i64, vector<3xi32>) {
+    %predicate = kernel.subgroup.broadcast.first %lane_predicate : i1
+    %wide_value = kernel.subgroup.broadcast.first %wide : i64
+    %packed_value = kernel.subgroup.broadcast.first %packed : vector<3xi32>
+    %predicate_scope = test.fact_observation_scope %predicate : i1 -> i32
+    %wide_scope = test.fact_observation_scope %wide_value : i64 -> i32
+    %packed_scope = test.fact_observation_scope %packed_value : vector<3xi32> -> i32
+    test.use %predicate_scope, %wide_scope, %packed_scope : i32, i32, i32
+    %more = index.cmp ult, %counter, %lane : index
+    scf.condition %more, %counter, %predicate, %wide_value, %packed_value : i1, index, i1, i64, vector<3xi32>
+  } do(%position: index, %unused_predicate: i1, %unused_wide: i64, %unused_packed: vector<3xi32>) {
+    %next = index.add %position, %step : index
+    scf.yield %next : index
+  }
+  %predicate_exit = test.fact_observation_scope %final_predicate : i1 -> i32
+  %wide_exit = test.fact_observation_scope %final_wide : i64 -> i32
+  %packed_exit = test.fact_observation_scope %final_packed : vector<3xi32> -> i32
+  test.use %predicate_exit, %wide_exit, %packed_exit : i32, i32, i32
+  kernel.return
+}
+
+// ----
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @structured_shapes() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  %wide = scalar.extui %word : i32 to i64
+  %packed = vector.splat %word : vector<3xi32>
+  %boundary = index.constant 32 : index
+  %lane_predicate = index.cmp ult, %lane, %boundary : index
+  %counter, %final_predicate, %final_wide, %final_packed = scf.while(%counter = %begin : index) -> (index, i1, i64, vector<3xi32>) {
+    %predicate = kernel.subgroup.broadcast.first %lane_predicate : i1
+    %wide_value = kernel.subgroup.broadcast.first %wide : i64
+    %packed_value = kernel.subgroup.broadcast.first %packed : vector<3xi32>
+    %predicate_scope = scalar.constant 1 : i32
+    %wide_scope = scalar.constant 1 : i32
+    %packed_scope = scalar.constant 1 : i32
+    test.use %predicate_scope, %wide_scope, %packed_scope : i32, i32, i32
+    %more = index.cmp ult, %counter, %lane : index
+    scf.condition %more, %counter, %predicate, %wide_value, %packed_value : i1, index, i1, i64, vector<3xi32>
+  } do(%position: index, %unused_predicate: i1, %unused_wide: i64, %unused_packed: vector<3xi32>) {
+    %next = index.add %position, %step : index
+    scf.yield %next : index
+  }
+  %predicate_exit = scalar.constant 0 : i32
+  %wide_exit = scalar.constant 0 : i32
+  %packed_exit = scalar.constant 0 : i32
+  test.use %predicate_exit, %wide_exit, %packed_exit : i32, i32, i32
+  kernel.return
+}
+
+// ====
+
+// Constants and invariant outer values retain their full scope.
+// RUN: pass canonicalize
+
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @invariant_and_alias() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  %initial = scalar.constant 9 : i32
+  %result = scf.for %counter = [%begin to %lane step %step](%previous = %initial : i32) -> (i32) {
+    %observed = kernel.subgroup.broadcast.first %word : i32
+    %alias = scalar.assume %observed [] : i32
+    %aliased_scope = test.fact_observation_scope %alias : i32 -> i32
+    %constant_scope = test.fact_observation_scope %initial : i32 -> i32
+    %uniform_scope = test.fact_observation_scope %choice : i1 -> i32
+    test.use %aliased_scope, %constant_scope, %uniform_scope : i32, i32, i32
+    scf.yield %alias : i32
+  }
+  %exit_scope = test.fact_observation_scope %result : i32 -> i32
+  %constant_exit = test.fact_observation_scope %initial : i32 -> i32
+  test.use %exit_scope, %constant_exit : i32, i32
+  kernel.return
+}
+
+// ----
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @invariant_and_alias() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%choice: i1) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  %initial = scalar.constant 9 : i32
+  %result = scf.for %counter = [%begin to %lane step %step](%previous = %initial : i32) -> (i32) {
+    %observed = kernel.subgroup.broadcast.first %word : i32
+    %aliased_scope = scalar.constant 1 : i32
+    %constant_scope = scalar.constant 3 : i32
+    %uniform_scope = scalar.constant 3 : i32
+    test.use %aliased_scope, %constant_scope, %uniform_scope : i32, i32, i32
+    scf.yield %observed : i32
+  }
+  %exit_scope = scalar.constant 0 : i32
+  %constant_exit = scalar.constant 3 : i32
+  test.use %exit_scope, %constant_exit : i32, i32
+  kernel.return
+}
+
+// ====
+
+// A uniform address does not prove agreement between separate atomic reads.
+// RUN: pass canonicalize
+
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @memory_observation() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %offset = index.constant 0 : offset
+  %view = buffer.view %input[%offset] : buffer -> view<1xi32>
+  %lane = kernel.subgroup.lane.id : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %loaded = view.atomic.load %view[0] {ordering = relaxed, scope = system} : view<1xi32> -> i32
+  %read_scope = test.fact_observation_scope %loaded : i32 -> i32
+  %agreed = kernel.subgroup.broadcast.first %loaded : i32
+  %broadcast_scope = test.fact_observation_scope %agreed : i32 -> i32
+  test.use %read_scope, %broadcast_scope : i32, i32
+  %more = index.cmp ult, %counter, %lane : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  %escaping = test.fact_observation_scope %agreed : i32 -> i32
+  test.use %escaping : i32
+  kernel.return
+}
+
+// ----
+target.generic<reference> @target {abi = hal_kernel, subgroup_size = 64}
+
+kernel.def target(@target) @memory_observation() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %offset = index.constant 0 : offset
+  %view = buffer.view %input[%offset] : buffer -> view<1xi32>
+  %lane = kernel.subgroup.lane.id : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %loaded = view.atomic.load %view[0] {ordering = relaxed, scope = system} : view<1xi32> -> i32
+  %read_scope = scalar.constant 0 : i32
+  %agreed = kernel.subgroup.broadcast.first %loaded : i32
+  %broadcast_scope = scalar.constant 1 : i32
+  test.use %read_scope, %broadcast_scope : i32, i32
+  %more = index.cmp ult, %counter, %lane : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  %escaping = scalar.constant 0 : i32
+  test.use %escaping : i32
+  kernel.return
+}

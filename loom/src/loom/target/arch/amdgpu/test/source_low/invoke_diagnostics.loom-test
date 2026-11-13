@@ -238,3 +238,38 @@ func.def target(@target) @wrong_numeric_result_class() -> (i16) {
   %result = low.invoke @condition_bit() : () -> (i16)
   func.return %result : i16
 }
+
+// ====
+
+// The header's broadcast is scalar for one execution. Lanes leaving on
+// different iterations cannot use the collected result as a scalar argument.
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @scalar_consumer(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  return %value
+}
+
+kernel.def target(@target) @escaping_native_argument() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %lane = kernel.subgroup.lane.id : index
+  %word = index.cast %lane : index to i32
+  %counter, %last = scf.while(%counter = %begin : index) -> (index, i32) {
+    %observed = kernel.subgroup.broadcast.first %word : i32
+    %more = index.cmp ult, %counter, %lane : index
+    scf.condition %more, %counter, %observed : i1, index, i32
+  } do(%position: index, %unused: i32) {
+    %next = index.add %position, %step : index
+    scf.yield %next : index
+  }
+  // ERROR@+1: TARGET/074 {callee_name="scalar_consumer", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.sgpr>"}
+  %result = low.invoke @scalar_consumer(%last) : (i32) -> (i32)
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  view.store %result, %view[%lane] : i32, view<64xi32>
+  kernel.return
+}

@@ -89,8 +89,10 @@ iree_status_t loom_amdgpu_prepare_control_operand(
     // A producer may nevertheless use VGPR instructions (for example, a
     // collective); selecting one lane is valid only with that shared proof.
     IREE_ASSERT(
-        loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup(
-            loom_low_lower_context_fact_table(context), source_value)));
+        loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup_at(
+            loom_low_lower_context_fact_table(context),
+            loom_low_lower_context_module(context), source_value,
+            source_terminator)));
   }
   if (requires_sgpr && loom_amdgpu_type_is_i1(source_type) &&
       loom_low_register_type_unit_count(required_type) == 2) {

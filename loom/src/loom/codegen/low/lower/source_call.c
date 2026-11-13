@@ -767,8 +767,9 @@ iree_status_t loom_low_lower_source_invoke_finalize(
     if (!context->policy->control_operand.accepts ||
         !context->policy->control_operand.accepts(
             source_type,
-            loom_value_fact_table_lookup(context->fact_table,
-                                         operands.values[i]),
+            loom_value_fact_table_lookup_at(context->fact_table,
+                                            context->module, operands.values[i],
+                                            source_op),
             actual_type, expected_type)) {
       status = loom_low_source_call_emit_type_error(
           context, source_op,

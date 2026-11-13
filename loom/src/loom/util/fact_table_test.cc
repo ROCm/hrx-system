@@ -311,6 +311,70 @@ TEST_F(FactTableTest, DefineUpdatesExisting) {
   EXPECT_EQ(result.range_lo, 99);
 }
 
+TEST_F(FactTableTest, DefinitionScopesAllocateOnlyWhenStrongerAndGrowLocally) {
+  loom_value_fact_table_t table = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+  const auto empty_bytes = arena_.used_allocation_size;
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table, 100000, LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE));
+  EXPECT_EQ(arena_.used_allocation_size, empty_bytes);
+  EXPECT_EQ(table.definition_distributions, nullptr);
+
+  const loom_value_id_t values[] = {100000, 99999, 100200, 100001};
+  for (auto value : values) {
+    IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+        &table, value, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP));
+  }
+  // Module prefixes do not consume space in this function-local domain.
+  EXPECT_LT(arena_.used_allocation_size - empty_bytes, 2048u);
+  for (auto value : values) {
+    EXPECT_EQ(loom_value_fact_table_definition_uniform_scope(&table, value),
+              LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
+  }
+  EXPECT_EQ(loom_value_fact_table_definition_uniform_scope(&table, 100002),
+            LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE);
+  loom_value_fact_table_clear_scope(&table);
+  EXPECT_EQ(table.definition_distributions, nullptr);
+  for (auto value : values) {
+    EXPECT_EQ(loom_value_fact_table_definition_uniform_scope(&table, value),
+              LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE);
+  }
+}
+
+TEST_F(FactTableTest, DefinitionScopesWithdrawAndAdvanceCompletePublications) {
+  loom_value_fact_table_t table = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 8));
+  auto facts = loom_value_facts_make(0, 63, 1);
+  loom_value_facts_mark_lane_varying(&facts);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 7, facts));
+  IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table));
+  const auto initial_generation = table.replay.generation;
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table, 7, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP));
+  EXPECT_GT(table.replay.generation, initial_generation);
+  EXPECT_TRUE(
+      loom_value_facts_equal(loom_value_fact_table_lookup(&table, 7), facts));
+  const auto first_generation = table.replay.generation;
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table, 7, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP));
+  EXPECT_EQ(table.replay.generation, first_generation);
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table, 7, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP));
+  EXPECT_GT(table.replay.generation, first_generation);
+
+  // Equal global facts are still a new publication when they withdraw a proof.
+  const auto stronger_generation = table.replay.generation;
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 7, facts));
+  EXPECT_GT(table.replay.generation, stronger_generation);
+  EXPECT_EQ(loom_value_fact_table_definition_uniform_scope(&table, 7),
+            LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE);
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scope(
+      &table, 7, LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER));
+  loom_value_fact_table_undefine(&table, 7);
+  EXPECT_EQ(loom_value_fact_table_definition_uniform_scope(&table, 7),
+            LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE);
+}
+
 TEST_F(FactTableTest, ClearScopeClearsOnlyTouchedEntriesAndKeepsStorage) {
   iree_arena_allocator_t transient_arena = {};
   iree_arena_initialize(&block_pool_, &transient_arena);
