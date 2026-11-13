@@ -5,7 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <string>
 #include <thread>
+#include <tuple>
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/pool_test_util.h"
@@ -23,11 +25,16 @@ namespace {
 
 using iree::hal::cts::Ref;
 
+enum class GridBarrier { kCombined, kSplit };
+
 class GpuCooperativeTest
     : public GpuNativeTest,
-      public ::testing::WithParamInterface<amdf_queue_command_type_t> {
+      public ::testing::WithParamInterface<
+          std::tuple<amdf_queue_command_type_t, GridBarrier>> {
  protected:
-  amdf_queue_command_type_t command_type() const override { return GetParam(); }
+  amdf_queue_command_type_t command_type() const override {
+    return std::get<0>(GetParam());
+  }
 };
 
 TEST_P(GpuCooperativeTest, QueueStateSurvivesMixedReplaysAndQueueReplacement) {
@@ -87,7 +94,11 @@ TEST_P(GpuCooperativeTest, QueueStateSurvivesMixedReplaysAndQueueReplacement) {
       iree_hal_executable_load(family, target, &load, executable.out()));
   iree_hal_executable_function_t function;
   IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
-      executable, IREE_SV("hrx_cooperative_grid_sync"), &function));
+      executable,
+      std::get<1>(GetParam()) == GridBarrier::kSplit
+          ? IREE_SV("hrx_cooperative_grid_sync_split")
+          : IREE_SV("hrx_cooperative_grid_sync"),
+      &function));
 
   Ref<iree_hal_pool_t> pool;
   IREE_ASSERT_OK(iree::hal::cts::CreateQueueSlabPool(
@@ -365,14 +376,20 @@ TEST_P(GpuCooperativeTest, QueueStateSurvivesMixedReplaysAndQueueReplacement) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(Protocol, GpuCooperativeTest,
-                         ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
-                                           AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
-                         [](const auto& info) {
-                           return info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
-                                      ? "Pm4"
-                                      : "Aql";
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    Protocol, GpuCooperativeTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Values(GridBarrier::kCombined,
+                                         GridBarrier::kSplit)),
+    [](const auto& info) {
+      return std::string(std::get<0>(info.param) ==
+                                 AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+                             ? "Pm4"
+                             : "Aql") +
+             (std::get<1>(info.param) == GridBarrier::kSplit ? "Split"
+                                                             : "Combined");
+    });
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu::cts
