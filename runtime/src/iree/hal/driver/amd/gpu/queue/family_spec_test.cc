@@ -108,12 +108,12 @@ TEST_P(FamilySpecTest, ExposesOnlyImplementedOperationsAndResourceSelections) {
   EXPECT_EQ(spec_.timestamp_valid_bits, 64u);
 }
 
-TEST_P(FamilySpecTest, CooperativeAdmissionRequiresIndependentGridState) {
+TEST_P(FamilySpecTest, CooperativeAdmissionRequiresNativeComputeSupport) {
   families_[1].user_queue_capabilities |=
       AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
   IREE_ASSERT_OK(Initialize());
   const bool supported =
-      std::get<0>(GetParam()) == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
+      std::get<0>(GetParam()) != AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA &&
       std::get<1>(GetParam()) == AMDF_QUEUE_PUBLICATION_MODE_USER;
   EXPECT_EQ(spec_.supported_queue_features,
             supported ? IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH : 0u);

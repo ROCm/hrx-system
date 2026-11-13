@@ -258,6 +258,29 @@ TEST_P(GpuCooperativeTest, QueueStateSurvivesMixedReplaysAndQueueReplacement) {
         IREE_STATUS_FAILED_PRECONDITION,
         iree_hal_queue_execute(queues_[0], {}, {}, recording,
                                {table.size(), table.data()}, 0));
+    // A deferred invocation must release its captures without touching the
+    // shared state or output when its dependency fails. The same recording
+    // and queue remain usable for the successful replays below.
+    Ref<iree_hal_semaphore_t> dependency_gate, rejected_completion;
+    CreateSemaphore(dependency_gate.out());
+    CreateSemaphore(rejected_completion.out());
+    if (HasFatalFailure()) {
+      return;
+    }
+    auto* dependency_semaphore = dependency_gate.get();
+    auto* rejected_semaphore = rejected_completion.get();
+    uint64_t rejected_value = 1;
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queue, {1, &dependency_semaphore, &rejected_value},
+        {1, &rejected_semaphore, &rejected_value}, recording,
+        {table.size(), table.data()}, 0));
+    iree_hal_semaphore_fail(dependency_semaphore,
+                            iree_status_from_code(IREE_STATUS_ABORTED));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_ABORTED,
+        iree_hal_semaphore_wait(rejected_semaphore, rejected_value,
+                                iree_infinite_timeout(),
+                                IREE_ASYNC_WAIT_FLAG_NONE));
     for (uint32_t replay = 0; replay < kReplays; ++replay) {
       table[1].offset = replay * kBytes;
       uint64_t next = completed + 1;

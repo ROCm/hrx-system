@@ -129,11 +129,8 @@ iree_status_t iree_hal_amd_gpu_queue_family_spec_initialize(
                ? IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
                      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS
                : 0),
-      // Recorded AQL cooperative launches require independent grid-state
-      // ownership before the family can advertise support.
       .supported_queue_features =
-          native_family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
-                  user_publication &&
+          compute && user_publication &&
                   (native_family->user_queue_capabilities &
                    AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH)
               ? IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH
