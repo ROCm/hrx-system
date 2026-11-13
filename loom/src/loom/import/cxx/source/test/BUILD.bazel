@@ -29,6 +29,7 @@ loom_check_test_suite(
         "enums.cxx-test",
         "enums_invalid.cxx-test",
         "frontend.cxx-test",
+        "function_definitions.cxx-test",
         "initializer_dependencies.cxx-test",
         "local_names.cxx-test",
         "locations.cxx-test",
