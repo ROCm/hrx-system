@@ -542,76 +542,46 @@ func.def @trim(%window_rows_dim0: index, %window_rows_layout: encoding<layout>, 
 }
 
 // ====
-// A selected vector lane uses the index evaluated by its own arm. An index
-// valid for the larger vector is never read against the shorter alternative.
-using Small = unsigned __attribute__((vector_size(8)));
-using Large = unsigned __attribute__((vector_size(16)));
-static void update(unsigned& value) { value += 5; }
-unsigned selected_lane(bool choose, unsigned first_index, unsigned second_index) {
-  Small first{1, 2};
-  Large second{3, 4, 5, 6};
-  update(choose ? first[first_index] : second[second_index]);
-  return first[1] * 10 + second[3];
+// A selected array element evaluates and transports only its arm's base and
+// index before passing the resulting lvalue through a mutable reference.
+static unsigned update(unsigned& value) { return value += 5; }
+unsigned selected_element(bool choose, unsigned* first, unsigned first_index,
+                          unsigned* second, unsigned second_index) {
+  return update(choose ? first[first_index] : second[second_index]);
 }
 // ----
-func.def public @selected_lane(%choose: i1, %first_index: i32, %second_index: i32) -> (i32) {
-  %first$4 = vector.constanti [1, 2] : vector<2xi32>
-  %second$5 = vector.constanti [3, 4, 5, 6] : vector<4xi32>
-  %10, %11 = scf.if %choose -> (i32, i64) {
-    %6 = scalar.constant 0 : i32
-    %7 = scalar.extui %first_index : i32 to i64
-    scf.yield %6, %7 : i32, i64
+func.def public @selected_element(%choose: i1, %first: buffer, %first_byte_offset: offset, %first_index: i32, %second: buffer, %second_byte_offset: offset, %second_index: i32) -> (i32) {
+  %22, %23 = scf.if %choose -> (buffer, offset) {
+    %8 = scalar.extui %first_index : i32 to i64
+    %9 = scalar.constant 4 : i64
+    %10 = scalar.muli %8, %9 : i64
+    %11 = index.cast %first_byte_offset : offset to i64
+    %12 = scalar.addi %11, %10 : i64
+    %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
+    %14 = index.cast %13 : i64 to offset
+    scf.yield %first, %14 : buffer, offset
   } else {
-    %8 = scalar.constant 1 : i32
-    %9 = scalar.extui %second_index : i32 to i64
-    scf.yield %8, %9 : i32, i64
+    %15 = scalar.extui %second_index : i32 to i64
+    %16 = scalar.constant 4 : i64
+    %17 = scalar.muli %15, %16 : i64
+    %18 = index.cast %second_byte_offset : offset to i64
+    %19 = scalar.addi %18, %17 : i64
+    %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+    %21 = index.cast %20 : i64 to offset
+    scf.yield %second, %21 : buffer, offset
   }
-  %12 = scalar.constant 0 : i32
-  %13 = scalar.cmpi eq, %10, %12 : i32
-  %14 = scf.if %13 -> (i32) {
-    %15 = index.cast %11 : i64 to index
-    %16 = vector.extract %first$4[%15] : vector<2xi32> -> i32
-    scf.yield %16 : i32
-  } else {
-    %17 = index.cast %11 : i64 to index
-    %18 = vector.extract %second$5[%17] : vector<4xi32> -> i32
-    scf.yield %18 : i32
-  }
-  %19 = func.call pure @update(%14) : (i32) -> (i32)
-  %20 = scalar.constant 0 : i32
-  %21 = scalar.cmpi eq, %10, %20 : i32
-  %first$22 = scf.if %21 -> (vector<2xi32>) {
-    %23 = index.cast %11 : i64 to index
-    %24 = vector.insert %19 into %first$4[%23] : i32, vector<2xi32>
-    scf.yield %24 : vector<2xi32>
-  } else {
-    scf.yield %first$4 : vector<2xi32>
-  }
-  %25 = scalar.constant 0 : i32
-  %26 = scalar.cmpi eq, %10, %25 : i32
-  %second$27 = scf.if %26 -> (vector<4xi32>) {
-    scf.yield %second$5 : vector<4xi32>
-  } else {
-    %28 = index.cast %11 : i64 to index
-    %29 = vector.insert %19 into %second$5[%28] : i32, vector<4xi32>
-    scf.yield %29 : vector<4xi32>
-  }
-  %30 = scalar.constant 1 : i32
-  %31 = index.cast %30 : i32 to index
-  %32 = vector.extract %first$22[%31] : vector<2xi32> -> i32
-  %33 = scalar.constant 10 : i32
-  %34 = scalar.muli %32, %33 : i32
-  %35 = scalar.constant 3 : i32
-  %36 = index.cast %35 : i32 to index
-  %37 = vector.extract %second$27[%36] : vector<4xi32> -> i32
-  %38 = scalar.addi %34, %37 : i32
-  func.return %38 : i32
+  %24 = func.call @update(%22, %23) : (buffer, offset) -> (i32)
+  func.return %24 : i32
 }
 
-func.def @update(%value$39: i32) -> (i32) {
-  %41 = scalar.constant 5 : i32
-  %value$42 = scalar.addi %value$39, %41 : i32
-  func.return %value$42 : i32
+func.def @update(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %28 = scalar.constant 5 : i32
+  %29 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
+  %31 = scalar.addi %30, %28 : i32
+  %32 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %31, %32[0] : i32, view<1xi32>
+  func.return %31 : i32
 }
 
 // ====

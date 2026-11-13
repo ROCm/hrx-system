@@ -9,13 +9,13 @@ auto entry() -> missing::type<N>;
 // Dependent arguments do not make a missing template name dependent.
 namespace known {}
 template <unsigned N>
-// ERROR@+1: PARSE/036 "'missing <>' is not a type"
+// ERROR@+1: PARSE/036 "'missing<>' is not a type"
 auto entry() -> known::missing<N>;
 
 // ====
 // RUN: verify
 template <unsigned N>
-// ERROR@+1: PARSE/036 "'Missing <>' is not a type"
+// ERROR@+1: PARSE/036 "'Missing<>' is not a type"
 auto entry() -> Missing<N>;
 
 // ====
@@ -23,7 +23,7 @@ auto entry() -> Missing<N>;
 // Neither typename nor template supplies the missing declaration.
 namespace known {}
 template <unsigned N>
-// ERROR@+1: PARSE/036 "no type named 'missing' in '::known'"
+// ERROR@+1: PARSE/036 "no type named 'missing' in 'known'"
 using Result = typename known::template missing<N>;
 
 // ====
@@ -32,7 +32,7 @@ namespace known {
 struct Type {};
 }
 template <unsigned N>
-// ERROR@+1: PARSE/036 "no type named 'Type' in '::known'"
+// ERROR@+1: PARSE/036 "no type named 'Type' in 'known'"
 using Result = typename known::template Type<N>;
 
 // ====

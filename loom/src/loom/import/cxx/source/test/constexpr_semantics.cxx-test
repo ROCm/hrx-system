@@ -2,7 +2,7 @@
 // An uninitialized const declaration is not a source constant.
 extern const unsigned value;
 int entry() {
-  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
   if constexpr (value == 4) return 11;
   else return 22;
 }
@@ -10,7 +10,7 @@ int entry() {
 // ====
 // Ordinary runtime parameters cannot control source selection.
 int entry(int value) {
-  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
   if constexpr (value) return 11;
   else return 22;
 }
@@ -19,18 +19,18 @@ int entry(int value) {
 // A dependent parameter is checked when its type becomes concrete.
 template <typename T>
 int select(T value) {
-  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
   if constexpr (value) return 11;
   else return 22;
 }
-// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'select <int>' requested here"
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'select<int>' requested here"
 int entry() { return select(3); }
 
 // ====
 // A nondependent condition is checked before a template is instantiated.
 template <typename T>
 int select(int value) {
-  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
   if constexpr (value) return 11;
   else return 22;
 }
@@ -39,7 +39,7 @@ int select(int value) {
 // Discarded source outside templates remains subject to source checking.
 int entry(int value) {
   if constexpr (false) {
-    // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+    // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
     if constexpr (value) return 11;
   }
   return 22;

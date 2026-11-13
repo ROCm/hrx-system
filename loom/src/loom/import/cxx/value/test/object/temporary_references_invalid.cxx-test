@@ -21,3 +21,13 @@ float* const* escape_pointer(float* input) {
   // ERROR@+1: LOWERING/059 "reference identity escaped an automatic value without addressable storage"
   return &pointer;
 }
+
+// ====
+// A default member initializer cannot extend its temporary through whichever
+// later construction happens to use it.
+struct Guard {};
+struct Holder {
+  const Guard& member = Guard{};
+};
+// ERROR@+1: PARSE/036 "a temporary expression bound to member 'member' from a default member initializer is ill-formed"
+Holder invalid_default_reference_member{};

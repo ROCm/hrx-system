@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "iree/testing/gtest.h"
+#include "loom/import/cxx/source/constants.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/options.h"
 #include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/value/types.h"
@@ -33,9 +35,19 @@ class Expressions final : public cxx::ASTVisitor {
         origins(source.unit(), types),
         retain_materialization_(retain_materialization) {}
 
+  bool preVisit(cxx::AST* ast) override {
+    auto* constant = cxx::ast_cast<cxx::ConstExpressionAST>(ast);
+    return !constant || (constant->constValue &&
+                         constant_contains_address(*constant->constValue));
+  }
+
   void postVisit(cxx::AST* ast) override {
     if (auto* expression = cxx::ast_cast<cxx::ExpressionAST>(ast)) {
       origins.retain(expression, retain_materialization_);
+      if (cxx::ast_cast<cxx::ConstExpressionAST>(expression) &&
+          origins.result(expression) == expression) {
+        constructions.push_back(expression);
+      }
     }
   }
 
@@ -51,6 +63,23 @@ class Expressions final : public cxx::ASTVisitor {
     cxx::ASTVisitor::visit(ast);
   }
 
+  void visit(cxx::BracedInitListAST* ast) override {
+    for (auto* element :
+         cxx::ListView{cxx::Initializer(ast).expressionList()}) {
+      accept(element);
+    }
+    if (ast->implicitElement) {
+      accept(ast->implicitElement->initializer());
+    }
+  }
+
+  void visit(cxx::ParenInitializerAST* ast) override {
+    for (auto* element :
+         cxx::ListView{cxx::Initializer(ast).expressionList()}) {
+      accept(element);
+    }
+  }
+
   void visit(cxx::ReturnStatementAST* ast) override {
     returned = ast->expression;
     cxx::ASTVisitor::visit(ast);
@@ -63,7 +92,7 @@ class Expressions final : public cxx::ASTVisitor {
   // Named declarations provide stable source roles to the assertions.
   std::unordered_map<std::string, cxx::ExpressionAST*> initializers;
   // Explicit construction sites, retained in source order.
-  std::vector<cxx::BracedTypeConstructionAST*> constructions;
+  std::vector<cxx::ExpressionAST*> constructions;
   // Last return operand, used by the single-return construction witness.
   cxx::ExpressionAST* returned = nullptr;
 
@@ -89,7 +118,7 @@ TEST(TemporaryOriginsTest, ConstructorSyntaxSharesOneResultObject) {
   ASSERT_TRUE(conversion->conversionFunction->isConstructor());
   auto* result = expressions.origins.result(conversion);
   ASSERT_NE(result, nullptr);
-  EXPECT_EQ(result, expressions.origins.result(conversion->expression));
+  EXPECT_EQ(expressions.origins.result(conversion->expression), nullptr);
   EXPECT_EQ(expressions.origins.materialization(conversion), result);
   auto* arguments =
       cxx::ast_cast<cxx::ParenInitializerAST>(conversion->expression);
@@ -190,8 +219,7 @@ TEST(TemporaryOriginsTest, PointerConversionsOwnTheirMaterializedValue) {
   expressions.accept(source.unit().ast());
   for (const auto& [name, initializer] : expressions.initializers) {
     SCOPED_TRACE(name);
-    auto* referent = cxx::Initializer(initializer)
-                         .referenceExpression(source.unit().typeTraits());
+    auto* referent = reference_initializer(source.unit(), initializer);
     ASSERT_NE(referent, nullptr);
     auto* materialization = expressions.origins.materialization(referent);
     ASSERT_NE(materialization, nullptr);

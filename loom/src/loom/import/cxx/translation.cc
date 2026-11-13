@@ -17,6 +17,7 @@
 #include <cxx/token.h>
 #include <cxx/translation_unit.h>
 #include <cxx/types.h>
+#include <cxx/vector_components.h>
 
 #include <algorithm>
 #include <array>
@@ -264,22 +265,29 @@ class Translator final : private Initialization::Evaluation {
   std::optional<SubobjectProjection> current_receiver_selection(
       cxx::ExpressionAST* expression) {
     expression = unwrap_object_identity(unit_, expression);
-    cxx::Symbol* field = nullptr;
-    cxx::List<cxx::Symbol*>* path = nullptr;
-    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+    std::optional<SubobjectProjection> selected;
+    cxx::Symbol* field;
+    auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression);
+    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+    if (id) {
       field = id->symbol;
-      path = id->subobjectPath;
-    } else if (auto* member =
-                   cxx::ast_cast<cxx::MemberExpressionAST>(expression);
-               member && is_current_object(unit_, member->baseExpression)) {
+    } else if (member && is_current_object(unit_, member->baseExpression)) {
       field = member->symbol;
-      path = member->subobjectPath;
-    }
-    auto* root = path ? path->value : field;
-    if (!is_direct_subobject(field) || !receivers_.find(root)) {
+    } else {
       return std::nullopt;
     }
-    return types_.selection(field, path, expression);
+    if (!is_direct_subobject(field)) {
+      return std::nullopt;
+    }
+    if (id) {
+      selected = types_.selection(field, id->subobjectPath, expression);
+    } else {
+      selected = types_.selection(member, expression);
+    }
+    if (!receivers_.find(selected->root->source)) {
+      return std::nullopt;
+    }
+    return selected;
   }
 
   Value selected_receiver_value(const SubobjectProjection& selected,
@@ -1814,17 +1822,20 @@ class Translator final : private Initialization::Evaluation {
       }
       return;
     }
-    if (unit_.typeTraits().is_reference(variable->type())) {
+    auto traits = unit_.typeTraits();
+    const bool aliases_subobject = variable->isStructuredBindingAlias();
+    if (aliases_subobject || traits.is_reference(variable->type())) {
       if (!initializer) {
-        fail(owner, "reference locals require an initializer");
+        fail(owner, "reference bindings require an initializer");
       }
-      auto* referent_expression =
-          cxx::Initializer(initializer).referenceExpression(unit_.typeTraits());
+      auto* referent_expression = reference_initializer(unit_, initializer);
       if (!referent_expression) {
         fail(initializer,
-             "reference locals require one initializer expression");
+             "reference bindings require one initializer expression");
       }
-      auto* referent = unit_.typeTraits().remove_reference(variable->type());
+      auto* referent = traits.is_reference(variable->type())
+                           ? traits.remove_reference(variable->type())
+                           : variable->type();
       if (auto* materialization =
               control_->reference_materialization(variable)) {
         if (control_->reference_requires_storage(variable)) {
@@ -1893,13 +1904,17 @@ class Translator final : private Initialization::Evaluation {
       return;
     }
     types_.partition(variable->type(), owner);
-    if (types_.address_domain(types_.unqualified(variable->type()), owner) ==
-        LOOM_SCALAR_TYPE_NONE) {
+    auto* folded_constant = folded_variable_constant(variable);
+    if (!folded_constant &&
+        types_.address_domain(types_.unqualified(variable->type()), owner) ==
+            LOOM_SCALAR_TYPE_NONE) {
       types_.admit_construction(variable->constructor(), variable->type(),
                                 owner);
     }
     auto value = apply_constexpr_contract(
-        record_constructor_call
+        folded_constant ? initialization_.constant(*folded_constant,
+                                                   variable->type(), owner)
+        : record_constructor_call
             ? initialization_.value(variable->type(), initializer,
                                     variable->constructor(), owner)
         : initializer ? expression(initializer)
@@ -1917,6 +1932,9 @@ class Translator final : private Initialization::Evaluation {
     reject_misplaced_binding_declarator(unit_, diagnostics_,
                                         declaration->declarator);
     auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(declaration->symbol);
+    auto* initializer = variable && variable->initializer()
+                            ? variable->initializer()
+                            : declaration->initializer;
     auto constexpr_contract = admit_constexpr_contract(
         unit_, diagnostics_, types_, attributes, variable,
         variable && control_->addressed(variable), declaration);
@@ -1939,7 +1957,7 @@ class Translator final : private Initialization::Evaluation {
              "workgroup storage requires a kernel or template definition "
              "body");
       }
-      if (declaration->initializer) {
+      if (initializer) {
         fail(declaration, "workgroup storage cannot have an initializer");
       }
       if (control_->automatic_destruction(variable)) {
@@ -1963,8 +1981,7 @@ class Translator final : private Initialization::Evaluation {
     }
     auto mark = begin_full_expression();
     extends_temporaries_ = control_->initializes_range(declaration);
-    initialize_variable(variable, declaration->initializer, constexpr_contract,
-                        declaration);
+    initialize_variable(variable, initializer, constexpr_contract, declaration);
     finish_full_expression(mark);
   }
 
@@ -2185,6 +2202,15 @@ class Translator final : private Initialization::Evaluation {
 
   StorageProjection pointer_expression(cxx::ExpressionAST* ast) {
     auto* source = strip_implicit_casts(ast);
+    if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(source);
+        cast && is_class_adjustment(cast) &&
+        unit_.typeTraits().is_pointer(cast->type)) {
+      auto object = pointer_expression(cast->expression);
+      auto byte_offset = types_.subobject_offset(cast->subobjectPath);
+      return cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion
+                 ? storage_.enclosing(object, byte_offset, cast)
+                 : storage_.subobject(object, byte_offset, cast);
+    }
     auto* source_type = unit_.typeTraits().remove_reference(source->type);
     if (unit_.typeTraits().is_array(source_type)) {
       // Direct array indexing retains its enclosing lvalue's alignment. An
@@ -2214,22 +2240,23 @@ class Translator final : private Initialization::Evaluation {
     if (ast->symbol) {
       fail(ast, "overloaded indexing is not admitted");
     }
+    auto* index_expression = subscript_index(ast);
     auto* base_type =
         unit_.typeTraits().remove_reference(ast->baseExpression->type);
     auto* index_type =
-        unit_.typeTraits().remove_reference(ast->indexExpression->type);
+        unit_.typeTraits().remove_reference(index_expression->type);
     if (types_.native_vector(base_type) || types_.native_vector(index_type)) {
       fail(ast, "vector lane subscripts require a value projection");
     }
     if (unit_.typeTraits().is_pointer(base_type) ||
         unit_.typeTraits().is_array(base_type)) {
       auto base = pointer_expression(ast->baseExpression);
-      auto index = expression(ast->indexExpression);
+      auto index = expression(index_expression);
       return {base, index.ssa(), base_type, index_type};
     }
     // The commuted spelling i[p] still evaluates its written base first.
     auto index = expression(ast->baseExpression);
-    auto base = pointer_expression(ast->indexExpression);
+    auto base = pointer_expression(index_expression);
     return {base, index.ssa(), index_type, base_type};
   }
 
@@ -2278,7 +2305,7 @@ class Translator final : private Initialization::Evaluation {
            "storage");
     }
     auto base = expression(member->baseExpression);
-    auto selected = types_.selection(field, member->subobjectPath, ast);
+    auto selected = types_.selection(member, ast);
     auto value = base.project(*selected.partition, selected.component_offset);
     return storage_.project(value.pointer(), referent, ast);
   }
@@ -2360,10 +2387,8 @@ class Translator final : private Initialization::Evaluation {
       auto base = member->accessOp == cxx::TokenKind::T_MINUS_GREATER
                       ? pointer_expression(member->baseExpression)
                       : object_address(member->baseExpression);
-      auto byte_offset = source_subobject_offset(field);
-      if (member->subobjectPath) {
-        byte_offset += types_.subobject_offset(member->subobjectPath);
-      }
+      auto byte_offset =
+          source_subobject_offset(field) + types_.member_object_offset(member);
       return storage_.subobject(base, byte_offset, ast);
     }
     // Value-producing operators and conversions materialize their result just
@@ -2531,9 +2556,8 @@ class Translator final : private Initialization::Evaluation {
       types_.require_mutable(member->type, owner);
     }
     return pointer_alias_pointee(*alias, owner)
-        .project(
-            types_.selection(member->symbol, member->subobjectPath, member),
-            member->type, storage_, owner);
+        .project(types_.selection(member, member), member->type, storage_,
+                 owner);
   }
 
   ObjectLvalue object_destination(
@@ -2828,10 +2852,9 @@ class Translator final : private Initialization::Evaluation {
                                  bool retain_value = true) {
     const bool left_vector =
         types_.native_vector(subscript->baseExpression->type);
-    auto* vector =
-        left_vector ? subscript->baseExpression : subscript->indexExpression;
-    auto* index =
-        left_vector ? subscript->indexExpression : subscript->baseExpression;
+    auto* written_index = subscript_index(subscript);
+    auto* vector = left_vector ? subscript->baseExpression : written_index;
+    auto* index = left_vector ? written_index : subscript->baseExpression;
     if (left_vector) {
       auto target = reference_lvalue(vector, owner, access);
       auto coordinate = expression(index);
@@ -2845,15 +2868,6 @@ class Translator final : private Initialization::Evaluation {
                                subscript->type, owner, retain_value);
   }
 
-  const cxx::Identifier* vector_component_identifier(
-      cxx::MemberExpressionAST* selection) const {
-    auto* name = cxx::ast_cast<cxx::NameIdAST>(selection->unqualifiedId);
-    IREE_ASSERT(selection->vectorComponentKind !=
-                cxx::VectorComponentKind::kNone);
-    IREE_ASSERT(name && name->identifier);
-    return name->identifier;
-  }
-
   const cxx::Type* vector_component_source_type(
       cxx::MemberExpressionAST* selection) const {
     if (selection->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
@@ -2865,12 +2879,9 @@ class Translator final : private Initialization::Evaluation {
 
   size_t vector_component_index(cxx::MemberExpressionAST* selection,
                                 size_t result_position) {
-    auto* source =
-        types_.native_vector(vector_component_source_type(selection));
-    IREE_ASSERT(source);
-    return cxx::vector_component_index(selection->vectorComponentKind,
-                                       vector_component_identifier(selection),
-                                       source->elementCount(), result_position);
+    auto access = cxx::vectorComponentAccess(selection);
+    IREE_ASSERT(access);
+    return cxx::vectorComponentIndex(*access, result_position);
   }
 
   Value read_vector_component(Value source,
@@ -3033,9 +3044,8 @@ class Translator final : private Initialization::Evaluation {
           !control_->storage_backed(member)) ||
          is_array_element(member->baseExpression))) {
       auto base = reference_lvalue(member->baseExpression, owner, access);
-      return base.project(
-          types_.selection(member->symbol, member->subobjectPath, member),
-          member->type, storage_, owner);
+      return base.project(types_.selection(member, member), member->type,
+                          storage_, owner);
     }
     if ((cxx::ast_cast<cxx::CallExpressionAST>(projected) ||
          (cxx::ast_cast<cxx::SubscriptExpressionAST>(projected) &&
@@ -3057,7 +3067,7 @@ class Translator final : private Initialization::Evaluation {
     }
     if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
-                      types_.native_vector(subscript->indexExpression->type))) {
+                      types_.native_vector(subscript_index(subscript)->type))) {
       return vector_lane_destination(subscript, owner, access);
     }
     auto retained = control_->destination(expression);
@@ -3240,7 +3250,7 @@ class Translator final : private Initialization::Evaluation {
     auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
     const bool vector_lane =
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
-                      types_.native_vector(subscript->indexExpression->type));
+                      types_.native_vector(subscript_index(subscript)->type));
     if (vector_lane) {
       return vector_lane_destination(subscript, owner, access,
                                      /*retain_value=*/false);
@@ -3975,16 +3985,17 @@ class Translator final : private Initialization::Evaluation {
     return from_target(std::move(target));
   }
 
-  ReceiverArgument receiver_argument(cxx::FunctionSymbol* function,
-                                     cxx::ExpressionAST* receiver,
-                                     cxx::TokenKind access_op, cxx::AST* owner,
-                                     cxx::List<cxx::Symbol*>* path = nullptr) {
-    if (!path) {
+  ReceiverArgument receiver_argument(
+      cxx::FunctionSymbol* function, cxx::ExpressionAST* receiver,
+      cxx::TokenKind access_op, cxx::AST* owner,
+      const SubobjectProjection* projection = nullptr) {
+    if (!projection) {
       return unprojected_receiver_argument(function, receiver, access_op,
                                            owner);
     }
-    const auto& selected = types_.projection(path, owner);
-    auto* enclosing = types_.record(path->value->parent()->type(), owner);
+    const auto& selected = *projection;
+    auto* enclosing =
+        types_.record(selected.root->source->parent()->type(), owner);
     auto result = unprojected_receiver_argument(function, receiver, access_op,
                                                 owner, enclosing);
     auto* type = implicit_object_type(unit_, function);
@@ -4021,12 +4032,20 @@ class Translator final : private Initialization::Evaluation {
     auto* base = unwrap_expression(call->baseExpression);
     auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base);
     auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
-    return receiver_argument(
-        function, member ? member->baseExpression : nullptr,
-        member ? member->accessOp : cxx::TokenKind::T_DOT, call,
-        member ? member->subobjectPath
-        : id   ? id->subobjectPath
-               : nullptr);
+    const SubobjectProjection* projection = nullptr;
+    cxx::ExpressionAST* receiver = member ? member->baseExpression : nullptr;
+    std::optional<SubobjectProjection> selected;
+    if (member) {
+      auto object = types_.member_object_selection(member, member);
+      receiver = object.object;
+      selected = object.projection;
+      projection = selected ? &*selected : nullptr;
+    } else if (id && id->subobjectPath) {
+      projection = &types_.projection(id->subobjectPath, id);
+    }
+    return receiver_argument(function, receiver,
+                             member ? member->accessOp : cxx::TokenKind::T_DOT,
+                             call, projection);
   }
 
   ReceiverArgument receiver_argument(cxx::SubscriptExpressionAST* call,
@@ -4123,7 +4142,7 @@ class Translator final : private Initialization::Evaluation {
       // static function. Preserve that sequencing before explicit arguments.
       effect(member->baseExpression);
     }
-    return emit_ordinary_call(call, function, {call->expressionList, nullptr},
+    return emit_ordinary_call(call, function, {call->expressionList},
                               std::move(receiver), source);
   }
 
@@ -4141,10 +4160,10 @@ class Translator final : private Initialization::Evaluation {
       receiver = receiver_argument(call, function);
     } else {
       // A static overloaded subscript still evaluates its written object
-      // expression before the explicit index argument.
+      // expression before the explicit subscript arguments.
       effect(call->baseExpression);
     }
-    return emit_ordinary_call(call, function, {nullptr, call->indexExpression},
+    return emit_ordinary_call(call, function, {call->expressionList},
                               std::move(receiver), source);
   }
 
@@ -4530,8 +4549,6 @@ class Translator final : private Initialization::Evaluation {
   struct SourceArguments {
     // Remaining arguments owned by an ordinary call's frontend list.
     cxx::List<cxx::ExpressionAST*>* remaining = nullptr;
-    // Single argument supplied by overloaded subscript syntax.
-    cxx::ExpressionAST* single = nullptr;
     // Arguments recovered from a declaration initializer.
     std::span<cxx::ExpressionAST* const> range;
     // Next unevaluated argument in the initializer range.
@@ -4545,9 +4562,6 @@ class Translator final : private Initialization::Evaluation {
         auto* argument = remaining->value;
         remaining = remaining->next;
         return argument;
-      }
-      if (single) {
-        return std::exchange(single, nullptr);
       }
       return range_index < range.size() ? range[range_index++] : nullptr;
     }
@@ -5761,6 +5775,26 @@ class Translator final : private Initialization::Evaluation {
     }
     auto source = locations_.get(ast);
     if (auto* expression = cxx::ast_cast<cxx::ConstExpressionAST>(ast)) {
+      if (constant_contains_address(*expression->constValue)) {
+        return this->expression(expression->expression);
+      }
+      // Preserve an existing source binding selected by constant evaluation.
+      // The frontend wraps reads of constexpr variables so their value remains
+      // available without re-evaluation, but locals and configs already have
+      // an importer-owned value and stable source name. Namespace-scope
+      // immutable objects have no such binding and remain foldable constants.
+      auto* id = cxx::ast_cast<cxx::IdExpressionAST>(
+          strip_implicit_casts(expression->expression));
+      auto* variable =
+          id ? cxx::symbol_cast<cxx::VariableSymbol>(id->symbol) : nullptr;
+      auto traits = unit_.typeTraits();
+      if (id &&
+          (values_.find(id->symbol) != values_.end() ||
+           (variable &&
+            (configs_.contains(variable) || traits.is_arithmetic(id->type) ||
+             traits.is_enum(id->type) || traits.is_vector(id->type))))) {
+        return this->expression(expression->expression);
+      }
       return constant(*expression->constValue, ast);
     }
     if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(ast)) {
@@ -5782,6 +5816,14 @@ class Translator final : private Initialization::Evaluation {
         return pointer_expression(cast->expression).pointer;
       }
       if (is_class_adjustment(cast)) {
+        if (unit_.typeTraits().is_pointer(cast->type)) {
+          auto pointer = expression(cast->expression).pointer();
+          auto byte_offset = types_.subobject_offset(cast->subobjectPath);
+          return cast->castKind ==
+                         cxx::ImplicitCastKind::kBaseToDerivedConversion
+                     ? storage_.enclosing(pointer, byte_offset, cast)
+                     : storage_.subobject(pointer, byte_offset, cast);
+        }
         if (cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion) {
           return load(cast);
         }
@@ -5911,7 +5953,8 @@ class Translator final : private Initialization::Evaluation {
     if (auto* construction =
             cxx::ast_cast<cxx::BracedTypeConstructionAST>(ast)) {
       if (types_.address_domain(ast->type, ast) != LOOM_SCALAR_TYPE_NONE) {
-        auto* arguments = construction->bracedInitList->expressionList;
+        auto* arguments =
+            cxx::Initializer(construction->bracedInitList).expressionList();
         if (!arguments || arguments->next) {
           fail(ast, "address construction requires one integer argument");
         }
@@ -6115,7 +6158,7 @@ class Translator final : private Initialization::Evaluation {
           return read(ObjectLvalue{member->type, *destination}, member);
         }
         auto value = expression(member->baseExpression);
-        auto slice = types_.selection(field, member->subobjectPath, ast);
+        auto slice = types_.selection(member, ast);
         return value.project(*slice.partition, slice.component_offset);
       }
       require_kernel_context(ast);
@@ -6191,7 +6234,19 @@ class Translator final : private Initialization::Evaluation {
                    ? conditional(ast, left.ssa(), evaluate_right, skipped)
                    : conditional(ast, left.ssa(), skipped, evaluate_right);
       }
-      auto right = expression(binary->rightExpression);
+      const bool shift = binary->op == cxx::TokenKind::T_LESS_LESS ||
+                         binary->op == cxx::TokenKind::T_GREATER_GREATER;
+      auto* shift_splat =
+          shift && types_.native_vector(binary->leftExpression->type)
+              ? cxx::ast_cast<cxx::ImplicitCastExpressionAST>(
+                    binary->rightExpression)
+              : nullptr;
+      if (shift_splat &&
+          shift_splat->castKind != cxx::ImplicitCastKind::kVectorSplat) {
+        shift_splat = nullptr;
+      }
+      auto right = expression(shift_splat ? shift_splat->expression
+                                          : binary->rightExpression);
       if (left.is_pointer() || right.is_pointer()) {
         if (binary->op == cxx::TokenKind::T_EQUAL_EQUAL ||
             binary->op == cxx::TokenKind::T_EXCLAIM_EQUAL) {
@@ -6232,10 +6287,18 @@ class Translator final : private Initialization::Evaluation {
       // C++ promotes shift operands independently. Loom's shift operands have
       // one width. Every defined source shift count fits the promoted left
       // width; normalize that count without changing any defined execution.
-      if (binary->op == cxx::TokenKind::T_LESS_LESS ||
-          binary->op == cxx::TokenKind::T_GREATER_GREATER) {
-        right = numeric_convert(right.ssa(), binary->rightExpression->type,
-                                binary->leftExpression->type, ast);
+      if (shift) {
+        right =
+            types_.native_vector(binary->leftExpression->type)
+                ? shift_splat ? vectors_.convert(right.ssa(),
+                                                 shift_splat->expression->type,
+                                                 binary->leftExpression->type,
+                                                 ast, lexical_fastmath_flags_)
+                              : vectors_.convert_elements(
+                                    right.ssa(), binary->rightExpression->type,
+                                    binary->leftExpression->type, ast)
+                : numeric_convert(right.ssa(), binary->rightExpression->type,
+                                  binary->leftExpression->type, ast);
       }
       return this->binary(binary->op, left.ssa(), right.ssa(),
                           binary->leftExpression->type, ast->type, ast);
@@ -6349,11 +6412,12 @@ class Translator final : private Initialization::Evaluation {
         }
         return *called.value;
       }
+      auto* index_expression = subscript_index(subscript);
       auto* base_type = subscript->baseExpression->type;
-      auto* index_type = subscript->indexExpression->type;
+      auto* index_type = index_expression->type;
       if (types_.native_vector(base_type) || types_.native_vector(index_type)) {
         auto base = expression(subscript->baseExpression);
-        auto index = expression(subscript->indexExpression);
+        auto index = expression(index_expression);
         if (!types_.native_vector(base_type)) {
           std::swap(base, index);
           std::swap(base_type, index_type);
@@ -7371,14 +7435,16 @@ class Translator final : private Initialization::Evaluation {
         reject_misplaced_binding_attributes(
             unit_, diagnostics_, structured->attributeList,
             BindingAttributeScope::LocalDeclaration);
-        if (!structured->hiddenVariable || !structured->bindingDeclaratorList) {
+        if (!structured->binding.hiddenVariable ||
+            !structured->binding.bindingDeclaratorList) {
           fail(structured,
                "structured binding decomposition must be resolved before "
                "import");
         }
-        initialize_local_declarator(structured->hiddenVariable,
+        initialize_local_declarator(structured->binding.hiddenVariable,
                                     structured->attributeList, structured);
-        for (auto* binding : cxx::ListView{structured->bindingDeclaratorList}) {
+        for (auto* binding :
+             cxx::ListView{structured->binding.bindingDeclaratorList}) {
           if (!binding->initializer) {
             fail(structured,
                  "structured binding decomposition must be resolved before "
@@ -8087,7 +8153,7 @@ class Translator final : private Initialization::Evaluation {
       if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast);
           subscript && !subscript->symbol) {
         effect(subscript->baseExpression);
-        effect(subscript->indexExpression);
+        effect(subscript_index(subscript));
         return;
       }
       if (auto* select = cxx::ast_cast<cxx::ConditionalExpressionAST>(ast)) {

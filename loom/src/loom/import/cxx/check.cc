@@ -9,6 +9,7 @@
 #include <cxx/ast.h>
 #include <cxx/ast_visitor.h>
 #include <cxx/control.h>
+#include <cxx/initialization.h>
 #include <cxx/literals.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
@@ -1326,17 +1327,19 @@ class CheckBody {
       return expression(initializer->expression);
     }
     if (auto* initializer = cxx::ast_cast<cxx::ParenInitializerAST>(source)) {
-      if (initializer->expressionList && !initializer->expressionList->next &&
+      auto* arguments = cxx::Initializer(initializer).expressionList();
+      if (arguments && !arguments->next &&
           types_.unqualified(source->type) ==
-              types_.unqualified(initializer->expressionList->value->type)) {
-        return expression(initializer->expressionList->value);
+              types_.unqualified(arguments->value->type)) {
+        return expression(arguments->value);
       }
     }
     if (auto* initializer = cxx::ast_cast<cxx::BracedInitListAST>(source)) {
-      if (initializer->expressionList && !initializer->expressionList->next &&
+      auto* arguments = cxx::Initializer(initializer).expressionList();
+      if (arguments && !arguments->next &&
           types_.unqualified(source->type) ==
-              types_.unqualified(initializer->expressionList->value->type)) {
-        return expression(initializer->expressionList->value);
+              types_.unqualified(arguments->value->type)) {
+        return expression(arguments->value);
       }
     }
     if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(source)) {

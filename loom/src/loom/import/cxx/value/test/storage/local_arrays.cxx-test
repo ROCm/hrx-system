@@ -156,8 +156,8 @@ unsigned value_initialized() {
 }
 // ----
 func.def public @value_initialized() -> (i32) {
-  %146 = scalar.constant 44 : i32
-  func.return %146 : i32
+  %174 = scalar.constant 44 : i32
+  func.return %174 : i32
 }
 
 // ====

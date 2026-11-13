@@ -63,5 +63,5 @@ class Owner {
  public:
   explicit Owner(unsigned value) : value(value) {}
 };
-// ERROR@+1: PARSE/036 "calling a private constructor of class '::Owner'"
+// ERROR@+1: PARSE/036 "calling a private constructor of class 'Owner'"
 void run() { Owner source(7); Owner target(source); }

@@ -149,3 +149,40 @@ func.def public @entry() -> (i32) {
   %result = scalar.constant 82 : i32
   func.return %result : i32
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A derived-to-base pointer conversion adjusts nonnull storage and preserves
+// the canonical zero origin of null.
+struct Base { unsigned value; };
+struct Prefix { unsigned tag; };
+struct Derived : Prefix, Base {};
+Base* pointer(Derived* value) { return value; }
+
+// ----
+func.def public @pointer(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  %4 = index.constant 4 : offset
+  %5 = index.add %value_byte_offset, %4 : offset
+  %6 = buffer.compare.null %value : buffer
+  %7 = index.constant 0 : offset
+  %8 = scf.select %6, %7, %5 : offset
+  func.return %value, %8 : buffer, offset
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The inverse class-pointer conversion preserves null without evaluating an
+// invalid negative offset for its absent object.
+struct Base { unsigned value; };
+struct Prefix { unsigned tag; };
+struct Derived : Prefix, Base {};
+Derived* pointer(Base* value) { return static_cast<Derived*>(value); }
+
+// ----
+func.def public @pointer(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  %4 = index.constant 4 : offset
+  %5 = buffer.compare.null %value : buffer
+  %6 = scf.select %5, %4, %value_byte_offset : offset
+  %7 = index.sub %6, %4 : offset
+  func.return %value, %7 : buffer, offset
+}

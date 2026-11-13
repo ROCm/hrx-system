@@ -88,7 +88,8 @@ constexpr unsigned value() {
   enum class E : unsigned char { first = V, next };
   return unsigned(E::next);
 }
-// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+// ERROR@+2: PARSE/036 "static assertion expression is not an integral constant expression"
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'value<255>' requested here"
 static_assert(value<255>() == 256);
 
 // ====
@@ -181,7 +182,8 @@ constexpr unsigned value() {
   enum class E : unsigned char { first = V, next };
   return unsigned(E::next);
 }
-// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+// ERROR@+2: PARSE/036 "static assertion expression is not an integral constant expression"
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'value<255>' requested here"
 static_assert(value<255>() == 256);
 
 // ====
@@ -274,14 +276,15 @@ constexpr unsigned value() {
   enum class E : unsigned char { first = V, next };
   return unsigned(E::next);
 }
-// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+// ERROR@+2: PARSE/036 "static assertion expression is not an integral constant expression"
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'value<255>' requested here"
 static_assert(value<255>() == 256);
 
 // ====
 // INPUT: cxx
 // Scoped enum values do not implicitly convert to an integer.
 enum class E { value };
-// ERROR@+1: PARSE/036 "cannot initialize return value of type 'unsigned int' with an expression of type '::E'"
+// ERROR@+1: PARSE/036 "cannot initialize return value of type 'unsigned int' with an expression of type 'E'"
 unsigned entry(E value) { return value; }
 
 // ====
@@ -289,5 +292,5 @@ unsigned entry(E value) { return value; }
 // Distinct nominal enum types do not become interchangeable after projection.
 enum class E { value };
 enum class F { value };
-// ERROR@+1: PARSE/036 "invalid operands to binary expression ('::E' and '::F')"
+// ERROR@+1: PARSE/036 "invalid operands to binary expression ('E' and 'F')"
 bool entry(E value) { return value == F::value; }

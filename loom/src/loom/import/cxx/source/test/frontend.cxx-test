@@ -91,28 +91,24 @@ static_assert(sizeof(Alias<Box<int>>::type) == sizeof(int));
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((2147483647 + 1) == (2147483647 + 1));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(((-2147483647 - 1) - 1) == ((-2147483647 - 1) - 1));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((2147483647 * 2) == (2147483647 * 2));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(((-2147483647 - 1) * -1) == ((-2147483647 - 1) * -1));
 
@@ -125,28 +121,24 @@ static_assert((-(-2147483647 - 1)) == (-(-2147483647 - 1)));
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(((-2147483647 - 1) / -1) == ((-2147483647 - 1) / -1));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(((-2147483647 - 1) % -1) == ((-2147483647 - 1) % -1));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((9223372036854775807LL + 1) == (9223372036854775807LL + 1));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(((-9223372036854775807LL - 1) - 1) ==
               ((-9223372036854775807LL - 1) - 1));
@@ -154,14 +146,12 @@ static_assert(((-9223372036854775807LL - 1) - 1) ==
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((9223372036854775807LL * 2) == (9223372036854775807LL * 2));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(((-9223372036854775807LL - 1) * -1) ==
               ((-9223372036854775807LL - 1) * -1));
@@ -176,7 +166,6 @@ static_assert((-(-9223372036854775807LL - 1)) ==
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(((-9223372036854775807LL - 1) / -1) ==
               ((-9223372036854775807LL - 1) / -1));
@@ -184,7 +173,6 @@ static_assert(((-9223372036854775807LL - 1) / -1) ==
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(((-9223372036854775807LL - 1) % -1) ==
               ((-9223372036854775807LL - 1) % -1));
@@ -192,63 +180,54 @@ static_assert(((-9223372036854775807LL - 1) % -1) ==
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1 / 0) == (1 / 0));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1u % 0u) == (1u % 0u));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1u << 32) == (1u << 32));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1ULL << 64) == (1ULL << 64));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1u >> 32) == (1u >> 32));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1ULL >> 64) == (1ULL >> 64));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1u << -1) == (1u << -1));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1u >> -1) == (1u >> -1));
 
 // ====
 // RUN: verify
 // Invalid constant arithmetic produces source diagnostics.
-// WARNING@+2: PARSE/036 "invalid binary expression"
 // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert((1u << (1ULL << 32)) == (1u << (1ULL << 32)));
 

@@ -29,7 +29,7 @@ unsigned load(const void* storage) {
 // ====
 void store(const void* storage) {
   auto* pointer = static_cast<const unsigned*>(storage);
-  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  // ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const unsigned int'"
   *pointer = 7;
 }
 

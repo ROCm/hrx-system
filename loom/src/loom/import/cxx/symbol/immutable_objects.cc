@@ -37,7 +37,7 @@ bool contains_mutable_subobject(cxx::TranslationUnit& unit,
     return false;
   }
   auto* definition = class_type->definition();
-  traits.requireCompleteClass(definition);
+  traits.require_complete_class(definition);
   if (!definition || !definition->isComplete()) {
     return true;
   }

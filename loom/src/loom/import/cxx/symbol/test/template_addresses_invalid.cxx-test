@@ -33,7 +33,7 @@ unsigned entry(unsigned input) {
 // ====
 // A reference argument cannot bind a temporary value.
 template <const unsigned& value>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'const unsigned int&'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a constant expression"
 constexpr unsigned choose() { return 3; }
 unsigned entry() {
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
@@ -44,7 +44,7 @@ unsigned entry() {
 // Reference conversion cannot discard the referent's const qualification.
 constexpr unsigned object = 5;
 template <unsigned& value>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned int&'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a constant expression"
 constexpr unsigned choose() { return 3; }
 unsigned entry() {
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
@@ -55,7 +55,7 @@ unsigned entry() {
 // Converting the object value would create a temporary of the requested type.
 constexpr int object = 5;
 template <const unsigned& value>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'const unsigned int&'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a constant expression"
 constexpr unsigned choose() { return 3; }
 unsigned entry() {
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
@@ -131,7 +131,7 @@ unsigned entry() {
 // Pointer offset arithmetic must not overflow the constant interpreter.
 constexpr unsigned table[3] = {3, 5, 7};
 template <const unsigned* value>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'const unsigned int*'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a constant expression"
 constexpr unsigned choose() { return 3; }
 unsigned entry() {
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
@@ -141,8 +141,7 @@ unsigned entry() {
 // ====
 // Subtracting addresses of different objects is not a constant expression.
 constexpr unsigned left[1] = {5}, right[1] = {5};
-// ERROR@+2: PARSE/036 "static assertion expression is not an integral constant expression"
-// WARNING@+1: PARSE/036 "invalid binary expression"
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
 static_assert(right - left == 0);
 
 // ====
@@ -217,23 +216,4 @@ unsigned entry() {
   constexpr unsigned local = 5;
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
   return choose<forward(local)>();
-}
-
-// ====
-// Virtual bases require one shared constant-object storage node. Until the
-// evaluator represents that node, reject the address instead of inventing a
-// separate nested object for each path through the diamond.
-struct VirtualBase {
-  unsigned value;
-};
-struct Left : virtual VirtualBase {};
-struct Right : virtual VirtualBase {};
-struct Diamond : Left, Right {};
-extern Diamond object;
-template <const unsigned& value>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'const unsigned int&'"
-constexpr unsigned choose() { return 3; }
-unsigned entry() {
-  // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
-  return choose<object.Left::value>();
 }

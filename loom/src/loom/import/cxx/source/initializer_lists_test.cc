@@ -58,7 +58,7 @@ TEST(InitializerListsTest, RetainsConversionsAndDistinctBackingIdentity) {
   auto& second = plans.retain(syntax.lists[1]);
   EXPECT_EQ(plans.get(syntax.lists[0]), &first);
   EXPECT_NE(first.backing, second.backing);
-  EXPECT_EQ(first.backing->expressionList, original_clauses);
+  EXPECT_NE(first.backing->expressionList, original_clauses);
   EXPECT_EQ(syntax.lists[0]->expressionList, original_clauses);
   EXPECT_EQ(syntax.lists[0]->type, original_type);
   auto* array = cxx::type_cast<cxx::BoundedArrayType>(first.backing->type);
@@ -67,6 +67,8 @@ TEST(InitializerListsTest, RetainsConversionsAndDistinctBackingIdentity) {
   auto traits = source.unit().typeTraits();
   EXPECT_TRUE(traits.is_const(array->elementType()));
   EXPECT_EQ(traits.remove_const(array->elementType()),
+            first.backing->expressionList->value->type);
+  EXPECT_NE(first.backing->expressionList->value->type,
             original_clauses->value->type);
   EXPECT_TRUE(traits.is_pointer(first.begin->type()));
   EXPECT_TRUE(traits.is_integral(first.limit->type()));

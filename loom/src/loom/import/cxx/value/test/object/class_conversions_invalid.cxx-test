@@ -4,7 +4,7 @@ struct Scalar {
   explicit operator unsigned() const;
 };
 unsigned entry(Scalar value) {
-  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('::Scalar' and 'unsigned int')"
+  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('Scalar' and 'unsigned int')"
   return value * 3u;
 }
 
@@ -15,7 +15,7 @@ struct Scalar {
   operator int() const;
 };
 unsigned entry(Scalar value) {
-  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('int' and '::Scalar')"
+  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('int' and 'Scalar')"
   return 1 << value;
 }
 
@@ -56,25 +56,6 @@ struct Scalar {
   operator unsigned();
 };
 unsigned entry(const Scalar value) {
-  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('const ::Scalar' and 'unsigned int')"
+  // ERROR@+1: PARSE/036 "invalid operands to binary expression ('const Scalar' and 'unsigned int')"
   return value % 3u;
-}
-
-// ====
-// Class pointer adjustment must preserve null separately from buffer extent.
-struct Base { unsigned value; };
-struct Prefix { unsigned tag; };
-struct Derived : Prefix, Base {};
-Base* pointer(Derived* value) {
-  // ERROR@+1: LOWERING/059 "class-pointer conversions require null-preserving buffer identity; use a reference conversion for a live object"
-  return value;
-}
-
-// ====
-struct Base { unsigned value; };
-struct Prefix { unsigned tag; };
-struct Derived : Prefix, Base {};
-Derived* pointer(Base* value) {
-  // ERROR@+1: LOWERING/059 "class-pointer conversions require null-preserving buffer identity; use a reference conversion for a live object"
-  return static_cast<Derived*>(value);
 }

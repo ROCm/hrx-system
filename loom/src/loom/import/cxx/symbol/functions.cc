@@ -187,6 +187,13 @@ uint8_t source_temperature(cxx::FunctionSymbol* function) {
   return 0;
 }
 
+bool has_source_visibility(cxx::FunctionSymbol* function,
+                           std::string_view visibility) {
+  const auto* attribute = semantic_attribute(function, "gnu", "visibility");
+  return attribute && attribute->arguments.size() == 1 &&
+         attribute->arguments.front()->name() == visibility;
+}
+
 }  // namespace
 
 void Functions::select(std::span<const iree_string_view_t> roots) {
@@ -253,9 +260,8 @@ void Functions::select(std::span<const iree_string_view_t> roots) {
         continue;
       }
       bool visible = !symbol->isStatic();
-      auto* visibility =
-          cxx::attributeArgument(symbol->attributes(), "visibility");
-      if (visibility && visibility->name() == "hidden") {
+      if (symbol->hasHiddenVisibility() ||
+          has_source_visibility(symbol, "hidden")) {
         visible = false;
       }
       for (auto* owner : symbol->enclosingSymbols()) {

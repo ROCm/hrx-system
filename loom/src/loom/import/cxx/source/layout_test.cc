@@ -167,7 +167,9 @@ TEST_P(LayoutTest, LayoutRequestsAndResolvedLayoutSurviveSemanticArchives) {
   ASSERT_FALSE(records.begin() == records.end());
   auto* record = cxx::symbol_cast<cxx::ClassSymbol>(*records.begin());
   ASSERT_NE(record, nullptr);
-  EXPECT_NE(cxx::findAttribute(record->attributes(), "packed"), nullptr);
+  EXPECT_NE(
+      cxx::findAttribute(record->attributes(), cxx::AttributeKind::kPacked),
+      nullptr);
   EXPECT_EQ(record->packAlignment(), 0);
   EXPECT_EQ(record->minimumAlignment(), 64);
   EXPECT_EQ(record->sizeInBytes(), 64);

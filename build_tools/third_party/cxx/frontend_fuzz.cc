@@ -184,7 +184,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     preprocess(unit, std::string(source_data, size));
     unit.parse({
         .analysisMode = cxx::ParserAnalysisMode::kFull,
-        .validateAst = true,
     });
   }
   return 0;

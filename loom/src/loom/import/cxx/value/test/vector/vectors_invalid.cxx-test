@@ -103,5 +103,5 @@ Int4 invalid(Int4 left, Int4 right) {
 // Native component values preserve whole-vector storage and are not
 // independently addressable source objects.
 using UInt4 = unsigned __attribute__((ext_vector_type(4)));
-// ERROR@+1: LOWERING/059 "extended-vector components are not addressable"
+// ERROR@+1: PARSE/036 "cannot take the address of a vector element"
 unsigned* invalid(UInt4* values) { return &values->x; }

@@ -1,6 +1,6 @@
 // RUN: verify
 // Rejects mutation of const objects and bindings.
-// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+// ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const int'"
 void store(const int* p) { p[0u] = 1; }
 
 // ====
@@ -8,7 +8,7 @@ void store(const int* p) { p[0u] = 1; }
 // Rejects mutation of const objects and bindings.
 int entry() {
   const int value = 1;
-  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  // ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const int'"
   value = 2;
   return value;
 }
@@ -18,7 +18,7 @@ int entry() {
 // Rejects mutation of const objects and bindings.
 int entry() {
   const int value = 1;
-  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  // ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const int'"
   value += 2;
   return value;
 }
@@ -26,13 +26,13 @@ int entry() {
 // ====
 // RUN: verify
 // Rejects mutation of const objects and bindings.
-// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+// ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'int* const'"
 void entry(int* const p, int* q) { p = q; }
 
 // ====
 // RUN: verify
 // Rejects mutation of const objects and bindings.
-// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+// ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'int* const'"
 void entry(int* const p) { p += 1; }
 
 // ====
@@ -40,7 +40,7 @@ void entry(int* const p) { p += 1; }
 // Rejects mutation of const objects and bindings.
 int entry() {
   const int value = 1;
-  // ERROR@+1: PARSE/036 "cannot increment a value of type 'const int'"
+  // ERROR@+1: PARSE/036 "cannot increment a non-modifiable lvalue of type 'const int'"
   ++value;
   return value;
 }

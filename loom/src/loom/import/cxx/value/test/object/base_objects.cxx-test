@@ -30,25 +30,25 @@ func.def public @memory(%value$0: buffer, %value_byte_offset: offset) -> (i32) {
   %3 = scalar.constant 3 : i32
   %4 = index.constant 8 : offset
   %5 = index.add %value_byte_offset, %4 : offset
-  %6 = buffer.view %value$0[%5] : buffer -> view<1xi32>
-  %7 = view.load<root_in_bounds> %6[0] : view<1xi32> -> i32
-  %8 = scalar.addi %7, %3 : i32
-  view.store<root_in_bounds> %8, %6[0] : i32, view<1xi32>
-  %11 = buffer.view %value$0[%value_byte_offset] : buffer -> view<1xi32>
-  %value$12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
-  %value$16 = view.load<root_in_bounds> %6[0] : view<1xi32> -> i32
-  %17 = index.constant 4 : offset
-  %18 = index.add %value_byte_offset, %17 : offset
-  %19 = buffer.view %value$0[%18] : buffer -> view<1xi32>
-  %tag = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
-  %21 = scalar.muli %value$16, %tag : i32
-  %22 = scalar.addi %value$12, %21 : i32
-  %23 = index.constant 12 : offset
+  %8 = buffer.view %value$0[%5] : buffer -> view<1xi32>
+  %9 = view.load<root_in_bounds> %8[0] : view<1xi32> -> i32
+  %10 = scalar.addi %9, %3 : i32
+  view.store<root_in_bounds> %10, %8[0] : i32, view<1xi32>
+  %15 = buffer.view %value$0[%value_byte_offset] : buffer -> view<1xi32>
+  %value$16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %value$22 = view.load<root_in_bounds> %8[0] : view<1xi32> -> i32
+  %23 = index.constant 4 : offset
   %24 = index.add %value_byte_offset, %23 : offset
   %25 = buffer.view %value$0[%24] : buffer -> view<1xi32>
-  %extra = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
-  %27 = scalar.addi %22, %extra : i32
-  func.return %27 : i32
+  %tag = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
+  %27 = scalar.muli %value$22, %tag : i32
+  %28 = scalar.addi %value$16, %27 : i32
+  %29 = index.constant 12 : offset
+  %30 = index.add %value_byte_offset, %29 : offset
+  %31 = buffer.view %value$0[%30] : buffer -> view<1xi32>
+  %extra = view.load<root_in_bounds> %31[0] : view<1xi32> -> i32
+  %33 = scalar.addi %28, %extra : i32
+  func.return %33 : i32
 }
 
 // ====
@@ -309,9 +309,9 @@ func.def public @read(%device: buffer, %device_byte_offset: offset) -> (i32) {
   %status$6 = view.load<volatile|root_in_bounds> %5[0] : view<1xi32> -> i32
   %7 = scalar.constant 7 : i32
   view.store<volatile|root_in_bounds> %7, %5[0] : i32, view<1xi32>
-  %status$16 = view.load<volatile|root_in_bounds> %5[0] : view<1xi32> -> i32
-  %17 = scalar.addi %status$6, %status$16 : i32
-  func.return %17 : i32
+  %status$18 = view.load<volatile|root_in_bounds> %5[0] : view<1xi32> -> i32
+  %19 = scalar.addi %status$6, %status$18 : i32
+  func.return %19 : i32
 }
 
 // ====

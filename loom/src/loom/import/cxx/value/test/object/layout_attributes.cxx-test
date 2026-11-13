@@ -78,12 +78,10 @@ struct __attribute__((packed, packed(1))) Packet { unsigned value; };
 // ====
 // INPUT: cxx
 struct Base { unsigned value; };
-// ERROR@+1: PARSE/036 "packed base classes and virtual members are not supported"
 struct [[gnu::packed]] Packet : Base { unsigned char tag; };
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "packed base classes and virtual members are not supported"
 struct [[gnu::packed]] Packet { virtual void call(); };
 
 // ====
@@ -109,27 +107,26 @@ struct [[gnu::aligned]] Packet { unsigned value; };
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "'aligned' attribute requires one argument"
 struct [[gnu::aligned()]] Packet { unsigned value; };
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "'aligned' attribute requires one argument"
+// ERROR@+1: PARSE/036 "'aligned' attribute takes at most one argument"
 struct [[gnu::aligned(8, 16)]] Packet { unsigned value; };
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "requested alignment is not a positive power of 2"
+// ERROR@+1: PARSE/036 "requested alignment is not a power of 2"
 struct [[gnu::aligned(3)]] Packet { unsigned value; };
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "requested alignment is not a positive power of 2"
+// ERROR@+1: PARSE/036 "requested alignment is not a power of 2"
 struct [[gnu::aligned(0)]] Packet { unsigned value; };
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "requested alignment is not a positive power of 2"
+// ERROR@+1: PARSE/036 "requested alignment is not a power of 2"
 struct [[gnu::aligned(-8)]] Packet { unsigned value; };
 
 // ====
@@ -159,7 +156,6 @@ struct [[gnu::packed]] Packet { alignas(2) unsigned value [[gnu::aligned(8)]]; }
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "'aligned' attribute requires a record, type alias, non-static data member, or variable"
 struct Packet { [[gnu::aligned(8)]] static unsigned value; };
 
 // ====
@@ -176,7 +172,7 @@ struct [[gnu::aligned(requested)]] Packet { unsigned value; };
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "requested alignment is not a positive power of 2"
+// ERROR@+1: PARSE/036 "requested alignment is not a power of 2"
 struct [[gnu::aligned(8), gnu::aligned(3)]] Packet { unsigned value; };
 
 // ====
@@ -191,5 +187,5 @@ struct Bits { unsigned value : 3 __attribute__((packed(1))); };
 
 // ====
 // INPUT: cxx
-// ERROR@+1: PARSE/036 "requested alignment is not a positive power of 2"
+// ERROR@+1: PARSE/036 "requested alignment is not a power of 2"
 struct Bits { unsigned value : 3 __attribute__((aligned(3))); };

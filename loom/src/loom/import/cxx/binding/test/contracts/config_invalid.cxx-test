@@ -151,7 +151,7 @@ static_assert(value == 5);
 // ====
 [[loom::config("tuning.value")]] extern const unsigned value;
 unsigned entry() {
-  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  // ERROR@+1: PARSE/036 "constexpr if condition is not a constant expression"
   if constexpr (value == 5) { return 1; }
   return 0;
 }

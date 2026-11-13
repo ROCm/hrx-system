@@ -9,6 +9,7 @@
 #include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
 #include <cxx/attributes.h>
+#include <cxx/initialization.h>
 #include <cxx/names.h>
 #include <cxx/standard_conversion.h>
 #include <cxx/symbols.h>
@@ -52,12 +53,13 @@ std::optional<cxx::ConstValue> predicate_scalar_constant(
     return std::nullopt;
   }
   cxx::StandardConversion conversion(&unit);
-  auto* constant =
-      conversion.convertConstantExpression(expression, expression->type);
-  if (!constant || !constant->constValue) {
+  auto converted =
+      conversion.convertedConstantExpression(expression, expression->type);
+  if (!converted) {
     return std::nullopt;
   }
-  return *constant->constValue;
+  cxx::ASTInterpreter interpreter(&unit);
+  return interpreter.evaluate(*converted);
 }
 
 int64_t signed_payload(uint64_t value, int bit_count) {
@@ -371,7 +373,8 @@ class MaterializablePredicateExpression {
       } else if (auto* construction =
                      cxx::ast_cast<cxx::BracedTypeConstructionAST>(
                          expression)) {
-        arguments = construction->bracedInitList->expressionList;
+        arguments =
+            cxx::Initializer(construction->bracedInitList).expressionList();
       }
       if (arguments && !arguments->next) {
         // Semantic index/offset construction is an integer conversion, not
@@ -454,11 +457,23 @@ std::optional<PredicateValue> predicate_value(
     }
     members.push_back(field);
     const size_t prefix_begin = members.size();
-    for (auto* step : cxx::ListView{member->subobjectPath}) {
-      members.push_back(step);
+    auto classes = *member_object_classes(unit, member);
+    if (classes.object != classes.declaring) {
+      auto path = classes.object->subobjectPath(classes.declaring);
+      members.insert(members.end(), path->begin(), path->end());
     }
     std::reverse(members.begin() + prefix_begin, members.end());
     identity = unwrap_expression(member->baseExpression);
+    if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(identity);
+        cast &&
+        cast->castKind == cxx::ImplicitCastKind::kDerivedToBaseConversion) {
+      const size_t adjustment_begin = members.size();
+      for (auto* subobject : cxx::ListView{cast->subobjectPath}) {
+        members.push_back(subobject);
+      }
+      std::reverse(members.begin() + adjustment_begin, members.end());
+      identity = unwrap_expression(cast->expression);
+    }
   }
   std::reverse(members.begin(), members.end());
 

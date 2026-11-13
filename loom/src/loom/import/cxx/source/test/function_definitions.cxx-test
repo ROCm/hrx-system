@@ -1,54 +1,54 @@
 // RUN: verify
 // Function definitions require complete object parameters before lifetime analysis.
 struct Incomplete;
-// ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+// ERROR@+1: PARSE/036 "parameter has incomplete class type 'Incomplete'"
 void consume(Incomplete value) {}
 
 // ====
 struct Incomplete;
-// ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+// ERROR@+1: PARSE/036 "parameter has incomplete class type 'Incomplete'"
 void consume(Incomplete) {}
 
 // ====
 struct Incomplete;
 using Alias = const Incomplete;
-// ERROR@+1: PARSE/036 "parameter has incomplete class type 'const ::Incomplete'"
+// ERROR@+1: PARSE/036 "parameter has incomplete class type 'const Incomplete'"
 void consume(Alias value) {}
 
 // ====
 struct Incomplete;
-// ERROR@+1: PARSE/036 "return type is an incomplete class type '::Incomplete'"
+// ERROR@+1: PARSE/036 "return type is an incomplete class type 'Incomplete'"
 Incomplete produce() { for (;;) {} }
 
 // ====
 struct Incomplete;
 struct Receiver {
-  // ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+  // ERROR@+1: PARSE/036 "parameter has incomplete class type 'Incomplete'"
   void consume(Incomplete value) {}
 };
 
 // ====
 struct Incomplete;
-// ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+// ERROR@+1: PARSE/036 "parameter has incomplete class type 'Incomplete'"
 auto consume = [](Incomplete value) {};
 
 // ====
 struct Abstract { virtual void operation() = 0; };
-// ERROR@+1: PARSE/036 "parameter has abstract class type '::Abstract'"
+// ERROR@+1: PARSE/036 "parameter has abstract class type 'Abstract'"
 void consume(Abstract value) {}
 
 // ====
 struct Abstract { virtual void operation() = 0; };
-// ERROR@+1: PARSE/036 "return type is an abstract class type '::Abstract'"
+// ERROR@+1: PARSE/036 "return type is an abstract class type 'Abstract'"
 Abstract produce() { for (;;) {} }
 
 // ====
 // Dependent signatures are diagnosed where their definitions are instantiated.
 struct Incomplete;
 template<class T>
-// ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+// ERROR@+1: PARSE/036 "parameter has incomplete class type 'Incomplete'"
 void consume(T value) {}
-// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'consume <::Incomplete>' requested here"
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'consume<Incomplete>' requested here"
 template void consume<Incomplete>(Incomplete);
 
 // ====
@@ -57,7 +57,7 @@ template<class T> void instantiate() {
   // ERROR@+1: PARSE/036 "object must contain at least two bytes"
   static_assert(sizeof(T) >= 2, "object must contain at least two bytes");
 }
-// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'instantiate <char>' requested here"
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'instantiate<char>' requested here"
 template void instantiate<char>();
 
 // ====
@@ -68,7 +68,7 @@ struct Converter {
     static_assert(sizeof(T) >= 2, "element must contain at least two bytes");
   }
 };
-// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'convert <char>' requested here"
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'convert<char>' requested here"
 template void Converter::convert<char>() const &;
 
 // ====
@@ -79,7 +79,7 @@ template<class T> struct Converter {
     static_assert(sizeof(T) >= 2, "element must contain at least two bytes");
   }
 };
-// REMARK@+1: PARSE/036 "in instantiation of member function '::Converter<char>::convert' requested here"
+// REMARK@+1: PARSE/036 "in instantiation of member function 'Converter<char>::convert' requested here"
 template void Converter<char>::convert();
 
 // ====

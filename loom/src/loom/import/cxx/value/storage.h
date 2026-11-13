@@ -113,10 +113,17 @@ class Storage {
   // displacement is retained by Types from the frontend's selected path.
   StorageProjection subobject(StorageProjection base, uint64_t byte_offset,
                               cxx::AST* owner);
+  // Adjusts a possibly-null class pointer to one of its nonvirtual base
+  // subobjects. Null retains a zero origin; nonnull pointers retain their
+  // allocation identity and add the source-layout displacement.
+  Pointer subobject(Pointer base, uint64_t byte_offset, cxx::AST* owner);
   // Reverses a nonvirtual base projection. The source reference cast requires
   // an enclosing live object; this operation never adjusts a nullable pointer.
   StorageProjection enclosing(StorageProjection base, uint64_t byte_offset,
                               cxx::AST* owner);
+  // Reverses a nonvirtual base-pointer projection while preserving null. A
+  // valid nonnull source already denotes the selected base subobject.
+  Pointer enclosing(Pointer base, uint64_t byte_offset, cxx::AST* owner);
   // Projects an in-bounds constant element of an admitted fixed array. Source
   // subobject offsets need no signed pointer-arithmetic conversion chain.
   StorageProjection element(StorageProjection base,

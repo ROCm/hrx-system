@@ -5,7 +5,7 @@ struct Scalar {
 };
 constexpr Scalar value{};
 template <unsigned N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned int'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument of type 'const Scalar' cannot be converted to 'unsigned int' in a converted constant expression"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -21,7 +21,7 @@ struct Scalar {
 };
 constexpr Scalar value{};
 template <unsigned N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned int'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument of type 'const Scalar' cannot be converted to 'unsigned int'"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -37,7 +37,7 @@ struct Scalar {
 };
 constexpr Scalar value{};
 template <unsigned N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned int'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument of type 'const Scalar' cannot be converted to 'unsigned int'"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -53,7 +53,7 @@ struct Scalar {
 };
 constexpr Scalar value{};
 template <unsigned char N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned char'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'const Scalar' to 'unsigned char' in converted constant expression"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -65,7 +65,7 @@ unsigned entry(unsigned input) {
 // ====
 // Scalar literals follow the same narrowing rule.
 template <unsigned char N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned char'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'int' to 'unsigned char' in converted constant expression: integer constant 256 is outside the range of 'unsigned char'"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -77,7 +77,7 @@ unsigned entry(unsigned input) {
 // ====
 // A negative integer cannot become an unsigned template argument.
 template <unsigned N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned int'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'int' to 'unsigned int' in converted constant expression: integer constant -1 is outside the range of 'unsigned int'"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -89,7 +89,7 @@ unsigned entry(unsigned input) {
 // ====
 // The Boolean value domain is zero and one, independent of its storage size.
 template <bool N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'bool'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'int' to 'bool' in converted constant expression"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -101,7 +101,7 @@ unsigned entry(unsigned input) {
 // ====
 // Floating-to-integral conversions are not converted constant expressions.
 template <unsigned N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned int'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'float' to 'unsigned int' in converted constant expression"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -113,7 +113,7 @@ unsigned entry(unsigned input) {
 // ====
 // Unsigned high bits cannot become a negative signed template argument.
 template <long long N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'long long'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'unsigned long long' to 'long long' in converted constant expression: integer constant 18446744073709551615 is outside the range of 'long long'"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -125,7 +125,7 @@ unsigned entry(unsigned input) {
 // ====
 // A small signed type must represent the complete argument value.
 template <signed char N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'signed char'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'int' to 'signed char' in converted constant expression: integer constant -129 is outside the range of 'signed char'"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -138,7 +138,7 @@ unsigned entry(unsigned input) {
 // An explicit cast belongs to the argument, but does not permit later
 // narrowing.
 template <unsigned char N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned char'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'unsigned int' to 'unsigned char' in converted constant expression: integer constant 256 is outside the range of 'unsigned char'"
 unsigned choose(unsigned input) {
   return input + N;
 }
@@ -154,7 +154,7 @@ struct Scalar {
 };
 constexpr Scalar value{};
 template <unsigned N = value>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned int'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument of type 'const Scalar' cannot be converted to 'unsigned int' in a converted constant expression"
 unsigned choose(unsigned input) { return input + N; }
 unsigned entry(unsigned input) {
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
@@ -164,7 +164,7 @@ unsigned entry(unsigned input) {
 // ====
 // Packing an explicit argument cannot bypass its declared element type.
 template <unsigned char... N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'unsigned char'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'int' to 'unsigned char' in converted constant expression: integer constant 256 is outside the range of 'unsigned char'"
 unsigned choose(unsigned input) { return input + (N + ...); }
 unsigned entry(unsigned input) {
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
@@ -174,7 +174,7 @@ unsigned entry(unsigned input) {
 // ====
 // Inexact floating conversions cannot supply a constant template argument.
 template <float N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'float'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: narrowing conversion from 'double' to 'float' in converted constant expression"
 float choose(float input) { return input + N; }
 float entry(float input) {
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
@@ -184,7 +184,7 @@ float entry(float input) {
 // ====
 // The conversion sequence excludes integral-to-floating conversion.
 template <float N>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'float'"
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument of type 'int' cannot be converted to 'float' in a converted constant expression"
 float choose(float input) { return input + N; }
 float entry(float input) {
   // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"

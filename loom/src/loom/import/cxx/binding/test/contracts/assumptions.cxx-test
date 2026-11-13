@@ -81,7 +81,7 @@ void entry(unsigned value) { assume(value < 256u && value < (side(), 16u)); }
 [[loom::assume]] void assume(bool);
 struct Bound {};
 bool operator&&(bool, Bound);
-// ERROR@+1: PARSE/036 "invalid operands to binary expression ('bool' and '::Bound')"
+// ERROR@+1: LOWERING/059 "predicate comparisons require builtin operators"
 void entry(unsigned value, Bound bound) { assume((value < 256u) && bound); }
 
 // ====

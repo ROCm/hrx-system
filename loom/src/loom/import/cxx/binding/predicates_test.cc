@@ -157,6 +157,40 @@ TEST(PredicatesTest, ProjectsEveryCanonicalHelperBySemanticBinding) {
   }
 }
 
+TEST(PredicatesTest, RetainsQualifiedBaseSubobjectPaths) {
+  auto import_options = options();
+  Source source(IREE_SV(R"cpp(
+#include <loomcxx/predicate.h>
+                  struct Base {
+                    unsigned count;
+                  };
+                  struct Left : Base {};
+                  struct Right : Base {};
+                  struct Shape : Left, Right {};
+                  unsigned base_count(Shape value)
+                      [[loom::where(loom::predicate::ule(value.Left::count,
+                                                         value.Right::count))]];
+                )cpp"),
+                IREE_SV("base_paths.cxx"), import_options);
+  auto* expression = function_where(source, "base_count");
+  ASSERT_NE(expression, nullptr);
+  auto predicates =
+      project_predicates(source.unit(), source.diagnostics(), expression);
+  ASSERT_EQ(predicates.size(), 1u);
+  ASSERT_EQ(predicates[0].value_count, 2u);
+
+  for (size_t index = 0; index < 2; ++index) {
+    const auto& value = predicates[0].values[index];
+    EXPECT_EQ(value.origin, PredicateValueOrigin::Binding);
+    EXPECT_EQ(cxx::to_string(value.binding->name()), "value");
+    ASSERT_EQ(value.members.size(), 3u);
+    EXPECT_EQ(cxx::to_string(value.members[0]->name()),
+              index == 0 ? "Left" : "Right");
+    EXPECT_EQ(cxx::to_string(value.members[1]->name()), "Base");
+    EXPECT_EQ(cxx::to_string(value.members[2]->name()), "count");
+  }
+}
+
 TEST(PredicatesTest, InsertsConfigSubjectForImplicitHelpers) {
   auto import_options = options();
   Source source(IREE_SV(R"cpp(

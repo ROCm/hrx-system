@@ -29,7 +29,7 @@ static void assign(Int4* output, T value) {
   // ERROR@+1: PARSE/036 "cannot initialize vector element of type 'int' with expression of type 'const int*'"
   *output = {value};
 }
-// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'assign <const int*>' requested here"
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'assign<const int*>' requested here"
 void entry(Int4* output, const int* pointer) { assign(output, pointer); }
 
 // ====

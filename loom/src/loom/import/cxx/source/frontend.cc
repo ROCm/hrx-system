@@ -286,14 +286,12 @@ void Frontend::preprocess(iree_string_view_t source, bool preamble_only) {
 }
 
 void Frontend::parse() {
-  unit_.parse(
-      {.analysisMode = cxx::ParserAnalysisMode::kFull, .validateAst = true});
+  unit_.parse({.analysisMode = cxx::ParserAnalysisMode::kFull});
   diagnostics_.finish();
 }
 
 void Frontend::resume() {
-  unit_.resume(
-      {.analysisMode = cxx::ParserAnalysisMode::kFull, .validateAst = true});
+  unit_.resume({.analysisMode = cxx::ParserAnalysisMode::kFull});
   diagnostics_.finish();
 }
 

@@ -199,7 +199,6 @@ void entry(unsigned value) {
 // Invalid constant arithmetic is not promoted into a source contract.
 [[loom::assume]] void assume(bool);
 void entry(unsigned value, unsigned other) {
-  // WARNING@+2: PARSE/036 "invalid binary expression"
   // ERROR@+1: LOWERING/059 "predicate operands must be retained scalar values, compile-time constants, or scalar expressions safe to evaluate unconditionally"
   assume(other < 32u && value < (1u / 0u));
 }

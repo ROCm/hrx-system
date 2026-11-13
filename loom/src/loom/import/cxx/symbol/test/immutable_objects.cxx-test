@@ -215,7 +215,7 @@ global.rodata.def @codes = bytes("0309")
 
 global.rodata.def @words = align(4) bytes("0102030405060708")
 
-global.rodata.def @text = utf8("Loom\u0000")
+global.rodata.def @text = bytes("4c6f6f6d00")
 
 // ====
 namespace shared {
