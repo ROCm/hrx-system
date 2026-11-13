@@ -1104,10 +1104,12 @@ void Functions::admit_symbol(
 
 cxx::FunctionSymbol* Functions::definition(
     cxx::FunctionSymbol* function) const {
-  auto found = definitions_.find(function->canonical());
+  auto* canonical = function->canonical();
+  auto found = definitions_.find(canonical);
   if (found != definitions_.end()) {
     return found->second;
   }
+  function = canonical->resolvedDefinition();
   return function->declaration() ? function : nullptr;
 }
 
