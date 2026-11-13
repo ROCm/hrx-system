@@ -2157,41 +2157,6 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_module_free(module);
 }
 
-TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
-  static const char kSource[] =
-      "amdgpu.target<gfx11-generic> @gfx_target\n"
-      "global.rodata.decl @iree_feedback_config\n"
-      "low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) "
-      "workgroup_size(64, 1, 1) "
-      "@loom_kernel() {\n"
-      "  %zero = low.const<amdgpu.s_mov_b32> {imm32 = 0} : "
-      "reg<amdgpu.sgpr>\n"
-      "  %address = low.op<amdgpu.s_add_u32.rhs_symbol_rel32_lo>(%zero) "
-      "{symbol = @iree_feedback_config, byte_offset = 16} : "
-      "(reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>\n"
-      "  low.return\n"
-      "}\n";
-  loom_module_t* module = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      ParseSource(iree_make_cstring_view(kSource), &module));
-
-  DiagnosticCapture capture;
-  loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {
-      .diagnostic_sink = capture.sink(),
-      .max_errors = 20,
-  };
-  bool emitted = false;
-  iree::Status status(loom_amdgpu_compile_hal_kernel_library(
-      module, &options, iree_allocator_system(), &emitted, &library));
-
-  EXPECT_EQ(status.code(), iree::StatusCode::kFailedPrecondition);
-  EXPECT_THAT(status.ToString(),
-              ::testing::HasSubstr("does not hold an s_getpc_b64 component"));
-  EXPECT_FALSE(emitted);
-  loom_module_free(module);
-}
-
 TEST_F(AmdgpuHalKernelLibraryTest, RejectsArtifactWithOrWithoutDiagnosticSink) {
   static const char kSource[] =
       "global.rodata.def @loom_kernel.kd = bytes(\"00\")\n"
@@ -2226,6 +2191,16 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsArtifactWithOrWithoutDiagnosticSink) {
       "  low.func.call noinline @helper() : ()\n"
       "  return\n"
       "}\n";
+  static const char kMissingPc[] =
+      "amdgpu.target<gfx1100> @target\n"
+      "global.rodata.def @data = bytes(\"00\")\n"
+      "low.kernel.def target<amdgpu.rdna3.core>(@target) "
+      "workgroup_size(64, 1, 1) @entry() asm {\n"
+      "  %zero = s_mov_b32 0\n"
+      "  %address, %carry = s_add_u32_rhs_symbol_rel32_lo %zero {symbol = "
+      "@data}\n"
+      "  return\n"
+      "}\n";
   const struct {
     // Authored program rejected through the public emission boundary.
     const char* source;
@@ -2242,6 +2217,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsArtifactWithOrWithoutDiagnosticSink) {
       {kInvalidLayout, LOOM_ERR_AMDGPU_059, 0, "parameter_count", 2},
       {kUnboundData, LOOM_ERR_BACKEND_057, 1, "data", 4},
       {kUnboundHelperData, LOOM_ERR_BACKEND_057, 1, "data", 4},
+      {kMissingPc, LOOM_ERR_AMDGPU_061, 0, "the low 32 bits", 5},
   };
   for (const auto& test_case : cases) {
     SCOPED_TRACE(test_case.source);

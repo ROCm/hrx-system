@@ -112,39 +112,17 @@ typedef struct loom_amdgpu_encoded_instruction_stream_t {
 } loom_amdgpu_encoded_instruction_stream_t;
 
 // Encodes one AMDGPU target-low function from an addressability-accepted
-// emission frame into an arena-owned instruction byte stream. The returned
-// bytes are only the executable text payload; kernel descriptors, metadata,
-// ELF sections, and relocations are emitted by later native code-object layers.
-// Values must be physically allocated and unspilled. This entry emits no
-// packet-plan insertions; frames that require them use the options form below.
+// emission frame. Options select packet-plan insertions and optional products;
+// NULL options select an ordinary kernel body with no insertions.
+// Authored relocation constraints produce diagnostics and leave |out_accepted|
+// false, independently of callback presence. Status carries allocation or
+// diagnostic delivery failure. No partial instruction stream is published.
 iree_status_t loom_amdgpu_encode_instruction_stream(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_text);
-
-// Encodes one instruction stream with target-owned insertion plans built from
-// the same emission frame.
-iree_status_t loom_amdgpu_encode_instruction_stream_with_options(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_encode_instruction_stream_options_t* options,
-    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_text);
-
-// Encodes one instruction stream and returns text plus relocation fixups.
-iree_status_t loom_amdgpu_encode_instruction_stream_result(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_encoded_instruction_stream_t* out_stream);
-
-// Encodes one instruction stream with target-owned insertion plans built from
-// the same emission frame and returns text plus relocation fixups.
-iree_status_t loom_amdgpu_encode_instruction_stream_result_with_options(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_amdgpu_encode_instruction_stream_options_t* options,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_encoded_instruction_stream_t* out_stream);
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_encoded_instruction_stream_t* out_stream);
 
 #ifdef __cplusplus
 }  // extern "C"

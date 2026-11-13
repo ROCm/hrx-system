@@ -29,17 +29,17 @@ static iree_status_t loom_amdgpu_program_emission_encode_function(
     const loom_amdgpu_function_compilation_t* compilation,
     loom_amdgpu_function_return_mode_t return_mode,
     loom_amdgpu_encode_instruction_stream_flags_t flags,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_encoded_instruction_stream_t* out_stream) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_encoded_instruction_stream_t* out_stream) {
   const loom_amdgpu_encode_instruction_stream_options_t options = {
       .packet_plan = &compilation->plan.packet_plan,
       .storage_layout = &compilation->plan.storage_layout,
       .flags = flags,
       .return_mode = return_mode,
   };
-  return loom_amdgpu_encode_instruction_stream_result_with_options(
+  return loom_amdgpu_encode_instruction_stream(
       &compilation->frame.schedule, &compilation->frame.allocation, &options,
-      arena, out_stream);
+      arena, emitter, out_accepted, out_stream);
 }
 
 iree_status_t loom_amdgpu_program_artifact_emission_build(
@@ -77,9 +77,13 @@ iree_status_t loom_amdgpu_program_artifact_emission_build(
         callable->report != NULL
             ? LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS
             : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE;
+    bool encoded = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_encode_function(
         &callable->compilation, LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER, flags,
-        table_arena, &helper_streams[i]));
+        table_arena, emitter, &encoded, &helper_streams[i]));
+    if (!encoded) {
+      return iree_ok_status();
+    }
     IREE_ASSERT_EQ(helper_streams[i].internal_call_fixup_count, 0);
     const loom_amdgpu_hsaco_text_fixup_t* text_fixups = NULL;
     bool references_bound = false;
@@ -273,9 +277,13 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
           ? LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS
           : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE;
   loom_amdgpu_encoded_instruction_stream_t entry_stream = {0};
+  bool encoded = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_encode_function(
       &compilation->entry, LOOM_AMDGPU_FUNCTION_RETURN_MODE_END_PROGRAM,
-      entry_flags, table_arena, &entry_stream));
+      entry_flags, table_arena, emitter, &encoded, &entry_stream));
+  if (!encoded) {
+    return iree_ok_status();
+  }
 
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
       record->entry_envelope;

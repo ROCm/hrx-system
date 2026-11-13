@@ -117,9 +117,13 @@ TEST_F(AmdgpuMoveEmissionTest, HighBankExchangeMatchesAssemblyAndEncoding) {
             "  s_set_vgpr_msb 768\n");
   iree_string_builder_deinitialize(&builder);
 
-  iree_const_byte_span_t text = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_amdgpu_encode_instruction_stream(&schedule_, &allocation_,
-                                                       &arena_, &text));
+  loom_amdgpu_encoded_instruction_stream_t stream = {};
+  bool accepted = false;
+  IREE_ASSERT_OK(loom_amdgpu_encode_instruction_stream(
+      &schedule_, &allocation_, /*options=*/nullptr, &arena_,
+      /*emitter=*/{}, &accepted, &stream));
+  ASSERT_TRUE(accepted);
+  const iree_const_byte_span_t text = stream.text;
   ASSERT_EQ(text.data_length, 3 * sizeof(uint32_t));
   EXPECT_EQ(iree_unaligned_load_le_u32(text.data), UINT32_C(0xBF860003));
   EXPECT_EQ(iree_unaligned_load_le_u32(text.data + 4), UINT32_C(0x7FFECB00));

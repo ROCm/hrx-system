@@ -33,10 +33,13 @@ iree_status_t loom_amdgpu_kernel_emission_build(
               ? LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS
               : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE,
   };
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_encode_instruction_stream_result_with_options(
-          &frame->schedule, &frame->allocation, &encode_options, table_arena,
-          &stream));
+  bool encoded = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encode_instruction_stream(
+      &frame->schedule, &frame->allocation, &encode_options, table_arena,
+      emitter, &encoded, &stream));
+  if (!encoded) {
+    return iree_ok_status();
+  }
 
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
       record->entry_envelope;

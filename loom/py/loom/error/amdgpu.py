@@ -1337,6 +1337,24 @@ ERR_AMDGPU_060 = ErrorDef(
     fix_hint="Use the selected processor's workitem live-in form",
 )
 
+# ERR_AMDGPU_061: PC-relative relocation uses an incompatible PC component.
+ERR_AMDGPU_061 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=61,
+    severity=Severity.ERROR,
+    summary="PC-relative relocation uses an incompatible PC component.",
+    message=(
+        "PC-relative relocation requires {expected_component} of s_getpc_b64; "
+        "s{register_index} holds {actual_component}"
+    ),
+    params=(
+        ErrorParam("expected_component", ParamKind.STRING),
+        ErrorParam("actual_component", ParamKind.STRING),
+        ErrorParam("register_index", ParamKind.U32),
+    ),
+    fix_hint="Use the corresponding captured PC half in the relocation block",
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1394,4 +1412,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_058,
     ERR_AMDGPU_059,
     ERR_AMDGPU_060,
+    ERR_AMDGPU_061,
 )
