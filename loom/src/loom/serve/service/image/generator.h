@@ -46,7 +46,7 @@ typedef struct loom_serve_image_generator_t {
                            const loom_serve_image_request_t* request,
                            loom_service_prepared_request_t* out_prepared);
   // Captures one cohort from compatible requests in stable client order.
-  // Output lengths are the protocol-validated F32 CHW extents in that order.
+  // Output lengths are the protocol-validated RGBA8 extents in that order.
   // The source packs one upload and command; failure retains no invocation.
   iree_status_t (*prepare_batch)(
       void* self, iree_host_size_t count,
@@ -73,8 +73,8 @@ typedef struct loom_serve_image_generator_t {
   iree_status_t (*submit)(void* self, loom_serve_image_submit_flags_t flags,
                           loom_runtime_execution_frontier_t* out_frontier,
                           bool* out_complete);
-  // Consumes successful completion and releases model pins. Borrowed F32 CHW
-  // RGB in [-1,1] remains live until the next invocation or model destruction.
+  // Consumes successful completion and releases model pins. Borrowed row-major
+  // RGBA8 remains live until the next invocation or model destruction.
   iree_const_byte_span_t (*complete)(void* self);
   // Optional owner-side cumulative parameter activity. This query reads only
   // activation-owner data, even while CPU preparation borrows the invocation.

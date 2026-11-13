@@ -176,7 +176,7 @@ static iree_status_t loom_serve_image_request_decode(
     request->height = values[1];
   }
   iree_host_size_t encoded_length = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_image_rgb_f32_png_size(
+  IREE_RETURN_IF_ERROR(loom_serve_image_rgba8_png_size(
       request->width, request->height, &encoded_length));
   uint64_t count = 1;
   if (fields[5].value.data) {

@@ -9,6 +9,7 @@
 
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstring>
@@ -73,9 +74,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     ASSERT_NE(source_path, nullptr);
     auto application_options = loom_runtime_test_application_options_default();
     if (application_options.backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC) {
-      // Small fixture images fit, but a 64x64 float image does not.
+      // Small fixture images fit, but a 64x64 RGBA8 image does not.
       application_options.slab_size = 4096;
-      application_options.memory_limit = 32 * 1024;
+      application_options.memory_limit = 16 * 1024;
     }
     loom_runtime_test_application_t* application = nullptr;
     IREE_ASSERT_OK(loom_runtime_test_application_acquire(
@@ -204,8 +205,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     loom_service_prepared_request_t request = {};
     IREE_RETURN_IF_ERROR(
         loom_serve_image_model_prepare_request(model_, &input.value, &request));
-    const iree_host_size_t output_length =
-        (iree_host_size_t)width * height * 12;
+    const iree_host_size_t output_length = (iree_host_size_t)width * height * 4;
     const iree_status_t status = loom_serve_image_model_prepare_batch(
         model_, 1, &request, &output_length, out_prepared);
     iree_vm_buffer_release(request.bytes);
@@ -275,15 +275,20 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     return response;
   }
 
-  static std::vector<float> Pixels(size_t tokens, uint64_t seed,
-                                   size_t count = kPixels,
-                                   float red_strength = 1.0f,
-                                   float green_strength = 1.0f) {
-    std::vector<float> pixels(count * 3);
+  static std::vector<uint8_t> Pixels(size_t tokens, uint64_t seed,
+                                     size_t count = kPixels,
+                                     float red_strength = 1.0f,
+                                     float green_strength = 1.0f) {
+    std::vector<uint8_t> pixels(count * 4);
+    const auto quantize = [](float value) {
+      return uint8_t(std::nearbyint((value / 2.0f + 0.5f) * 255.0f));
+    };
     for (size_t i = 0; i < count; ++i) {
-      pixels[i] = (seed & 1 ? 1.0f : -1.0f) * red_strength;
-      pixels[count + i] = (tokens & 1 ? 1.0f : -1.0f) * green_strength;
-      pixels[2 * count + i] = i & 1 ? 1.0f : -1.0f;
+      pixels[4 * i] = quantize((seed & 1 ? 1.0f : -1.0f) * red_strength);
+      pixels[4 * i + 1] =
+          quantize((tokens & 1 ? 1.0f : -1.0f) * green_strength);
+      pixels[4 * i + 2] = i & 1 ? 255 : 0;
+      pixels[4 * i + 3] = 255;
     }
     return pixels;
   }
@@ -295,9 +300,8 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     const auto pixels = Pixels(tokens, seed, (size_t)width * height,
                                red_strength, green_strength);
     iree_byte_span_t png;
-    IREE_EXPECT_OK(loom_serve_image_encode_rgb_f32_png(
-        width, height,
-        iree_make_const_byte_span(pixels.data(), pixels.size() * sizeof(float)),
+    IREE_EXPECT_OK(loom_serve_image_encode_rgba8_png(
+        width, height, iree_make_const_byte_span(pixels.data(), pixels.size()),
         host_allocator_, &png));
     std::string encoded(iree_base64_encoded_size(png.data_length), '\0');
     size_t length = 0;
@@ -691,7 +695,7 @@ TEST_P(SourceImageServiceTest,
   const auto red_position = source.find(red);
   ASSERT_NE(red_position, std::string::npos);
   source.replace(red_position, red.size(), "scf.select %odd_seed, %low, %high");
-  const std::string launch = "  kernel.launch @pixels(%colors, %rgb)";
+  const std::string launch = "  kernel.launch @pixels(%colors, %rgba)";
   const auto launch_position = source.find(launch);
   ASSERT_NE(launch_position, std::string::npos);
   // A second producer is a third barrier wave under command_quantum=1. The
@@ -790,7 +794,7 @@ TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
   ASSERT_NE(red_position, std::string::npos);
   contents[1].replace(red_position, red.size(),
                       "scf.select %odd_seed, %low, %high");
-  const std::string launch = "  kernel.launch @pixels(%colors, %rgb)";
+  const std::string launch = "  kernel.launch @pixels(%colors, %rgba)";
   const auto launch_position = contents[1].find(launch);
   ASSERT_NE(launch_position, std::string::npos);
   contents[1].insert(
@@ -884,12 +888,11 @@ TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
       ++parts;
     }
     EXPECT_EQ(parts, expected_parts);
-    const auto rgb = generator.complete(generator.self);
+    const auto rgba = generator.complete(generator.self);
     const auto expected = Pixels(3, expected_seed, 15 * 9);
-    ASSERT_EQ(rgb.data_length, expected.size() * sizeof(float));
+    ASSERT_EQ(rgba.data_length, expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
-      EXPECT_EQ(iree_unaligned_load_le_f32(rgb.data + i * sizeof(float)),
-                expected[i]);
+      EXPECT_EQ(rgba.data[i], expected[i]);
     }
   };
   loom_service_image_prepared_t prepared;
@@ -1031,16 +1034,16 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
     ImageRequest input;
     IREE_ASSERT_OK(input.Initialize(
         iree_make_string_view(body.data(), body.size()), kWidth, kHeight));
-    iree_const_byte_span_t rgb;
-    IREE_ASSERT_OK(
-        loom_serve_image_model_generate(model_, &input.value, &prepared, &rgb));
+    iree_const_byte_span_t rgba;
+    IREE_ASSERT_OK(loom_serve_image_model_generate(model_, &input.value,
+                                                   &prepared, &rgba));
     EXPECT_EQ(prepared.stage, 0u);
     EXPECT_EQ(prepared.tag, 32);
     EXPECT_EQ(prepared.input_bytes, 16u + 32u);
     const auto expected = Pixels(3, seed);
-    ASSERT_EQ(rgb.data_length, expected.size() * sizeof(float));
+    ASSERT_EQ(rgba.data_length, expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
-      EXPECT_EQ(iree_unaligned_load_le_f32(rgb.data + 4 * i), expected[i]);
+      EXPECT_EQ(rgba.data[i], expected[i]);
     }
   }
   Start();
@@ -1702,18 +1705,17 @@ class ImageSpecializationTest : public SourceImageServiceTest {
   void Run(uint32_t width, uint32_t height, bool reuse) {
     const auto before = compiler_allocations_.load();
     loom_service_image_prepared_t prepared;
-    iree_const_byte_span_t rgb;
+    iree_const_byte_span_t rgba;
     ImageRequest input;
     IREE_ASSERT_OK(input.Initialize(IREE_SV(R"({"prompt":"aba","seed":1})"),
                                     width, height));
-    IREE_ASSERT_OK(
-        loom_serve_image_model_generate(model_, &input.value, &prepared, &rgb));
+    IREE_ASSERT_OK(loom_serve_image_model_generate(model_, &input.value,
+                                                   &prepared, &rgba));
     EXPECT_EQ(compiler_allocations_.load() == before, reuse);
     const auto expected = Pixels(3, 1, (size_t)width * height);
-    ASSERT_EQ(rgb.data_length, expected.size() * sizeof(float));
+    ASSERT_EQ(rgba.data_length, expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
-      EXPECT_EQ(iree_unaligned_load_le_f32(rgb.data + i * sizeof(float)),
-                expected[i]);
+      EXPECT_EQ(rgba.data[i], expected[i]);
     }
   }
 
@@ -1764,7 +1766,7 @@ class ImageSpecializationTest : public SourceImageServiceTest {
         model_, &inputs[1].value, &prepared.requests[1]));
     EXPECT_EQ(prepared.requests[0].units, 1u);
     EXPECT_EQ(prepared.requests[0].tag, prepared.requests[1].tag);
-    const iree_host_size_t lengths[] = {kPixels * 12, kPixels * 12};
+    const iree_host_size_t lengths[] = {kPixels * 4, kPixels * 4};
     loom_service_image_prepared_t batch;
     IREE_ASSERT_OK(loom_serve_image_model_prepare_batch(
         model_, prepared.requests.size(), prepared.requests.data(), lengths,
@@ -1791,21 +1793,19 @@ class ImageSpecializationTest : public SourceImageServiceTest {
       ++parts;
     }
     EXPECT_EQ(parts, GetParam() ? 2u : 1u);
-    const auto rgb = generator.complete(generator.self);
+    const auto rgba = generator.complete(generator.self);
     prepared_ = false;
     loom_serve_image_model_set_observer(model_, {});
     if (cancel && GetParam()) {
       return;
     }
-    ASSERT_EQ(rgb.data_length, 2 * kPixels * 12);
+    ASSERT_EQ(rgba.data_length, 2 * kPixels * 4);
     for (size_t item = 0; item < 2; ++item) {
       const auto expected =
           Pixels(item ? 3 : 2, item, kPixels, item ? -0.5f : first_strength,
                  item ? 0.75f : 0.5f);
       for (size_t i = 0; i < expected.size(); ++i) {
-        EXPECT_EQ(iree_unaligned_load_le_f32(rgb.data + item * lengths[item] +
-                                             i * sizeof(float)),
-                  expected[i]);
+        EXPECT_EQ(rgba.data[item * lengths[item] + i], expected[i]);
       }
     }
   }
@@ -1857,7 +1857,7 @@ TEST_P(ImageSpecializationTest, CohortPrivateValuesSurvivePartsAndReuse) {
 }
 
 TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
-  constexpr uint32_t kExtent = 40;
+  constexpr uint32_t kExtent = 48;
   const auto prepare = [this] {
     loom_service_image_prepared_t prepared;
     IREE_ASSERT_OK(PrepareSingle(IREE_SV(R"({"prompt":"aba","seed":1})"),
@@ -1883,8 +1883,8 @@ TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
   const auto expect_peer_capacity = [&] {
     loom_runtime_residency_admission_t admission;
     IREE_ASSERT_OK(peer.try_admit(peer.self, &admission));
-    // Each image's float output is 19,200 bytes. Both fit individually, but
-    // together exceed the bounded domain's 32 KiB before input and scratch.
+    // Each 9,216-byte output fits individually. Two outputs exceed the
+    // bounded domain's 16 KiB even before payload and workspace.
     EXPECT_EQ(admission, loom_runtime_pool_memory(storage_owner_)
                              ? LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY
                              : LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
@@ -1908,12 +1908,10 @@ TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
     }
     const auto output = generator.complete(generator.self);
     const auto expected = Pixels(3, 1, kExtent * kExtent);
-    ASSERT_EQ(output.data_length, expected.size() * sizeof(float));
-    std::vector<float> actual(expected.size());
-    for (size_t i = 0; i < actual.size(); ++i) {
-      actual[i] = iree_unaligned_load_le_f32(output.data + i * sizeof(float));
-    }
-    EXPECT_EQ(actual, expected);
+    ASSERT_EQ(output.data_length, expected.size());
+    EXPECT_EQ(
+        std::vector<uint8_t>(output.data, output.data + output.data_length),
+        expected);
   };
   ASSERT_NO_FATAL_FAILURE(finish(first.get(), true));
 

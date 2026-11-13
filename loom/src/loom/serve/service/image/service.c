@@ -41,9 +41,9 @@ typedef struct loom_serve_image_job_t {
   loom_service_prepared_request_t prepared;
   // Owned input rejection, published by CPU preparation.
   iree_status_t status;
-  // Stable byte offset in the complete cohort RGB result.
+  // Stable byte offset in the complete cohort RGBA8 result.
   iree_host_size_t output_offset;
-  // Protocol-validated F32 CHW byte length for this request.
+  // Protocol-validated RGBA8 byte length for this request.
   iree_host_size_t output_length;
   // Successfully completed model command parts, excluding cancellation cleanup.
   uint64_t completed_parts;
@@ -112,7 +112,7 @@ struct loom_serve_image_service_t {
     // Actual CPU preparation/capture work, counted once per released task.
     iree_duration_t elapsed_ns;
     // Borrowed successful model output, retained through encoding.
-    iree_const_byte_span_t rgb;
+    iree_const_byte_span_t rgba;
     // Owned complete HTTP result, independent of health/metadata responses.
     iree_string_builder_t response;
   } cpu;
@@ -154,7 +154,7 @@ struct loom_serve_image_service_t {
     // Copied source selection, published by CPU batch capture.
     loom_service_image_prepared_t prepared;
     // Borrowed complete model output, retained through the final CPU encoder.
-    iree_const_byte_span_t rgb;
+    iree_const_byte_span_t rgba;
   } cohort;
   // Start of the current admission wait or submitted device execution.
   iree_time_t phase_start;
@@ -405,8 +405,8 @@ static iree_status_t loom_serve_image_cpu_run(
   const iree_time_t begin = iree_time_now();
   iree_byte_span_t png = iree_byte_span_empty();
   IREE_TRACE_ZONE_BEGIN_NAMED(z_png, "loom_serve_image_encode_png");
-  iree_status_t status = loom_serve_image_encode_rgb_f32_png(
-      job->request.width, job->request.height, service->cpu.rgb,
+  iree_status_t status = loom_serve_image_encode_rgba8_png(
+      job->request.width, job->request.height, service->cpu.rgba,
       service->host_allocator, &png);
   IREE_TRACE_ZONE_END(z_png);
   const iree_time_t encoded = iree_time_now();
@@ -686,7 +686,7 @@ static void loom_serve_image_select(loom_serve_image_service_t* service) {
   loom_serve_image_schedule_cpu(service, IMAGE_PHASE_BATCHING);
 }
 
-// Device work has retired, but its complete RGB result remains borrowed until
+// Device work has retired, but its complete RGBA8 result remains borrowed until
 // the last surviving encoder releases it. Only one PNG/base64 buffer is live.
 static void loom_serve_image_encode_next(loom_serve_image_service_t* service) {
   while (service->cohort.next < service->cohort.count &&
@@ -700,8 +700,8 @@ static void loom_serve_image_encode_next(loom_serve_image_service_t* service) {
   } else {
     const loom_serve_image_job_t* job =
         service->cohort.jobs[service->cohort.next];
-    service->cpu.rgb = iree_make_const_byte_span(
-        service->cohort.rgb.data + job->output_offset, job->output_length);
+    service->cpu.rgba = iree_make_const_byte_span(
+        service->cohort.rgba.data + job->output_offset, job->output_length);
     loom_serve_image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
   }
 }
@@ -829,7 +829,7 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
             .ordinal);
     IREE_TRACE_ZONE_APPEND_VALUE_I64(z_complete,
                                      loom_serve_image_active(service));
-    service->cohort.rgb = service->generator.complete(service->generator.self);
+    service->cohort.rgba = service->generator.complete(service->generator.self);
     IREE_TRACE_ZONE_END(z_complete);
     if (service->device.cancelled) {
       loom_serve_image_finish(service, LOOM_SERVICE_TELEMETRY_CANCELLED);
@@ -956,7 +956,7 @@ static iree_status_t loom_serve_image_accept(
   if (iree_status_is_ok(status)) {
     *job = receipt;
     job->output_length =
-        (iree_host_size_t)job->request.width * job->request.height * 12;
+        (iree_host_size_t)job->request.width * job->request.height * 4;
     service->pending[service->pending_count++] = job;
     ++service->count;
   } else {

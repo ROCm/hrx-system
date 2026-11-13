@@ -35,7 +35,7 @@ typedef struct loom_serve_image_request_t {
 
 // Decodes one bounded JSON/JSONC body with default pixel geometry. Requires
 // prompt; optional model must match the supplied name. Size is positive decimal
-// WIDTHxHEIGHT with representable F32 RGB/PNG storage; the source validates its
+// WIDTHxHEIGHT with representable RGBA8/PNG storage; the source validates its
 // supported geometry during preparation. Only n=1 and
 // response_format="b64_json" are supported. Seed accepts an unsigned integer or
 // literal decimal string. Optional loras is an array of objects with a nonempty

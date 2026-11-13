@@ -6,7 +6,6 @@
 
 #include "loom/serve/service/image/output.h"
 
-#include <math.h>
 #include <string.h>
 
 // PNG's reflected IEEE CRC-32 polynomial, indexed one nibble at a time.
@@ -32,20 +31,21 @@ static void loom_serve_image_store_be32(uint8_t* target, uint32_t value) {
   target[3] = (uint8_t)value;
 }
 
-iree_status_t loom_serve_image_rgb_f32_png_size(uint32_t width, uint32_t height,
-                                                iree_host_size_t* out_length) {
+iree_status_t loom_serve_image_rgba8_png_size(uint32_t width, uint32_t height,
+                                              iree_host_size_t* out_length) {
   *out_length = 0;
   const uint64_t pixels = (uint64_t)width * height;
   if (!width || !height || width > INT32_MAX || height > INT32_MAX ||
-      pixels > IREE_HOST_SIZE_MAX / 12) {
+      pixels > IREE_HOST_SIZE_MAX / 4) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected exact positive F32 CHW RGB shape");
+                            "expected exact positive packed RGBA8 shape");
   }
-  const uint64_t row_length = (uint64_t)width * 3 + 1;
+  const uint64_t row_length = (uint64_t)width * 4 + 1;
   const uint64_t raw_length = row_length * height;
   const uint64_t blocks = (raw_length + 65534) / 65535;
   const uint64_t idat_length = raw_length + 5 * blocks + 6;
-  if (idat_length > INT32_MAX || idat_length + 57 > IREE_HOST_SIZE_MAX) {
+  if (raw_length > INT32_MAX || idat_length > INT32_MAX ||
+      idat_length + 57 > IREE_HOST_SIZE_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "image exceeds one PNG data chunk");
   }
@@ -53,19 +53,20 @@ iree_status_t loom_serve_image_rgb_f32_png_size(uint32_t width, uint32_t height,
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_image_encode_rgb_f32_png(
-    uint32_t width, uint32_t height, iree_const_byte_span_t rgb,
-    iree_allocator_t host_allocator, iree_byte_span_t* out_png) {
+iree_status_t loom_serve_image_encode_rgba8_png(uint32_t width, uint32_t height,
+                                                iree_const_byte_span_t rgba,
+                                                iree_allocator_t host_allocator,
+                                                iree_byte_span_t* out_png) {
   *out_png = iree_byte_span_empty();
   iree_host_size_t encoded_length = 0;
   IREE_RETURN_IF_ERROR(
-      loom_serve_image_rgb_f32_png_size(width, height, &encoded_length));
+      loom_serve_image_rgba8_png_size(width, height, &encoded_length));
   const uint64_t pixels = (uint64_t)width * height;
-  if (rgb.data_length != pixels * 12) {
+  if (rgba.data_length != pixels * 4) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected exact positive F32 CHW RGB shape");
+                            "expected exact positive packed RGBA8 shape");
   }
-  const uint64_t row_length = (uint64_t)width * 3 + 1;
+  const uint64_t row_length = (uint64_t)width * 4 + 1;
   const uint64_t raw_length = row_length * height;
   const uint64_t blocks = (raw_length + 65534) / 65535;
   const uint64_t idat_length = encoded_length - 57;
@@ -78,7 +79,7 @@ iree_status_t loom_serve_image_encode_rgb_f32_png(
   loom_serve_image_store_be32(png + 16, width);
   loom_serve_image_store_be32(png + 20, height);
   png[24] = 8;
-  png[25] = 2;
+  png[25] = 6;
   memset(png + 26, 0, 3);
   loom_serve_image_store_be32(png + 29, loom_serve_image_crc32(png + 12, 17));
   loom_serve_image_store_be32(png + 33, (uint32_t)idat_length);
@@ -95,40 +96,23 @@ iree_status_t loom_serve_image_encode_rgb_f32_png(
   }
   uint32_t adler_first = 1;
   uint32_t adler_second = 0;
-  iree_status_t status = iree_ok_status();
-  for (uint64_t i = 0; i < raw_length && iree_status_is_ok(status); ++i) {
+  for (uint64_t i = 0; i < raw_length; ++i) {
     const uint64_t column = i % row_length;
-    uint8_t value = 0;
-    if (column) {
-      const uint64_t channel = (column - 1) % 3;
-      const uint64_t pixel = (i / row_length) * width + (column - 1) / 3;
-      const float sample =
-          iree_unaligned_load_le_f32(rgb.data + (channel * pixels + pixel) * 4);
-      if (!isfinite(sample) || sample < -1.0f || sample > 1.0f) {
-        status = iree_make_status(IREE_STATUS_DATA_LOSS,
-                                  "nonfinite or out-of-range final RGB");
-      } else {
-        value = (uint8_t)nearbyintf((sample / 2.0f + 0.5f) * 255.0f);
-      }
-    }
+    const uint8_t value = column ? rgba.data[i - i / row_length - 1] : 0;
     // Five-byte stored-block headers interrupt the logical filtered stream.
     png[43 + i + 5 * (i / 65535 + 1)] = value;
     adler_first = (adler_first + value) % 65521;
     adler_second = (adler_second + adler_first) % 65521;
   }
-  if (iree_status_is_ok(status)) {
-    loom_serve_image_store_be32(png + 41 + idat_length - 4,
-                                (adler_second << 16) | adler_first);
-    loom_serve_image_store_be32(
-        png + 41 + idat_length,
-        loom_serve_image_crc32(png + 37, (iree_host_size_t)idat_length + 4));
-    uint8_t* end = png + 45 + idat_length;
-    loom_serve_image_store_be32(end, 0);
-    memcpy(end + 4, "IEND", 4);
-    loom_serve_image_store_be32(end + 8, loom_serve_image_crc32(end + 4, 4));
-    *out_png = iree_make_byte_span(png, encoded_length);
-  } else {
-    iree_allocator_free(host_allocator, png);
-  }
-  return status;
+  loom_serve_image_store_be32(png + 41 + idat_length - 4,
+                              (adler_second << 16) | adler_first);
+  loom_serve_image_store_be32(
+      png + 41 + idat_length,
+      loom_serve_image_crc32(png + 37, (iree_host_size_t)idat_length + 4));
+  uint8_t* end = png + 45 + idat_length;
+  loom_serve_image_store_be32(end, 0);
+  memcpy(end + 4, "IEND", 4);
+  loom_serve_image_store_be32(end + 8, loom_serve_image_crc32(end + 4, 4));
+  *out_png = iree_make_byte_span(png, encoded_length);
+  return iree_ok_status();
 }
