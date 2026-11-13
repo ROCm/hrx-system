@@ -240,3 +240,32 @@ low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 4, direct_
   global_store_b64_saddr %29, %maxnum, %result_view_0 {offset = 1536}
   return
 }
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx90a output=low
+// Both uniform operands still obey the one-scalar-source packet limit.
+kernel.def @scale_uniform() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%bits: i64, %power: i32, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xf64>
+  %input = scalar.bitcast %bits : i64 to f64
+  %scaled = scalar.ldexpf %input, %power : f64, i32
+  view.store %scaled, %result_view_0[%fixture_lane] : f64, view<64xf64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "bits", arg1 = "power"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 4], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scale_uniform(%input: reg<amdgpu.sgpr x2>, %power: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32_copy %power
+  %scaled = v_ldexp_f64 %input, %14
+  %16 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_dwordx2_saddr %16, %scaled, %result_view_0
+  return
+}
