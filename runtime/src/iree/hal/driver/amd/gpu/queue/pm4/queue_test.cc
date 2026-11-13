@@ -1030,8 +1030,9 @@ TEST_F(KernelQueueTest, LocalExecutionAndVisibilityJoinOnlyTheirOwnProducers) {
     }
     const iree_hal_barrier_t acquire = {
         .source_stage_mask = scenario.source_stage,
-        .flags = scenario.acquire ? IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE
-                                  : IREE_HAL_BARRIER_FLAG_NONE,
+        .flags = static_cast<iree_hal_barrier_flags_t>(
+            scenario.acquire ? IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE
+                             : IREE_HAL_BARRIER_FLAG_NONE),
     };
     const iree_hal_barrier_list_t before = {1, &acquire}, after = {};
     const iree_hal_queue_barriers_t barriers = {&before, &after};
