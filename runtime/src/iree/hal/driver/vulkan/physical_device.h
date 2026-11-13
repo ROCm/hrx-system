@@ -125,6 +125,9 @@ typedef struct iree_hal_vulkan_physical_device_snapshot_t {
   // Physical-device ordinal from vkEnumeratePhysicalDevices.
   uint32_t ordinal;
 
+  // Reported active execution units in the physical device, or zero if unknown.
+  uint32_t execution_unit_count;
+
   // Base and extended device properties.
   VkPhysicalDeviceProperties2 properties2;
 
@@ -215,6 +218,13 @@ typedef struct iree_hal_vulkan_physical_device_snapshot_t {
   // VK_EXT_calibrated_timestamps domains supported by this physical device.
   iree_hal_vulkan_time_domain_flags_t calibrated_timestamp_time_domains;
 } iree_hal_vulkan_physical_device_snapshot_t;
+
+// Queries a reported active CU, SM, or shader-core count from the available
+// physical-device extensions. Returns zero when no such property is available.
+// Nominal topology and queue creation limits do not establish this count.
+uint32_t iree_hal_vulkan_physical_device_query_execution_unit_count(
+    const iree_hal_vulkan_instance_t* instance, VkPhysicalDevice handle,
+    uint32_t extension_count, const VkExtensionProperties* extensions);
 
 // Captures properties, features, memory, queue, and extension data for a
 // physical device.

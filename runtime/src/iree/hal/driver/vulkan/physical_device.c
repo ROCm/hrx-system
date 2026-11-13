@@ -621,6 +621,63 @@ void iree_hal_vulkan_instance_deinitialize(
 // Physical device snapshots
 //===----------------------------------------------------------------------===//
 
+uint32_t iree_hal_vulkan_physical_device_query_execution_unit_count(
+    const iree_hal_vulkan_instance_t* instance, VkPhysicalDevice handle,
+    uint32_t extension_count, const VkExtensionProperties* extensions) {
+  static const struct {
+    // Extension supplying an active execution-unit count.
+    const char* extension_name;
+    // Property structure accepted by vkGetPhysicalDeviceProperties2.
+    VkStructureType structure_type;
+    // Byte offset of the uint32_t count in the property structure.
+    uint16_t unit_count_offset;
+  } property_types[] = {
+      {VK_AMD_SHADER_CORE_PROPERTIES_2_EXTENSION_NAME,
+       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_2_AMD,
+       offsetof(VkPhysicalDeviceShaderCoreProperties2AMD,
+                activeComputeUnitCount)},
+      {VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME,
+       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV,
+       offsetof(VkPhysicalDeviceShaderSMBuiltinsPropertiesNV, shaderSMCount)},
+      {VK_ARM_SHADER_CORE_BUILTINS_EXTENSION_NAME,
+       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_BUILTINS_PROPERTIES_ARM,
+       offsetof(VkPhysicalDeviceShaderCoreBuiltinsPropertiesARM,
+                shaderCoreCount)},
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(property_types); ++i) {
+    if (!iree_hal_vulkan_extension_list_contains(
+            extension_count, extensions, property_types[i].extension_name)) {
+      continue;
+    }
+    union {
+      // Common Vulkan property-chain header.
+      VkBaseOutStructure header;
+      // Active AMD CU population, excluding disabled units.
+      VkPhysicalDeviceShaderCoreProperties2AMD amd;
+      // NVIDIA SM population.
+      VkPhysicalDeviceShaderSMBuiltinsPropertiesNV nvidia;
+      // Arm shader-core population.
+      VkPhysicalDeviceShaderCoreBuiltinsPropertiesARM arm;
+    } property;
+    memset(&property, 0, sizeof(property));
+    property.header.sType = property_types[i].structure_type;
+    VkPhysicalDeviceProperties2 properties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &property,
+    };
+    IREE_LEAK_CHECK_DISABLE_PUSH();
+    iree_vkGetPhysicalDeviceProperties2(IREE_VULKAN_INSTANCE(&instance->syms),
+                                        handle, &properties);
+    IREE_LEAK_CHECK_DISABLE_POP();
+    uint32_t unit_count = 0;
+    memcpy(&unit_count,
+           (const uint8_t*)&property + property_types[i].unit_count_offset,
+           sizeof(unit_count));
+    return unit_count;
+  }
+  return 0;
+}
+
 iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
     const iree_hal_vulkan_instance_t* instance, VkPhysicalDevice handle,
     uint32_t ordinal, iree_allocator_t host_allocator,
@@ -752,6 +809,10 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
     out_snapshot->available_extensions =
         iree_hal_vulkan_available_device_extensions_from_list(
             out_snapshot->extension_count, out_snapshot->extensions);
+    out_snapshot->execution_unit_count =
+        iree_hal_vulkan_physical_device_query_execution_unit_count(
+            instance, handle, out_snapshot->extension_count,
+            out_snapshot->extensions);
   }
   if (iree_status_is_ok(status) &&
       iree_hal_vulkan_physical_device_has_extension(
