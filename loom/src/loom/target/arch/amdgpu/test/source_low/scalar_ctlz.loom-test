@@ -151,20 +151,40 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 amdgpu.target<gfx942> @target
 
-func.def target(@target) @scalar_ctlzi_i32_cdna3(%uniform: i32, %inputs: vector<2xi32>) -> (i32, i32) {
+kernel.def target(@target) @scalar_ctlzi_i32_cdna3() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%uniform: i32, %inputs_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %inputs_view = buffer.view %inputs_buffer[%capture_base] : buffer -> view<64x2xi32>
+  %inputs = vector.load %inputs_view[%capture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xi32>
   %varying = vector.extract %inputs[0] : vector<2xi32> -> i32
   %uniform_result = scalar.ctlzi %uniform : i32
   %varying_result = scalar.ctlzi %varying : i32
-  func.return %uniform_result, %varying_result : i32, i32
+  view.store %uniform_result, %captured[0, %capture_lane] : i32, view<2x64xi32>
+  view.store %varying_result, %captured[1, %capture_lane] : i32, view<2x64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @scalar_ctlzi_i32_cdna3(%uniform: reg<amdgpu.vgpr>, %inputs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %varying = slice %inputs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %12 = v_ffbh_u32 %uniform
-  %13 = v_mov_b32 32
-  %uniform_result = v_min_u32 %12, %13
-  %15 = v_ffbh_u32 %varying
-  %varying_result = v_min_u32 %15, %13
-  return %uniform_result, %varying_result
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_ctlzi_i32_cdna3(%uniform: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %inputs_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %25 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %varying = global_load_dword_saddr %25, %inputs_view : reg<amdgpu.vgpr>
+  %27 = s_flbit_i32_b32 %uniform
+  %28 = s_mov_b32 32
+  %uniform_result = s_min_u32 %27, %28
+  %30 = v_ffbh_u32 %varying
+  %31 = v_mov_b32 32
+  %varying_result = v_min_u32 %30, %31
+  %33 = v_mov_b32_copy %uniform_result
+  %34 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_dword_saddr %34, %33, %captured
+  global_store_dword_saddr %34, %varying_result, %captured {offset = 256}
+  return
 }

@@ -105,49 +105,92 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_float_
 amdgpu.target<gfx1151> @target
 
 // A halfword writer must define the whole carrier before returning it.
-func.def target(@target) @scalar_half_return(%input: i32) -> (f16) {
+func.def noinline target(@target) @scalar_half_return(%input: i32) -> (f16) {
   %value = scalar.bitcast %input : i32 to f32
   %half = scalar.fptrunc %value : f32 to f16
   func.return %half : f16
 }
 
+kernel.def target(@target) @capture_scalar_half_return() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: i32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %view = buffer.view %output[%base] : buffer -> view<64xf16>
+  %half = func.call @scalar_half_return(%input) : (i32) -> (f16)
+  view.store %half, %view[%lane] : f16, view<64xf16>
+  kernel.return
+}
+
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_return(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %half = v_cvt_f16_f32 %value
-  %7 = v_bfe_u32_offset_0_width_inline_low16 %half
-  return %7
+low.func.def noinline target<amdgpu.rdna3_5.core>(@target) @scalar_half_return(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %half = s_cvt_f16_f32 %value
+  %15 = s_bfe_u32_lit_low16 %half
+  return %15
+}
+
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @capture_scalar_half_return(%input: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %view = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %half = low.func.call pure @scalar_half_return(%input) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+  %20 = v_mov_b32_copy %half
+  %21 = v_lshlrev_b32_src0_inline %lane, 1
+  global_store_short_saddr %21, %20, %view
+  return
 }
 
 // ====
 
 amdgpu.target<gfx1151> @target
 
-func.def target(@target) @scalar_half_select(%lhs: i32, %rhs: i32) -> (f16) {
+kernel.def target(@target) @scalar_half_select() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%lhs: i32, %rhs: i32, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xf16>
   %lhs_float = scalar.bitcast %lhs : i32 to f32
   %rhs_float = scalar.bitcast %rhs : i32 to f32
   %lhs_half = scalar.fptrunc %lhs_float : f32 to f16
   %rhs_half = scalar.fptrunc %rhs_float : f32 to f16
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %result = scf.select %condition, %lhs_half, %rhs_half : f16
-  func.return %result : f16
+  view.store %result, %captured[%capture_lane] : f16, view<64xf16>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_select(%lhs_float: reg<amdgpu.vgpr>, %rhs_float: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %lhs_half = v_cvt_f16_f32 %lhs_float
-  %rhs_half = v_cvt_f16_f32 %rhs_float
-  %condition = v_cmp_lt_i32 %lhs_float, %rhs_float
-  %15 = v_bfe_u32_offset_0_width_inline_low16 %lhs_half
-  %16 = v_bfe_u32_offset_0_width_inline_low16 %rhs_half
-  %result = v_cndmask_b32 %16, %15, %condition
-  return %result
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs", arg1 = "rhs"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_half_select(%lhs_float: reg<amdgpu.sgpr>, %rhs_float: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %lhs_half = s_cvt_f16_f32 %lhs_float
+  %rhs_half = s_cvt_f16_f32 %rhs_float
+  %condition = s_cmp_lt_i32 %lhs_float, %rhs_float
+  %21 = s_bfe_u32_lit_low16 %lhs_half
+  %22 = s_bfe_u32_lit_low16 %rhs_half
+  %result = s_cselect_b32 %21, %22, %condition
+  %24 = v_mov_b32_copy %result
+  %25 = v_lshlrev_b32_src0_inline %capture_lane, 1
+  global_store_short_saddr %25, %24, %captured
+  return
 }
 
 // ====
 
 amdgpu.target<gfx1151> @target
 
-func.def target(@target) @scalar_half_loop(%input: i32, %count: index) -> (f16) {
+kernel.def target(@target) @scalar_half_loop() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: i32, %count: index, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xf16>
   %value = scalar.bitcast %input : i32 to f32
   %initial = scalar.fptrunc %value : f32 to f16
   %begin = index.constant 0 : index
@@ -156,28 +199,29 @@ func.def target(@target) @scalar_half_loop(%input: i32, %count: index) -> (f16) 
     %next = scalar.addf %carried, %initial : f16
     scf.yield %next : f16
   }
-  func.return %result : f16
+  view.store %result, %captured[%capture_lane] : f16, view<64xf16>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_half_loop(%value: reg<amdgpu.vgpr>, %count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %initial = v_cvt_f16_f32 %value
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "input", arg1 = "count"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_half_loop(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %initial = s_cvt_f16_f32 %value
   %begin = s_mov_b32 0
   %step = s_mov_b32 1
-  %27 = v_mov_b32_copy %begin
-  %28 = v_bfe_u32_offset_0_width_inline_low16 %initial
-  %30 = s_mov_b64_exec_read
-  low.br ^_bb1(%27: reg<amdgpu.vgpr>, %28: reg<amdgpu.vgpr>)
-^_bb1(%iteration: reg<amdgpu.vgpr>, %carried: reg<amdgpu.vgpr>):
-  %29 = v_cmp_lt_i32 %iteration, %count
-  %31, %32 = s_and_saveexec_b64 %29
+  %31 = v_bfe_u32_offset_0_width_inline_low16 %initial
+  low.br ^_bb1(%begin: reg<amdgpu.sgpr>, %31: reg<amdgpu.vgpr>)
+^_bb1(%iteration: reg<amdgpu.sgpr>, %carried: reg<amdgpu.vgpr>):
+  %32 = s_cmp_lt_i32 %iteration, %count
   low.cond_br %32, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %next = v_add_f16 %carried, %initial
-  %34 = v_add_u32 %step, %iteration
-  %35 = v_bfe_u32_offset_0_width_inline_low16 %next
-  low.br ^_bb1(%34: reg<amdgpu.vgpr>, %35: reg<amdgpu.vgpr>)
+  %next = v_add_f16 %carried, %31
+  %35 = s_add_u32 %iteration, %step
+  %36 = v_bfe_u32_offset_0_width_inline_low16 %next
+  low.br ^_bb1(%35: reg<amdgpu.sgpr>, %36: reg<amdgpu.vgpr>)
 ^_bb3:
-  s_mov_b64_exec %30
-  return %carried
+  %37 = v_lshlrev_b32_src0_inline %capture_lane, 1
+  global_store_short_saddr %37, %carried, %captured
+  return
 }

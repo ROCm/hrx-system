@@ -105,27 +105,62 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @varying
 
 amdgpu.target<gfx942> @target
 
-func.def target(@target) @cdna_index_counts(%input: index, %inputs: vector<2xi32>) -> (index, index, index, index) {
+kernel.def target(@target) @cdna_index_counts() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: index, %inputs_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %inputs_view = buffer.view %inputs_buffer[%capture_base] : buffer -> view<64x2xi32>
+  %inputs = vector.load %inputs_view[%capture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<4x64xi64>
   %word = vector.extract %inputs[0] : vector<2xi32> -> i32
   %varying = index.cast %word : i32 to index
   %leading = index.ctlzi %input : index
   %trailing = index.cttzi %input : index
   %varying_leading = index.ctlzi %varying : index
   %varying_trailing = index.cttzi %varying : index
-  func.return %leading, %trailing, %varying_leading, %varying_trailing : index, index, index, index
+  %stored_1_0 = index.cast %leading : index to i64
+  view.store %stored_1_0, %captured[0, %capture_lane] : i64, view<4x64xi64>
+  %stored_1_1 = index.cast %trailing : index to i64
+  view.store %stored_1_1, %captured[1, %capture_lane] : i64, view<4x64xi64>
+  %stored_1_2 = index.cast %varying_leading : index to i64
+  view.store %stored_1_2, %captured[2, %capture_lane] : i64, view<4x64xi64>
+  %stored_1_3 = index.cast %varying_trailing : index to i64
+  view.store %stored_1_3, %captured[3, %capture_lane] : i64, view<4x64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @cdna_index_counts(%input: reg<amdgpu.vgpr>, %inputs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %varying = slice %inputs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %19 = v_ffbh_u32 %input
-  %20 = v_mov_b32 32
-  %leading = v_min_u32 %19, %20
-  %22 = v_ffbl_b32 %input
-  %trailing = v_min_u32 %22, %20
-  %25 = v_ffbh_u32 %varying
-  %varying_leading = v_min_u32 %25, %20
-  %28 = v_ffbl_b32 %varying
-  %varying_trailing = v_min_u32 %28, %20
-  return %leading, %trailing, %varying_leading, %varying_trailing
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cdna_index_counts(%input: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %inputs_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 2048, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %36 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %varying = global_load_dword_saddr %36, %inputs_view : reg<amdgpu.vgpr>
+  %38 = s_flbit_i32_b32 %input
+  %39 = s_mov_b32 32
+  %leading = s_min_u32 %38, %39
+  %41 = s_ff1_i32_b32 %input
+  %trailing = s_min_u32 %41, %39
+  %44 = v_ffbh_u32 %varying
+  %45 = v_mov_b32 32
+  %varying_leading = v_min_u32 %44, %45
+  %47 = v_ffbl_b32 %varying
+  %varying_trailing = v_min_u32 %47, %45
+  %50 = s_mov_b32 0
+  %53 = v_mov_b32_copy %leading
+  %55 = v_mov_b32_copy %50
+  %56 = concat(%53, %55) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %36, %56, %captured
+  %61 = v_mov_b32_copy %trailing
+  %64 = concat(%61, %55) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %36, %64, %captured {offset = 512}
+  %66 = v_mov_b32 0
+  %stored_1_2 = concat(%varying_leading, %66) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %36, %stored_1_2, %captured {offset = 1024}
+  %stored_1_3 = concat(%varying_trailing, %66) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %36, %stored_1_3, %captured {offset = 1536}
+  return
 }

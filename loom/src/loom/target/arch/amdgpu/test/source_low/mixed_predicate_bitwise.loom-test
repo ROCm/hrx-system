@@ -1,6 +1,15 @@
 // RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-func.def @mixed_scc_predicate_bitwise(%values: vector<2xi32>, %limit: i32) -> (i32, i32, i32, i32, i32, i32) {
+kernel.def @mixed_scc_predicate_bitwise() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%values_buffer: buffer, %limit: i32, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %values_view = buffer.view %values_buffer[%capture_base] : buffer -> view<64x2xi32>
+  %values = vector.load %values_view[%capture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<6x64xi32>
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32
   %c3 = scalar.constant 3 : i32
@@ -27,32 +36,76 @@ func.def @mixed_scc_predicate_bitwise(%values: vector<2xi32>, %limit: i32) -> (i
   %or_right_result = scf.select %or_right, %lane, %limit : i32
   %xor_left_result = scf.select %xor_left, %lane, %limit : i32
   %xor_right_result = scf.select %xor_right, %lane, %limit : i32
-  func.return %and_left_result, %and_right_result, %or_left_result, %or_right_result, %xor_left_result, %xor_right_result : i32, i32, i32, i32, i32, i32
+  view.store %and_left_result, %captured[0, %capture_lane] : i32, view<6x64xi32>
+  view.store %and_right_result, %captured[1, %capture_lane] : i32, view<6x64xi32>
+  view.store %or_left_result, %captured[2, %capture_lane] : i32, view<6x64xi32>
+  view.store %or_right_result, %captured[3, %capture_lane] : i32, view<6x64xi32>
+  view.store %xor_left_result, %captured[4, %capture_lane] : i32, view<6x64xi32>
+  view.store %xor_right_result, %captured[5, %capture_lane] : i32, view<6x64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @mixed_scc_predicate_bitwise(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_scc_predicate_bitwise(%limit: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %values_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 1536, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %56 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %lane = global_load_b32_saddr %56, %values_view
+  %c1 = s_mov_b32 1
+  %c2 = s_mov_b32 2
+  %c3 = s_mov_b32 3
+  %c4 = s_mov_b32 4
+  %c5 = s_mov_b32 5
+  %c6 = s_mov_b32 6
   %mask = v_cmp_lt_i32 %lane, %limit
-  %and_left_bool = v_cmp_lt_i32_src1_inline %limit {rhs = 1}
-  %and_right_bool = v_cmp_lt_i32_src1_inline %limit {rhs = 2}
-  %or_left_bool = v_cmp_lt_i32_src1_inline %limit {rhs = 3}
-  %or_right_bool = v_cmp_lt_i32_src1_inline %limit {rhs = 4}
-  %xor_left_bool = v_cmp_lt_i32_src1_inline %limit {rhs = 5}
-  %xor_right_bool = v_cmp_lt_i32_src1_inline %limit {rhs = 6}
-  %and_left = s_and_b64 %and_left_bool, %mask
-  %and_right = s_and_b64 %mask, %and_right_bool
-  %or_left = s_or_b64 %or_left_bool, %mask
-  %or_right = s_or_b64 %mask, %or_right_bool
-  %xor_left = s_xor_b64 %xor_left_bool, %mask
-  %xor_right = s_xor_b64 %mask, %xor_right_bool
-  %and_left_result = v_cndmask_b32 %limit, %lane, %and_left
-  %and_right_result = v_cndmask_b32 %limit, %lane, %and_right
-  %or_left_result = v_cndmask_b32 %limit, %lane, %or_left
-  %or_right_result = v_cndmask_b32 %limit, %lane, %or_right
-  %xor_left_result = v_cndmask_b32 %limit, %lane, %xor_left
-  %xor_right_result = v_cndmask_b32 %limit, %lane, %xor_right
-  return %and_left_result, %and_right_result, %or_left_result, %or_right_result, %xor_left_result, %xor_right_result
+  %and_left_bool = s_cmp_lt_i32 %limit, %c1
+  %and_right_bool = s_cmp_lt_i32 %limit, %c2
+  %or_left_bool = s_cmp_lt_i32 %limit, %c3
+  %or_right_bool = s_cmp_lt_i32 %limit, %c4
+  %xor_left_bool = s_cmp_lt_i32 %limit, %c5
+  %xor_right_bool = s_cmp_lt_i32 %limit, %c6
+  %71 = s_mov_b32 0
+  %72 = slice %mask[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %73 = s_cselect_b32 %72, %71, %and_left_bool
+  %74 = slice %mask[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %75 = s_cselect_b32 %74, %71, %and_left_bool
+  %and_left = concat(%73, %75) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %79 = s_cselect_b32 %72, %71, %and_right_bool
+  %81 = s_cselect_b32 %74, %71, %and_right_bool
+  %and_right = concat(%79, %81) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %83 = s_mov_b64_exec_read
+  %84 = slice %83[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %86 = s_cselect_b32 %84, %72, %or_left_bool
+  %87 = slice %83[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %89 = s_cselect_b32 %87, %74, %or_left_bool
+  %or_left = concat(%86, %89) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %94 = s_cselect_b32 %84, %72, %or_right_bool
+  %97 = s_cselect_b32 %87, %74, %or_right_bool
+  %or_right = concat(%94, %97) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %103 = s_cselect_b32 %84, %71, %xor_left_bool
+  %104 = s_cselect_b32 %87, %71, %xor_left_bool
+  %105 = concat(%103, %104) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %xor_left = s_xor_b64 %105, %mask
+  %111 = s_cselect_b32 %84, %71, %xor_right_bool
+  %112 = s_cselect_b32 %87, %71, %xor_right_bool
+  %113 = concat(%111, %112) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %xor_right = s_xor_b64 %mask, %113
+  %115 = v_mov_b32_copy %limit
+  %and_left_result = v_cndmask_b32 %115, %lane, %and_left
+  %and_right_result = v_cndmask_b32 %115, %lane, %and_right
+  %or_left_result = v_cndmask_b32 %115, %lane, %or_left
+  %or_right_result = v_cndmask_b32 %115, %lane, %or_right
+  %xor_left_result = v_cndmask_b32 %115, %lane, %xor_left
+  %xor_right_result = v_cndmask_b32 %115, %lane, %xor_right
+  %127 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %127, %and_left_result, %captured
+  global_store_b32_saddr %127, %and_right_result, %captured {offset = 256}
+  global_store_b32_saddr %127, %or_left_result, %captured {offset = 512}
+  global_store_b32_saddr %127, %or_right_result, %captured {offset = 768}
+  global_store_b32_saddr %127, %xor_left_result, %captured {offset = 1024}
+  global_store_b32_saddr %127, %xor_right_result, %captured {offset = 1280}
+  return
 }
 
 // ====

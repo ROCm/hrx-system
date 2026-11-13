@@ -36,40 +36,60 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 4, direc
 
 // ====
 
-func.def @constant_subtract(%value: i64) -> (i64, i64, i64) {
+kernel.def @constant_subtract() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%value: i64, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<3x64xi64>
   %c0 = scalar.constant 0 : i64
   %wide = scalar.constant 4294967297 : i64
   %negated = scalar.subi %c0, %value : i64
   %constant_left = scalar.subi %wide, %value : i64
   %constant_right = scalar.subi %value, %wide : i64
-  func.return %negated, %constant_left, %constant_right : i64, i64, i64
+  view.store %negated, %captured[0, %capture_lane] : i64, view<3x64xi64>
+  view.store %constant_left, %captured[1, %capture_lane] : i64, view<3x64xi64>
+  view.store %constant_right, %captured[2, %capture_lane] : i64, view<3x64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @constant_subtract(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
-  %61 = v_mov_b32 0
-  %23 = concat(%61, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %24 = slice %23[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %25 = slice %23[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %26 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %27 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %28, %29 = v_sub_co_u32 %24, %26
-  %30, %31 = v_sub_co_ci_u32 %25, %27, %29
-  %negated = concat(%28, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %63 = v_mov_b32 1
-  %37 = concat(%63, %63) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %38 = slice %37[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %39 = slice %37[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %42, %43 = v_sub_co_u32 %38, %26
-  %44, %45 = v_sub_co_ci_u32 %39, %27, %43
-  %constant_left = concat(%42, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %51 = concat(%63, %63) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %54 = slice %51[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %55 = slice %51[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %56, %57 = v_sub_co_u32 %26, %54
-  %58, %59 = v_sub_co_ci_u32 %27, %55, %57
-  %constant_right = concat(%56, %58) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %negated, %constant_left, %constant_right
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @constant_subtract(%value: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 1536, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %23 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %66, %67 = s_sub_co_u32_lhs_inline %23, 0
+  %68, %69 = s_subb_u32_lhs_inline %24, %67, 0
+  %negated = concat(%66, %68) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %70, %71 = s_sub_co_u32_lhs_inline %23, 1
+  %72, %73 = s_subb_u32_lhs_inline %24, %71, 1
+  %constant_left = concat(%70, %72) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %74, %75 = s_sub_co_u32_rhs_inline %23, 1
+  %76, %77 = s_subb_u32_rhs_inline %24, %75, 1
+  %constant_right = concat(%74, %76) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %48 = slice %negated[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = v_mov_b32_copy %48
+  %50 = slice %negated[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %51 = v_mov_b32_copy %50
+  %52 = concat(%49, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %53 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  global_store_b64_saddr %53, %52, %captured
+  %54 = slice %constant_left[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55 = v_mov_b32_copy %54
+  %56 = slice %constant_left[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57 = v_mov_b32_copy %56
+  %58 = concat(%55, %57) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %53, %58, %captured {offset = 512}
+  %60 = slice %constant_right[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %61 = v_mov_b32_copy %60
+  %62 = slice %constant_right[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = v_mov_b32_copy %62
+  %64 = concat(%61, %63) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %53, %64, %captured {offset = 1024}
+  return
 }
 
 // ====

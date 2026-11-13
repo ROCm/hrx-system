@@ -1,66 +1,122 @@
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-func.def @mixed_f16(%uniform_word: i32, %varying: f16) -> (i32, i32) {
+kernel.def @mixed_f16() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%uniform_word: i32, %varying_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %varying_view = buffer.view %varying_buffer[%capture_base] : buffer -> view<64xf16>
+  %varying = view.load %varying_view[%capture_lane] : view<64xf16> -> f16
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xi32>
   %uniform_bits = scalar.trunci %uniform_word : i32 to i16
   %uniform = scalar.bitcast %uniform_bits : i16 to f16
   %forward = scalar.cmpf olt, %uniform, %varying : f16
   %reverse = scalar.cmpf uge, %varying, %uniform : f16
   %forward_word = scalar.extui %forward : i1 to i32
   %reverse_word = scalar.extui %reverse : i1 to i32
-  func.return %forward_word, %reverse_word : i32, i32
+  view.store %forward_word, %captured[0, %capture_lane] : i32, view<2x64xi32>
+  view.store %reverse_word, %captured[1, %capture_lane] : i32, view<2x64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @mixed_f16(%uniform: reg<amdgpu.vgpr>, %varying: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform_word"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_f16(%uniform: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %varying_view = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %29 = v_lshlrev_b32_src0_inline %capture_lane, 1
+  %varying = global_load_u16_saddr %29, %varying_view
   %forward = v_cmp_lt_f16 %uniform, %varying
   %reverse = v_cmp_nlt_f16 %varying, %uniform
   %forward_word = v_cndmask_b32_src0_lit_src1_inline %forward {imm32 = 0, true_value = 1}
   %reverse_word = v_cndmask_b32_src0_lit_src1_inline %reverse {imm32 = 0, true_value = 1}
-  return %forward_word, %reverse_word
+  %37 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %37, %forward_word, %captured
+  global_store_b32_saddr %37, %reverse_word, %captured {offset = 256}
+  return
 }
 
 // ====
 
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-func.def @mixed_f32(%uniform_bits: i32, %varying: f32) -> (i32, i32) {
+kernel.def @mixed_f32() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%uniform_bits: i32, %varying_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %varying_view = buffer.view %varying_buffer[%capture_base] : buffer -> view<64xf32>
+  %varying = view.load %varying_view[%capture_lane] : view<64xf32> -> f32
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xi32>
   %uniform = scalar.bitcast %uniform_bits : i32 to f32
   %forward = scalar.cmpf olt, %uniform, %varying : f32
   %reverse = scalar.cmpf uge, %varying, %uniform : f32
   %forward_word = scalar.extui %forward : i1 to i32
   %reverse_word = scalar.extui %reverse : i1 to i32
-  func.return %forward_word, %reverse_word : i32, i32
+  view.store %forward_word, %captured[0, %capture_lane] : i32, view<2x64xi32>
+  view.store %reverse_word, %captured[1, %capture_lane] : i32, view<2x64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @mixed_f32(%uniform: reg<amdgpu.vgpr>, %varying: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform_bits"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_f32(%uniform: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %varying_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %28 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  %varying = global_load_b32_saddr %28, %varying_view
   %forward = v_cmp_lt_f32 %uniform, %varying
   %reverse = v_cmp_nlt_f32 %varying, %uniform
   %forward_word = v_cndmask_b32_src0_lit_src1_inline %forward {imm32 = 0, true_value = 1}
   %reverse_word = v_cndmask_b32_src0_lit_src1_inline %reverse {imm32 = 0, true_value = 1}
-  return %forward_word, %reverse_word
+  global_store_b32_saddr %28, %forward_word, %captured
+  global_store_b32_saddr %28, %reverse_word, %captured {offset = 256}
+  return
 }
 
 // ====
 
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-func.def @mixed_f64(%uniform_bits: i64, %varying: f64) -> (i32, i32) {
+kernel.def @mixed_f64() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%uniform_bits: i64, %varying_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %varying_view = buffer.view %varying_buffer[%capture_base] : buffer -> view<64xf64>
+  %varying = view.load %varying_view[%capture_lane] : view<64xf64> -> f64
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xi32>
   %uniform = scalar.bitcast %uniform_bits : i64 to f64
   %forward = scalar.cmpf olt, %uniform, %varying : f64
   %reverse = scalar.cmpf uge, %varying, %uniform : f64
   %forward_word = scalar.extui %forward : i1 to i32
   %reverse_word = scalar.extui %reverse : i1 to i32
-  func.return %forward_word, %reverse_word : i32, i32
+  view.store %forward_word, %captured[0, %capture_lane] : i32, view<2x64xi32>
+  view.store %reverse_word, %captured[1, %capture_lane] : i32, view<2x64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @mixed_f64(%uniform: reg<amdgpu.vgpr x2>, %varying: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform_bits"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_f64(%uniform: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %varying_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %28 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %varying = global_load_b64_saddr %28, %varying_view
   %forward = v_cmp_lt_f64 %uniform, %varying
   %reverse = v_cmp_nlt_f64 %varying, %uniform
   %forward_word = v_cndmask_b32_src0_lit_src1_inline %forward {imm32 = 0, true_value = 1}
   %reverse_word = v_cndmask_b32_src0_lit_src1_inline %reverse {imm32 = 0, true_value = 1}
-  return %forward_word, %reverse_word
+  %36 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %36, %forward_word, %captured
+  global_store_b32_saddr %36, %reverse_word, %captured {offset = 256}
+  return
 }
 
 // ====
@@ -136,48 +192,85 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 4, direc
 
 // RUN: emit source-low target=amdgpu:gfx942 output=low
 
-func.def @mixed_i32(%uniform: i32, %payload: vector<1xi32>) -> (i32, i32) {
+kernel.def @mixed_i32() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%uniform: i32, %payload_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %payload_view = buffer.view %payload_buffer[%capture_base] : buffer -> view<64x1xi32>
+  %payload = vector.load %payload_view[%capture_lane, 0] : view<64x1xi32> -> vector<1xi32>
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xi32>
   %varying = vector.extract %payload[0] : vector<1xi32> -> i32
   %forward = scalar.cmpi slt, %uniform, %varying : i32
   %reverse = scalar.cmpi uge, %varying, %uniform : i32
   %forward_word = scalar.extui %forward : i1 to i32
   %reverse_word = scalar.extui %reverse : i1 to i32
-  func.return %forward_word, %reverse_word : i32, i32
+  view.store %forward_word, %captured[0, %capture_lane] : i32, view<2x64xi32>
+  view.store %reverse_word, %captured[1, %capture_lane] : i32, view<2x64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @mixed_i32(%uniform: reg<amdgpu.vgpr>, %varying: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_i32(%uniform: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %payload_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %31 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  %varying = global_load_dword_saddr %31, %payload_view : reg<amdgpu.vgpr>
   %forward = v_cmp_lt_i32 %uniform, %varying
   %reverse = v_cmp_ge_u32 %varying, %uniform
-  %22 = s_mov_b32 0
-  %23 = v_mov_b32_copy %22
-  %forward_word = v_cndmask_b32_src1_inline %23, %forward {true_value = 1}
-  %reverse_word = v_cndmask_b32_src1_inline %23, %reverse {true_value = 1}
-  return %forward_word, %reverse_word
+  %36 = s_mov_b32 0
+  %37 = v_mov_b32_copy %36
+  %forward_word = v_cndmask_b32_src1_inline %37, %forward {true_value = 1}
+  %reverse_word = v_cndmask_b32_src1_inline %37, %reverse {true_value = 1}
+  global_store_dword_saddr %31, %forward_word, %captured
+  global_store_dword_saddr %31, %reverse_word, %captured {offset = 256}
+  return
 }
 
 // ====
 
 // RUN: emit source-low target=amdgpu:gfx942 output=low
 
-func.def @mixed_i64(%uniform: i64, %payload: vector<1xi64>) -> (i32, i32) {
+kernel.def @mixed_i64() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%uniform: i64, %payload_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %payload_view = buffer.view %payload_buffer[%capture_base] : buffer -> view<64x1xi64>
+  %payload = vector.load %payload_view[%capture_lane, 0] : view<64x1xi64> -> vector<1xi64>
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xi32>
   %varying = vector.extract %payload[0] : vector<1xi64> -> i64
   %forward = scalar.cmpi slt, %uniform, %varying : i64
   %reverse = scalar.cmpi uge, %varying, %uniform : i64
   %forward_word = scalar.extui %forward : i1 to i32
   %reverse_word = scalar.extui %reverse : i1 to i32
-  func.return %forward_word, %reverse_word : i32, i32
+  view.store %forward_word, %captured[0, %capture_lane] : i32, view<2x64xi32>
+  view.store %reverse_word, %captured[1, %capture_lane] : i32, view<2x64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @mixed_i64(%uniform: reg<amdgpu.vgpr x2>, %varying: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @mixed_i64(%uniform: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %payload_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %31 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %varying = global_load_dwordx2_saddr %31, %payload_view : reg<amdgpu.vgpr x2>
   %forward = v_cmp_lt_i64 %uniform, %varying
   %reverse = v_cmp_ge_u64 %varying, %uniform
-  %22 = s_mov_b32 0
-  %23 = v_mov_b32_copy %22
-  %forward_word = v_cndmask_b32_src1_inline %23, %forward {true_value = 1}
-  %reverse_word = v_cndmask_b32_src1_inline %23, %reverse {true_value = 1}
-  return %forward_word, %reverse_word
+  %36 = s_mov_b32 0
+  %37 = v_mov_b32_copy %36
+  %forward_word = v_cndmask_b32_src1_inline %37, %forward {true_value = 1}
+  %reverse_word = v_cndmask_b32_src1_inline %37, %reverse {true_value = 1}
+  %41 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_dword_saddr %41, %forward_word, %captured
+  global_store_dword_saddr %41, %reverse_word, %captured {offset = 256}
+  return
 }
 
 // ====

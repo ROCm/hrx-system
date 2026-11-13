@@ -5,21 +5,38 @@
 // boolean and rematerializes SCC immediately before its select.
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @select_nested_scalar(%x: i32, %y: i32, %zero: i32, %two: i32, %lhs: i32, %middle: i32, %rhs: i32) -> (i32) {
+kernel.def target(@target) @select_nested_scalar() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%x: i32, %y: i32, %zero: i32, %two: i32, %lhs: i32, %middle: i32, %rhs: i32, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xi32>
   %use_lhs = scalar.cmpi eq, %x, %zero : i32
   %use_rhs = scalar.cmpi eq, %y, %two : i32
   %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : i32
   %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : i32
-  func.return %selected : i32
+  view.store %selected, %captured[%capture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @select_nested_scalar(%x: reg<amdgpu.vgpr>, %y: reg<amdgpu.vgpr>, %zero: reg<amdgpu.vgpr>, %two: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %middle: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %use_lhs = v_cmp_eq_i32 %x, %zero
-  %use_rhs = v_cmp_eq_i32 %y, %two
-  %middle_or_rhs = v_cndmask_b32 %middle, %rhs, %use_rhs
-  %selected = v_cndmask_b32 %middle_or_rhs, %lhs, %use_lhs
-  return %selected
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 7, direct_arg_count = 7, direct_arg_names = {arg0 = "x", arg1 = "y", arg2 = "zero", arg3 = "two", arg4 = "lhs", arg5 = "middle", arg6 = "rhs"}, direct_arg_offsets = [0, 4, 8, 12, 16, 20, 24], direct_arg_parameter_indices = [0, 1, 2, 3, 4, 5, 6], direct_arg_sizes = [4, 4, 4, 4, 4, 4, 4], parameter_count = 8, resource_count = 1, resource_offsets = [32], resource_parameter_indices = [7], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @select_nested_scalar(%x: reg<amdgpu.sgpr>, %y: reg<amdgpu.sgpr>, %zero: reg<amdgpu.sgpr>, %two: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %middle: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %26 = s_cmp_eq_i32 %x, %zero
+  %27 = s_mov_b32 0
+  %28 = s_mov_b32 1
+  %use_lhs = s_cselect_b32 %28, %27, %26
+  %use_rhs = s_cmp_eq_i32 %y, %two
+  %middle_or_rhs = s_cselect_b32 %rhs, %middle, %use_rhs
+  %32 = s_cmp_lg_i32_src1_inline %use_lhs {rhs = 0}
+  %selected = s_cselect_b32 %lhs, %middle_or_rhs, %32
+  %34 = v_mov_b32_copy %selected
+  %35 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %35, %34, %captured
+  return
 }
 
 // ====
