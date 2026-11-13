@@ -6,6 +6,8 @@
 
 #include "loom/decision/predicate.h"
 
+#include "loom/ir/float_facts.h"
+
 static loom_decision_truth_t loom_decision_truth_from_bool(bool value) {
   return value ? LOOM_DECISION_TRUTH_TRUE : LOOM_DECISION_TRUTH_FALSE;
 }
@@ -104,6 +106,52 @@ static loom_decision_truth_t loom_decision_predicate_evaluate_unsigned_relation(
   }
 }
 
+static loom_decision_truth_t loom_decision_predicate_float_equal(
+    const loom_decision_predicate_operand_t* lhs,
+    const loom_decision_predicate_operand_t* rhs) {
+  if (loom_value_facts_is_nan(lhs->facts) ||
+      loom_value_facts_is_nan(rhs->facts)) {
+    return LOOM_DECISION_TRUTH_FALSE;
+  }
+  if (loom_decision_operands_have_same_identity(lhs, rhs) &&
+      (loom_value_facts_is_not_nan(lhs->facts) ||
+       loom_value_facts_is_not_nan(rhs->facts))) {
+    return LOOM_DECISION_TRUTH_TRUE;
+  }
+  const bool lhs_is_float = loom_value_facts_is_float(lhs->facts);
+  const bool rhs_is_float = loom_value_facts_is_float(rhs->facts);
+  if (lhs_is_float && rhs_is_float) {
+    double lhs_value = 0.0;
+    double rhs_value = 0.0;
+    if (!loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, lhs->facts,
+                                         &lhs_value) ||
+        !loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, rhs->facts,
+                                         &rhs_value)) {
+      return LOOM_DECISION_TRUTH_UNKNOWN;
+    }
+    return loom_decision_truth_from_bool(lhs_value == rhs_value);
+  }
+
+  // Integer literals retain their exact value. Converting them to double could
+  // falsely prove equality after rounding an integer larger than 2^53.
+  const loom_value_facts_t float_facts = lhs_is_float ? lhs->facts : rhs->facts;
+  const loom_value_facts_t integer_facts =
+      lhs_is_float ? rhs->facts : lhs->facts;
+  double float_value = 0.0;
+  int64_t integer_value = 0;
+  if (!loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, float_facts,
+                                       &float_value) ||
+      !loom_value_facts_as_exact_i64(integer_facts, &integer_value)) {
+    return LOOM_DECISION_TRUTH_UNKNOWN;
+  }
+  if (float_value < -0x1p63 || float_value >= 0x1p63) {
+    return LOOM_DECISION_TRUTH_FALSE;
+  }
+  const int64_t truncated_value = (int64_t)float_value;
+  return loom_decision_truth_from_bool(float_value == (double)truncated_value &&
+                                       truncated_value == integer_value);
+}
+
 static IREE_ATTRIBUTE_ALWAYS_INLINE loom_decision_truth_t
 loom_decision_predicate_evaluate_relation(
     loom_predicate_kind_t predicate_kind,
@@ -111,6 +159,16 @@ loom_decision_predicate_evaluate_relation(
     const loom_decision_predicate_operand_t* rhs) {
   if (loom_value_facts_is_float(lhs->facts) ||
       loom_value_facts_is_float(rhs->facts)) {
+    if (predicate_kind == LOOM_PREDICATE_EQ ||
+        predicate_kind == LOOM_PREDICATE_NE) {
+      const loom_decision_truth_t equal =
+          loom_decision_predicate_float_equal(lhs, rhs);
+      if (equal == LOOM_DECISION_TRUTH_UNKNOWN ||
+          predicate_kind == LOOM_PREDICATE_EQ) {
+        return equal;
+      }
+      return loom_decision_truth_from_bool(equal == LOOM_DECISION_TRUTH_FALSE);
+    }
     return LOOM_DECISION_TRUTH_UNKNOWN;
   }
 
