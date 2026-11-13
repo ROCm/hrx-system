@@ -373,9 +373,12 @@ curl --fail --silent --show-error "$loom_base_url/models"
 
 Then test the operation directly with the exact model ID. The
 [HTTP profile reference](../http-profiles.md) gives accepted request
-fields for chat, image, embedding, speech and transcription operations. Loom
-deliberately rejects unknown or unsupported options instead of silently changing
-their meaning.
-Common configuration failures are unsupported reasoning/template fields, a
+fields for chat, image, embedding, speech and transcription operations. Chat
+accepts client extensions and nullable native defaults; the model program owns
+sampling and template behavior. The [compatibility table](../http-profiles.md#request-compatibility)
+distinguishes implemented controls from fields that are accepted without an
+effect on generation. Other operation profiles retain their documented schemas.
+
+Common configuration failures are conflicting reasoning/template controls, a
 sampling value or image size rejected by the model's source, an operation using
 a model of another kind, or a client base URL that duplicates or omits `/v1`.

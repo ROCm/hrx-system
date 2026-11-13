@@ -165,6 +165,58 @@ TEST_F(SourceChatPolicyTest, OutputBudgetsUseSignedTokenCoordinates) {
   }
 }
 
+TEST_F(SourceChatPolicyTest, NullableLimitsUseDefaultsAndCompletionPrecedence) {
+  const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
+  const struct {
+    // Optional output-limit members following the required request fields.
+    const char* fields;
+    // Limit selected from the request or the deployment default.
+    size_t expected;
+  } cases[] = {
+      {R"("max_tokens":null)", 32},
+      {R"("max_completion_tokens":null)", 32},
+      {R"("max_tokens":null,"max_completion_tokens":null)", 32},
+      {R"("max_tokens":7,"max_completion_tokens":null)", 7},
+      {R"("max_tokens":null,"max_completion_tokens":5)", 5},
+      {R"("max_tokens":7,"max_completion_tokens":5)", 5},
+      {R"("max_completion_tokens":5,"max_tokens":7)", 5},
+  };
+  for (const auto& entry : cases) {
+    SCOPED_TRACE(entry.fields);
+    const std::string body =
+        R"({"model":"fixture-text","messages":[{"role":"user","content":"a"}],)" +
+        std::string(entry.fields) + "}";
+    loom_serve_text_chat_t chat = {};
+    IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+        policy, policy->name, iree_make_cstring_view(body.c_str()), 1, 32,
+        host_allocator_, &chat));
+    EXPECT_EQ(chat.max_tokens, entry.expected);
+    loom_serve_text_chat_deinitialize(&chat);
+  }
+}
+
+TEST_F(SourceChatPolicyTest, NullableRequestFieldsStillRejectDuplicates) {
+  const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
+  for (
+      const char* fields : {
+          R"("max_tokens":null,"max_tokens":2)",
+          R"("tools":null,"tools":[])",
+          R"("stream":null,"stream":true)",
+          R"("stream":true,"stream_options":{"include_usage":null,"include_usage":true})",
+      }) {
+    SCOPED_TRACE(fields);
+    const std::string body =
+        R"({"model":"fixture-text","messages":[{"role":"user","content":"a"}],)" +
+        std::string(fields) + "}";
+    loom_serve_text_chat_t chat = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_text_chat_initialize(policy, policy->name,
+                                        iree_make_cstring_view(body.c_str()), 1,
+                                        32, host_allocator_, &chat));
+  }
+}
+
 TEST_F(SourceChatPolicyTest, StreamingBatchesReuseScratchWithoutHeapChurn) {
   const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
   const std::string body = Request(Message("user", "a"), 32);
@@ -463,6 +515,29 @@ TEST_F(SourceChatPolicyTest, OrderedImagesReachSourceDefinedInputSpans) {
     EXPECT_EQ(input.media_span_count, 0u);
     loom_serve_text_input_deinitialize(&input, failing.allocator());
   }
+  loom_serve_text_chat_deinitialize(&chat);
+}
+
+TEST_F(SourceChatPolicyTest, MediaRequestExtensionsPreserveImageInput) {
+  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+    GTEST_SKIP() << "image input is disabled in this build";
+  }
+  const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
+  const std::string body =
+      R"({"model":"fixture-text","messages":[{"role":"user","content":[)"
+      R"({"type":"image_url","cache_control":{"type":"ephemeral"},"image_url":{)"
+      R"("detail":null,"extension":true,"url":"data:image/x-portable-arbitrarymap;base64,)" +
+      std::string(kPam) +
+      R"("}}]}],"media_io_kwargs":{"image":{"extension":1},"video":{"fps":null,"frames_indices":null,"total_num_frames":null,"duration":null,"num_frames":null,"do_sample_frames":null,"extension":1}}})";
+  loom_serve_text_chat_t chat = {};
+  IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+      policy, policy->name, iree_make_cstring_view(body.c_str()), 1, 4,
+      host_allocator_, &chat));
+  ASSERT_EQ(chat.images.count, 1u);
+  EXPECT_EQ(chat.images.values[0].detail,
+            LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_AUTO);
+  EXPECT_EQ(chat.images.values[0].info.width, 2u);
+  EXPECT_EQ(chat.images.values[0].info.height, 2u);
   loom_serve_text_chat_deinitialize(&chat);
 }
 

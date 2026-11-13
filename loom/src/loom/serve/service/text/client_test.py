@@ -158,9 +158,68 @@ class ClientTest(unittest.TestCase):
                         {"stream": False},
                         {"stream": None},
                         {"stream": False, "stream_options": None},
+                        {"stream_options": {}},
+                        {"stream": False, "stream_options": {"include_usage": True}},
                     ):
                         result = self.request(address, self.body(**options))
                         self.check_completion(result, "bx", "length", 4, 2)
+                    # Common SDK defaults and extensions share the normal
+                    # JSON/SSE path, without changing the source's prompt.
+                    compatible = self.body(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "abxa",
+                                        "cache_control": {"type": "ephemeral"},
+                                    }
+                                ],
+                                "reasoning_content": None,
+                                "tool_calls": None,
+                            }
+                        ],
+                        tools=None,
+                        max_tokens=None,
+                        max_completion_tokens=2,
+                        store=True,
+                        user="client",
+                        n=1,
+                        stop=None,
+                        logprobs=False,
+                        top_logprobs=None,
+                        presence_penalty=0,
+                        frequency_penalty=0,
+                        response_format={"type": "text"},
+                        stream_options={
+                            "include_usage": True,
+                            "include_obfuscation": False,
+                        },
+                        media_io_kwargs=None,
+                        client_extension={"request_label": "example"},
+                    )
+                    for streaming in (False, True):
+                        result = self.request(
+                            address, {**compatible, "stream": streaming}
+                        )
+                        if streaming:
+                            self.assertEqual(
+                                self.check_stream(result, include_usage=True), "bx"
+                            )
+                        else:
+                            self.check_completion(result, "bx", "length", 4, 2)
+                    self.assertEqual(
+                        control(
+                            address,
+                            "POST",
+                            "/v1/chat/completions/input_tokens",
+                            200,
+                            body=json.dumps(compatible),
+                            headers={"Content-Type": "application/json"},
+                        ),
+                        {"input_tokens": 4},
+                    )
                     tools = [
                         {
                             "type": "function",
@@ -312,14 +371,23 @@ class ClientTest(unittest.TestCase):
 
                     for options in (
                         {"stream": "false"},
-                        {"stream_options": {}},
-                        {"stream": False, "stream_options": {"include_usage": True}},
+                        {"stream": True, "stream_options": {"include_usage": "yes"}},
+                        {"tools": {}},
+                        {"max_completion_tokens": 0},
+                        {
+                            "messages": [
+                                {"role": "user", "content": [{"type": "unknown"}]}
+                            ]
+                        },
                         {"temperature": 0.7},
                     ):
                         error = self.request(
                             address, self.body(**options), expected=400
                         )
                         self.assertIn("message", error["error"])
+                    self.check_completion(
+                        self.request(address, self.body()), "bx", "length", 4, 2
+                    )
 
                     models = control(address, "GET", "/v1/models", 200)["data"]
                     self.assertEqual(models[0]["created"], registered)

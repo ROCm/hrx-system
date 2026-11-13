@@ -174,6 +174,14 @@ class ToolPolicyTest(unittest.TestCase):
             "chat_template_kwargs": {"custom_option": True},
             "parallel_tool_calls": False,
             "response_format": {"type": "json_object"},
+            "stop": ["done"],
+            "user": "client",
+            "n": 1,
+            "logprobs": True,
+            "top_logprobs": 5,
+            "presence_penalty": 0.5,
+            "frequency_penalty": 0.5,
+            "store": True,
         }
         result = self.execute("[]", **options)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -188,6 +196,37 @@ class ToolPolicyTest(unittest.TestCase):
         result = self.execute("[]", messages=messages)
         self.assertEqual(result.returncode, 0, result.stderr)
         value = json.loads(result.stdout)
+        self.assertEqual(
+            json.loads(bytes(value["request_options"]))["messages"], messages
+        )
+
+    def test_history_extensions_and_nullable_fields_reach_source_unchanged(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "hello", "cache_control": {}}],
+                "name": None,
+                "tool_calls": None,
+                "reasoning_content": None,
+                "tool_call_id": None,
+            },
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        **self.call(),
+                        "index": 0,
+                        "function": {**self.call()["function"], "extension": True},
+                    }
+                ],
+            },
+        ]
+        result = self.execute("[]", messages=messages)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertIn('read: {"path":"a"}', value["prompt"])
         self.assertEqual(
             json.loads(bytes(value["request_options"]))["messages"], messages
         )
