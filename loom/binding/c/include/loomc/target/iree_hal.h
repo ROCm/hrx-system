@@ -153,10 +153,17 @@ struct loomc_iree_hal_target_options_t {
   /// IREE HAL device borrowed for the duration of the call.
   iree_hal_device_t* device;
 
+  /// Optional dispatch queue borrowed for the duration of the call. When
+  /// supplied, selection uses its physical-device affinity and retains its
+  /// available execution-unit count in the profile when known. The queue must
+  /// belong to `device`; no queue reference is retained by the result.
+  iree_hal_queue_t* queue;
+
   /// Optional physical-device set the selected target must fully cover.
   ///
   /// Zero selects the unique highest-priority target for the logical device.
   /// A heterogeneous logical device may require an explicit affinity.
+  /// With `queue`, zero uses the queue affinity and nonzero must equal it.
   iree_hal_physical_device_affinity_t physical_device_affinity;
 
   /// Optional caller-selected compiler profile to bind to this HAL device.

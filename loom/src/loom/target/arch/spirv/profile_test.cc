@@ -467,6 +467,7 @@ TEST(SpirvTargetProfileTest, RejectsUnknownNamedProfile) {
 TEST(SpirvTargetProfileTest, CheckedCastRejectsAnotherFamily) {
   static const loom_target_profile_type_t kOtherProfileType = {
       .name = IREE_SVL("other"),
+      .storage_size = sizeof(loom_target_profile_t),
       .equal = loom_target_profile_equal_common,
   };
   const loom_target_profile_t other_profile = {

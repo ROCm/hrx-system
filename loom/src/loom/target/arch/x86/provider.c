@@ -120,6 +120,7 @@ static bool loom_x86_profile_equal(const loom_target_profile_t* lhs,
 
 static const loom_target_profile_type_t kProfileType = {
     .name = IREE_SVL("x86"),
+    .storage_size = sizeof(loom_x86_target_profile_t),
     .fact_type = &loom_x86_target_fact_type,
     .project_facts = loom_x86_profile_project_facts,
     .equal = loom_x86_profile_equal,

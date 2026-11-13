@@ -65,6 +65,7 @@ loom_cc_test(
         "//loom/binding/c/target/iree_hal",
         "//loom/binding/c/target/spirv",
         "//loom/binding/c/test:test_util",
+        "//loom/src/loom/target:types",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

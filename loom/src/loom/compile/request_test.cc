@@ -54,6 +54,7 @@ static iree_status_t ProjectTargetFacts(const loom_target_profile_t* profile,
 
 static const loom_target_profile_type_t kTargetProfileType = {
     .name = IREE_SVL("TargetFamily123"),
+    .storage_size = sizeof(loom_target_profile_t),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectTargetFacts,
     .equal = loom_target_profile_equal_common,

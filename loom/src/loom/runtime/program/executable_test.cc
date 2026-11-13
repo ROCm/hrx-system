@@ -173,10 +173,7 @@ TEST_P(ExecutableTest, FailedImageLoadsAreNotRetainedAndCanRetireCache) {
   loom_runtime_target_t target = {};
   IREE_ASSERT_OK(loom_runtime_target_select(
       loom_runtime_host_target_environment(host), providers, provider_count,
-      device_,
-      iree_hal_queue_family_spec(iree_hal_queue_family(dispatch_))
-          ->physical_device_affinity,
-      &compilation_, host_allocator_, &target));
+      device_, dispatch_, &compilation_, host_allocator_, &target));
   const loom_runtime_native_domain_options_t options = {
       .profile = target.selection.target_profile,
       .artifact_format = target.artifact_format,

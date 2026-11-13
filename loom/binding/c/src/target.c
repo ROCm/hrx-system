@@ -806,6 +806,88 @@ loomc_status_t loomc_target_profile_create(
   return status;
 }
 
+// The family value follows this header at maximum alignment. Its nested
+// pointers remain valid through the retained base profile.
+typedef struct loomc_target_profile_refinement_t {
+  // Original immutable profile retaining family storage and its provenance.
+  loomc_target_profile_t* base_profile;
+  // Common bundle borrowing the base export plan and configuration.
+  loom_target_bundle_t bundle;
+  // Snapshot with the additional deployment fact.
+  loom_target_snapshot_t snapshot;
+} loomc_target_profile_refinement_t;
+
+static loomc_target_profile_refinement_t* loomc_target_profile_refinement(
+    loom_target_profile_t* profile) {
+  uint8_t* storage =
+      (uint8_t*)profile - iree_sizeof_struct(loomc_target_profile_refinement_t);
+  return (loomc_target_profile_refinement_t*)storage;
+}
+
+static void loomc_target_profile_refinement_destroy(
+    loom_target_profile_t* profile, iree_allocator_t allocator) {
+  loomc_target_profile_refinement_t* storage =
+      loomc_target_profile_refinement(profile);
+  loomc_target_profile_release(storage->base_profile);
+  iree_allocator_free(allocator, storage);
+}
+
+loomc_status_t loomc_target_profile_refine_execution_unit_count(
+    loomc_target_profile_t* base_profile, uint32_t execution_unit_count,
+    loomc_allocator_t allocator, loomc_target_profile_t** out_profile) {
+  if (out_profile == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_profile must not be NULL");
+  }
+  *out_profile = NULL;
+  if (base_profile == NULL || execution_unit_count == 0) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "execution-unit refinement requires a profile "
+                             "and nonzero count");
+  }
+  const loom_target_profile_t* base = base_profile->target_profile;
+  const loom_target_bundle_t* bundle = base->target_bundle;
+  if (bundle == NULL || bundle->snapshot == NULL ||
+      bundle->export_plan == NULL || bundle->config == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "execution-unit refinement requires a complete "
+                             "target profile");
+  }
+  const uint32_t previous_count = bundle->snapshot->execution_unit_count;
+  if (previous_count != 0) {
+    if (previous_count != execution_unit_count) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "execution-unit count conflicts with the "
+                               "target profile");
+    }
+    loomc_target_profile_retain(base_profile);
+    *out_profile = base_profile;
+    return loomc_ok_status();
+  }
+  const iree_host_size_t profile_offset =
+      iree_sizeof_struct(loomc_target_profile_refinement_t);
+  loomc_target_profile_refinement_t* storage = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc(
+      allocator, profile_offset + base->type->storage_size, (void**)&storage));
+  *storage = (loomc_target_profile_refinement_t){
+      .base_profile = base_profile,
+      .bundle = *bundle,
+      .snapshot = *bundle->snapshot,
+  };
+  loomc_target_profile_retain(base_profile);
+  storage->snapshot.execution_unit_count = execution_unit_count;
+  storage->bundle.snapshot = &storage->snapshot;
+  loom_target_profile_t* refined =
+      (loom_target_profile_t*)((uint8_t*)storage + profile_offset);
+  memcpy(refined, base, base->type->storage_size);
+  refined->target_bundle = &storage->bundle;
+  loom_target_fact_field_set_insert(
+      &refined->explicit_fields, LOOM_TARGET_FACT_FIELD_EXECUTION_UNIT_COUNT);
+  return loomc_target_profile_create(
+      base_profile->target_environment, base_profile->identifier, refined,
+      loomc_target_profile_refinement_destroy, allocator, out_profile);
+}
+
 loomc_status_t loomc_target_profile_select(
     loomc_target_environment_t* target_environment,
     loomc_string_view_t specification, loomc_allocator_t allocator,
@@ -863,10 +945,18 @@ const loom_target_provider_t* loomc_target_profile_loom_target_provider(
   return profile ? profile->target_provider : NULL;
 }
 
-bool loomc_target_profile_has_storage(
+const void* loomc_target_profile_storage(
     const loomc_target_profile_t* profile,
     loom_target_profile_destroy_fn_t destroy) {
-  return profile && profile->target_profile_destroy == destroy;
+  if (profile != NULL && profile->target_profile_destroy ==
+                             loomc_target_profile_refinement_destroy) {
+    // A known count can only be repeated, so refinements never form chains.
+    profile =
+        loomc_target_profile_refinement(profile->target_profile)->base_profile;
+  }
+  return profile && profile->target_profile_destroy == destroy
+             ? profile->target_profile
+             : NULL;
 }
 
 loomc_target_environment_t* loomc_target_profile_target_environment(

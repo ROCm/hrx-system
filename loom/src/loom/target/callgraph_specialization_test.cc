@@ -70,6 +70,7 @@ static iree_status_t ProjectTestProfileFacts(
 
 static const loom_target_profile_type_t kTestProfileType = {
     .name = IREE_SVL("callgraph-specialization-test"),
+    .storage_size = sizeof(TestTargetProfile),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectTestProfileFacts,
     .equal =

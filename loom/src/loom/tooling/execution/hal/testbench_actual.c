@@ -234,6 +234,7 @@ iree_status_t loom_run_hal_testbench_context_select_target(
       .structure_size = sizeof(options),
       .identifier = identifier,
       .device = context->runtime.device,
+      .queue = context->runtime.dispatch_queue,
       .physical_device_affinity =
           loom_run_hal_runtime_dispatch_physical_device_affinity(
               &context->runtime),

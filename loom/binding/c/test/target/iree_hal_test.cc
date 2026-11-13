@@ -12,6 +12,7 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
+#include "loom/target/types.h"
 #include "loomc/context.h"
 #include "loomc/diagnostic.h"
 #include "loomc/module.h"
@@ -21,6 +22,7 @@
 #include "loomc/target/spirv/base.h"
 #include "loomc/target/spirv/profile.h"
 #include "loomc/workspace.h"
+#include "target.h"
 #include "test/util.h"
 
 namespace {
@@ -139,7 +141,7 @@ loomc_status_t FakeSelectTarget(
       .structure_size = sizeof(profile_options),
       .next = nullptr,
       .identifier = options->identifier,
-      .preset = LOOMC_SPIRV_PROFILE_PRESET_NONE,
+      .preset = LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
       .feature_facts = nullptr,
       .feature_fact_count = 0,
       .limit_facts = nullptr,
@@ -160,6 +162,76 @@ loomc_status_t FakeSelectTarget(
     loomc_result_release(result);
   }
   return status;
+}
+
+TEST(LoomcIreeHalTargetTest, CountsQueueUnitsInsteadOfResourceOrdinals) {
+  TargetEnvironmentPtr environment = CreateSpirvTargetEnvironment();
+  FakeProviderState state = {.supports = true};
+  const loomc_iree_hal_target_provider_t provider = {
+      .name = loomc_make_cstring_view("queue"),
+      .user_data = &state,
+      .select_target = FakeSelectTarget,
+  };
+  const loomc_iree_hal_target_provider_t* providers[] = {&provider};
+  const iree_hal_queue_execution_resource_group_spec_t group = {
+      .minimum_selected_resource_count = 1,
+  };
+  const iree_hal_queue_execution_resource_spec_t resources[] = {
+      {.first_execution_unit_ordinal = 0, .execution_unit_count = 2},
+      {.first_execution_unit_ordinal = 8, .execution_unit_count = 3},
+      {.first_execution_unit_ordinal = 48, .execution_unit_count = 8},
+  };
+  const iree_hal_queue_execution_resource_ordinal_t selected[] = {0, 2};
+  const iree_hal_queue_vtable_t vtable = {
+      .destroy = [](iree_hal_queue_t*) {},
+  };
+  for (uint32_t expected_count : {0u, 13u, 10u}) {
+    SCOPED_TRACE(expected_count);
+    const iree_hal_queue_family_spec_t family_spec = {
+        .execution_unit_count = expected_count ? 64u : 0u,
+        .execution_resource_group_count = expected_count ? 1u : 0u,
+        .execution_resource_groups = expected_count ? &group : nullptr,
+        .execution_resource_count = expected_count ? 3u : 0u,
+        .execution_resources = expected_count ? resources : nullptr,
+        .physical_device_affinity = 4,
+        .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+    };
+    iree_hal_queue_family_t family = {};
+    iree_hal_queue_family_initialize(FakeDevice(), 0, &family_spec, &family);
+    const iree_hal_queue_params_t params = {
+        .execution_resources =
+            expected_count == 10
+                ? iree_hal_queue_execution_resource_list_t{2, selected}
+                : iree_hal_queue_execution_resource_list_t{},
+    };
+    iree_hal_queue_t queue = {};
+    iree_hal_queue_initialize(&family, &params, &vtable, &queue);
+    loomc_iree_hal_target_options_t options = {
+        .device = FakeDevice(),
+        .queue = &queue,
+        .providers = providers,
+        .provider_count = 1,
+    };
+    loomc_iree_hal_target_selection_t selection = {};
+    loomc_result_t* result = nullptr;
+    LOOMC_ASSERT_OK(loomc_target_select_iree_hal(environment.get(), &options,
+                                                 loomc_allocator_system(),
+                                                 &selection, &result));
+    ResultPtr result_owner(result);
+    TargetProfilePtr profile(selection.target_profile);
+    ASSERT_TRUE(loomc_result_succeeded(result_owner.get()));
+    EXPECT_EQ(loomc_target_profile_loom_target_profile(profile.get())
+                  ->target_bundle->snapshot->execution_unit_count,
+              expected_count);
+    options.physical_device_affinity = 2;
+    LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
+                           loomc_target_select_iree_hal(
+                               environment.get(), &options,
+                               loomc_allocator_system(), &selection, &result));
+    EXPECT_EQ(selection.target_profile, nullptr);
+    EXPECT_EQ(result, nullptr);
+    iree_hal_queue_release(&queue);
+  }
 }
 
 TEST(LoomcIreeHalTargetTest, RejectsInvalidArguments) {

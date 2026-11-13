@@ -22,6 +22,7 @@ static iree_status_t loom_vm_profile_project_facts(
 
 static const loom_target_profile_type_t kProfileType = {
     .name = IREE_SVL("vm"),
+    .storage_size = sizeof(loom_target_profile_t),
     .fact_type = &loom_vm_target_fact_type,
     .project_facts = loom_vm_profile_project_facts,
     .equal = loom_target_profile_equal_common,
@@ -48,9 +49,15 @@ static iree_status_t loom_vm_materialize_definition(
     loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
     loom_symbol_ref_t symbol, loom_location_id_t location) {
   loom_op_t* target_op = NULL;
+  const loom_target_facts_t* facts = resolved_target->facts;
+  const loom_vm_target_build_flags_t flags =
+      loom_target_fact_field_set_contains(
+          facts->explicit_fields, LOOM_TARGET_FACT_FIELD_EXECUTION_UNIT_COUNT)
+          ? LOOM_VM_TARGET_BUILD_FLAG_HAS_EXECUTION_UNIT_COUNT
+          : 0;
   return loom_vm_target_build(
-      builder, (loom_vm_target_kind_t)resolved_target->facts->selector, symbol,
-      location, &target_op);
+      builder, flags, (loom_vm_target_kind_t)facts->selector, symbol,
+      facts->storage.snapshot.execution_unit_count, location, &target_op);
 }
 
 static void loom_vm_descriptor_registry_initialize(

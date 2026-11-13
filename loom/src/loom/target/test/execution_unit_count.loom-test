@@ -1,0 +1,111 @@
+// RUN: pass canonicalize
+
+// Missing capacity stays contextual; a known deployment count resolves without
+// depending on the target architecture or subgroup width.
+target.generic<reference> @unknown
+
+target.generic<reference> @known {execution_unit_count = 40, subgroup_size = 32}
+
+target.generic<reference> @unspecified {execution_unit_count = 0}
+
+func.def public target(@unknown) @pending() -> (index) {
+  %units = target.execution.unit.count : index
+  func.return %units : index
+}
+
+func.def public target(@known) @budget() -> (index) {
+  %units = target.execution.unit.count : index
+  %groups_per_unit = index.constant 4 : index
+  %groups = index.mul %units, %groups_per_unit : index
+  func.return %groups : index
+}
+
+func.def public target(@unspecified) @still_pending() -> (index) {
+  %units = target.execution.unit.count : index
+  func.return %units : index
+}
+
+template.decl @capacity() -> (index)
+
+// Provider identity alone supplies no deployment capacity.
+template.def<@capacity> target(@unknown) @eligible_provider() -> (index) {
+  %units = target.execution.unit.count : index
+  template.return %units : index
+}
+
+// ----
+target.generic<reference> @unknown
+
+target.generic<reference> @known {execution_unit_count = 40, subgroup_size = 32}
+
+target.generic<reference> @unspecified {execution_unit_count = 0}
+
+func.def public target(@unknown) @pending() -> (index) {
+  %units = target.execution.unit.count : index
+  func.return %units : index
+}
+
+func.def public target(@known) @budget() -> (index) {
+  %groups = index.constant 160 : index
+  func.return %groups : index
+}
+
+func.def public target(@unspecified) @still_pending() -> (index) {
+  %units = target.execution.unit.count : index
+  func.return %units : index
+}
+
+template.decl @capacity() -> (index)
+
+template.def<@capacity> target(@unknown) @eligible_provider() -> (index) {
+  %units = target.execution.unit.count : index
+  template.return %units : index
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,canonicalize
+
+// A shared helper specializes independently for full and partitioned queues.
+test.target<low_core> @whole {execution_unit_count = 40}
+
+test.target<low_core> @partition {execution_unit_count = 10}
+
+func.def noinline @capacity() -> (index) {
+  %units = target.execution.unit.count : index
+  func.return %units : index
+}
+
+func.def public target(@whole) @whole_queue() -> (index) {
+  %units = func.call @capacity() : () -> (index)
+  func.return %units : index
+}
+
+func.def public target(@partition) @partitioned_queue() -> (index) {
+  %units = func.call @capacity() : () -> (index)
+  func.return %units : index
+}
+
+// ----
+test.target<low_core> @whole {execution_unit_count = 40}
+
+test.target<low_core> @partition {execution_unit_count = 10}
+
+func.def noinline @capacity() -> (index) {
+  %units = index.constant 40 : index
+  func.return %units : index
+}
+
+func.def noinline @capacity_spec0() -> (index) {
+  %units = index.constant 10 : index
+  func.return %units : index
+}
+
+func.def public target(@whole) @whole_queue() -> (index) {
+  %units = func.call pure @capacity() : () -> (index)
+  func.return %units : index
+}
+
+func.def public target(@partition) @partitioned_queue() -> (index) {
+  %units = func.call pure @capacity_spec0() : () -> (index)
+  func.return %units : index
+}

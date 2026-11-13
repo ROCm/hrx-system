@@ -1305,7 +1305,7 @@ static iree_status_t loom_low_source_workload_generate_module_into(
       /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
       /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
       /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
-      /*subgroup_size=*/0,
+      /*subgroup_size=*/0, /*execution_unit_count=*/0,
       /*max_grid_size_x=*/0, /*max_grid_size_y=*/0, /*max_grid_size_z=*/0,
       /*max_flat_grid_size=*/0,
       /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,

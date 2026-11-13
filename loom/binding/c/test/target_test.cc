@@ -291,6 +291,7 @@ static iree_status_t ProjectTestTargetProfileFacts(
 
 static const loom_target_profile_type_t kTestTargetProfileType = {
     .name = IREE_SVL("loomc-target-test"),
+    .storage_size = sizeof(TestTargetProfile),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectTestTargetProfileFacts,
     .equal =

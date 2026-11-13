@@ -826,6 +826,7 @@ int loom_run_main(int argc, char** argv,
         .structure_size = sizeof(target_options),
         .identifier = loomc_make_cstring_view("loom-run live device"),
         .device = runtime.device,
+        .queue = runtime.dispatch_queue,
         .physical_device_affinity =
             loom_run_hal_runtime_dispatch_physical_device_affinity(&runtime),
         .target_profile = requested_target_profile,

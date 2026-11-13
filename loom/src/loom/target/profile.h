@@ -48,6 +48,10 @@ typedef struct loom_target_profile_type_t {
   // Stable family name used in diagnostics and reports.
   iree_string_view_t name;
 
+  // Size of the complete family profile value. Values are byte-copyable while
+  // their original owner remains live; nested immutable storage is borrowed.
+  iree_host_size_t storage_size;
+
   // Static typed fact representation produced from this profile family.
   const loom_target_fact_type_t* fact_type;
 

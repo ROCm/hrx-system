@@ -902,6 +902,7 @@ class TestBuilder(DialectBuilder):
         max_flat_workgroup_size: int | None = ...,
         max_workgroup_storage_bytes: int | None = ...,
         subgroup_size: int | None = ...,
+        execution_unit_count: int | None = ...,
         max_grid_size_x: int | None = ...,
         max_grid_size_y: int | None = ...,
         max_grid_size_z: int | None = ...,

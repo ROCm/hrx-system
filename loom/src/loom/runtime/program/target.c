@@ -35,13 +35,12 @@ iree_status_t loom_runtime_target_select(
     loomc_target_environment_t* environment,
     const loomc_iree_hal_target_provider_t* const* providers,
     iree_host_size_t provider_count, iree_hal_device_t* device,
-    iree_hal_physical_device_affinity_t affinity,
-    loom_runtime_compilation_report_t* report, iree_allocator_t host_allocator,
-    loom_runtime_target_t* out_target) {
+    iree_hal_queue_t* queue, loom_runtime_compilation_report_t* report,
+    iree_allocator_t host_allocator, loom_runtime_target_t* out_target) {
   *out_target = (loom_runtime_target_t){0};
   const loomc_iree_hal_target_options_t options = {
       .device = device,
-      .physical_device_affinity = affinity,
+      .queue = queue,
       .providers = providers,
       .provider_count = provider_count,
   };
