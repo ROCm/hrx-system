@@ -68,10 +68,12 @@ iree_status_t loom_low_lower_projected_call(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_projected_call_plan_t* plan);
 
-// Resolves a low.invoke helper contract, checks result carriers, and proves its
-// preconditions. Retained predicates preserve each formal's operand position;
-// emission does not borrow the helper's signature or source body. Selection has
-// already planned the helper's exact Low contract; publication is not required.
+// Resolves a low.invoke helper contract, plans result-carrier conversions, and
+// proves its preconditions. The helper's native return signature is distinct
+// from source result storage, which must preserve every observation. Retained
+// predicates preserve each formal's operand position; emission does not borrow
+// the helper's signature or source body. Selection has already planned the
+// helper's exact Low contract; publication is not required.
 iree_status_t loom_low_lower_source_invoke_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_source_invoke_plan_t** out_plan);

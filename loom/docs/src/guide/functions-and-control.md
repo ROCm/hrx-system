@@ -191,8 +191,11 @@ can become scalar truth only when participating lanes agree; inactive lanes
 do not contribute. A proven range can also permit a narrower native index
 argument, including SPIR-V's signed index carriers. Missing proofs reject the
 invocation. These are physical conversions at the explicit `low.invoke`
-boundary; ordinary source calls retain exact source-type matching, and native
-results use the helper's declared carriers.
+boundary; ordinary source calls retain exact source-type matching. The native
+call returns the helper's declared carriers. Loom then preserves the source
+result for every lane that observes it: a scalar native result produced inside
+a divergent loop is saved before retiring lanes stop participating, so later
+iterations cannot overwrite their results.
 
 Inlined helpers use virtual register allocation and receive inputs through
 arguments rather than `low.resource` or `low.live_in`. They may contain

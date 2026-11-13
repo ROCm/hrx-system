@@ -120,3 +120,66 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count =
   global_store_b64_saddr %52, %58, %pair_results
   return
 }
+
+// ====
+// The native signature remains scalar. Durable numeric results are copied at
+// the call, before the divergent exit can retire lanes with different values.
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @observe_pair(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %first = v_readfirstlane_b32 %value
+  %pair = concat(%first, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %pair
+}
+
+func.def target(@target) @header_observation(%value: i32, %limit: index) -> (i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %observed = low.invoke @observe_pair(%value) : (i32) -> (i64)
+  %more = index.cmp ult, %counter, %limit : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %observed : i64
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @observe_pair(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %first = v_readfirstlane_b32 %value
+  %pair = concat(%first, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %pair
+}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @header_observation(%value: reg<amdgpu.vgpr>, %limit: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %20 = v_mov_b32_copy %begin
+  low.br ^_bb4(%20: reg<amdgpu.vgpr>)
+^_bb4(%counter$17: reg<amdgpu.vgpr>):
+  %28 = s_mov_b64_exec_read
+  low.br ^header(%counter$17: reg<amdgpu.vgpr>)
+^header(%counter$16: reg<amdgpu.vgpr>):
+  %21 = low.func.call @observe_pair(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>)
+  %22 = slice %21[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = v_mov_b32_copy %22
+  %24 = slice %21[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = v_mov_b32_copy %24
+  %observed = concat(%23, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %more = v_cmp_lt_u32 %counter$16, %limit
+  %29, %30 = s_and_saveexec_b64 %more
+  low.cond_br %30, ^body, ^_bb5 : reg<amdgpu.scc>
+^body:
+  %next = v_add_u32 %step, %counter$16
+  low.br ^header(%next: reg<amdgpu.vgpr>)
+^_bb5:
+  s_mov_b64_exec %28
+  low.br ^exit
+^exit:
+  return %observed
+}

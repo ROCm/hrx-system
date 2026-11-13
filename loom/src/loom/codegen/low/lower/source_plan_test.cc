@@ -921,13 +921,11 @@ TEST_P(LowLowerControlOperandTest,
   policy_.control_operand = {
       .prepare = [](void* user_data, loom_low_lower_context_t* context,
                     const loom_op_t* terminator, loom_value_id_t source_value,
-                    loom_type_t required_type,
+                    loom_type_t actual_type, loom_type_t required_type,
                     const void** out_plan) -> iree_status_t {
         *out_plan = nullptr;
         EXPECT_EQ(loom_low_lower_context_low_function(context), nullptr);
-        EXPECT_EQ(loom_low_register_type_unit_count(
-                      loom_low_lower_value_binding_type(context, source_value)),
-                  1u);
+        EXPECT_EQ(loom_low_register_type_unit_count(actual_type), 1u);
         EXPECT_EQ(loom_low_register_type_unit_count(required_type), 2u);
         return loom_low_lower_emit_branch_constraint(
             context, terminator, IREE_SV("test_control_operand_constraint"));

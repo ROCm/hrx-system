@@ -45,3 +45,37 @@ func.def target(@target) @narrow_helper_argument() -> (index) {
   %result = low.invoke @native_coordinate(%limit) : (index) -> (index)
   func.return %result : index
 }
+
+// ====
+// A native return keeps its declared width even when the receiving source
+// coordinate participates in wider arithmetic.
+// RUN: pass source-to-low,low-dce
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @narrow_coordinate() -> (reg<spirv.id : index>) asm {
+  %coordinate = OpConstant.i32 7 : reg<spirv.id : index>
+  return %coordinate
+}
+
+func.def target(@target) @widen_helper_result() -> (index) {
+  %coordinate = low.invoke @narrow_coordinate() : () -> (index)
+  %base = index.constant 4294967296 : index
+  %result = index.add %coordinate, %base : index
+  func.return %result : index
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @narrow_coordinate() -> (reg<spirv.id : index>) asm {
+  %coordinate = OpConstant.i32 7 : reg<spirv.id : index>
+  return %coordinate
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @widen_helper_result() -> (reg<spirv.id : i64>) asm {
+  %7 = low.func.call @narrow_coordinate() : () -> (reg<spirv.id : index>)
+  %coordinate = OpSConvert.i32.i64 %7
+  %base = OpConstant.i64 4294967296
+  %result = OpIAdd.i64 %coordinate, %base
+  return %result
+}

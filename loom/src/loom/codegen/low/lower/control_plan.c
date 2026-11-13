@@ -496,14 +496,15 @@ static iree_status_t loom_low_lower_control_plan_operands(
         is_branch
             ? loom_low_lower_control_argument_type(context, destination, i)
             : context->lowering->boundary.result_types[i];
-    if (loom_type_equal(loom_low_lower_value_binding_type(context, operands[i]),
-                        required_type)) {
+    const loom_type_t actual_type =
+        loom_low_lower_value_binding_type(context, operands[i]);
+    if (loom_type_equal(actual_type, required_type)) {
       continue;
     }
     const void* recipe = NULL;
     status = context->policy->control_operand.prepare(
         context->policy->control_operand.user_data, context, terminator,
-        operands[i], required_type, &recipe);
+        operands[i], actual_type, required_type, &recipe);
     if (!iree_status_is_ok(status) ||
         loom_low_lower_context_diagnostic_limit_reached(context) ||
         recipe == NULL) {
