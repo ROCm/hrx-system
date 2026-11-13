@@ -407,7 +407,11 @@ iree_status_t loom_aie2p_select_transpose_plan(
   retained_plan->layout = match.layout;
   memcpy(retained_plan->switch_masks, match.switch_masks,
          match.layout.stage_count * sizeof(match.switch_masks[0]));
-  if (match.layout.mechanism != LOOM_AIE2P_TRANSPOSE_MECHANISM_ALIAS) {
+  if (match.layout.mechanism == LOOM_AIE2P_TRANSPOSE_MECHANISM_ALIAS) {
+    loom_low_lower_inherit_value_type(context,
+                                      loom_vector_transpose_source(source_op),
+                                      loom_vector_transpose_result(source_op));
+  } else {
     loom_type_t result_type = loom_type_none();
     IREE_RETURN_IF_ERROR(loom_aie2p_vector_packet_make_carrier_type(
         context, match.layout.carrier_kind, match.layout.carrier_unit_count,
@@ -418,21 +422,6 @@ iree_status_t loom_aie2p_select_transpose_plan(
   *out_plan =
       loom_low_lower_plan_make(LOOM_AIE2P_PLAN_TRANSPOSE_STATIC, retained_plan);
   return iree_ok_status();
-}
-
-iree_status_t loom_aie2p_finalize_transpose_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_low_lower_plan_t plan) {
-  const loom_aie2p_transpose_plan_t* transpose_plan =
-      (const loom_aie2p_transpose_plan_t*)plan.target_data;
-  if (transpose_plan->layout.mechanism !=
-      LOOM_AIE2P_TRANSPOSE_MECHANISM_ALIAS) {
-    return iree_ok_status();
-  }
-  return loom_low_lower_plan_value_type(
-      context, loom_vector_transpose_result(source_op),
-      loom_low_lower_value_binding_type(
-          context, loom_vector_transpose_source(source_op)));
 }
 
 void loom_aie2p_mark_transpose_plan_demands(loom_low_lower_context_t* context,
@@ -596,15 +585,13 @@ static iree_status_t loom_aie2p_transpose_bind_vector_packets(
 
 static iree_status_t loom_aie2p_transpose_emit_native_single(
     loom_aie2p_transpose_emit_state_t* state) {
-  loom_value_id_t source_packets[2] = {LOOM_VALUE_ID_INVALID,
-                                       LOOM_VALUE_ID_INVALID};
+  loom_value_id_t source_packets[LOOM_AIE2P_VECTOR_PACKET_MAX_COUNT];
   IREE_RETURN_IF_ERROR(
       loom_aie2p_transpose_read_source_packets(state, source_packets));
   loom_value_id_t control = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_control(
       state, state->plan->layout.low_control, &control));
-  loom_value_id_t result_packets[2] = {LOOM_VALUE_ID_INVALID,
-                                       LOOM_VALUE_ID_INVALID};
+  loom_value_id_t result_packets[LOOM_AIE2P_VECTOR_PACKET_MAX_COUNT];
   for (uint8_t packet = 0; packet < state->plan->layout.packet_count;
        ++packet) {
     IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_shuffle(
@@ -616,21 +603,22 @@ static iree_status_t loom_aie2p_transpose_emit_native_single(
 
 static iree_status_t loom_aie2p_transpose_emit_native_pair(
     loom_aie2p_transpose_emit_state_t* state) {
-  loom_value_id_t source_packets[2] = {LOOM_VALUE_ID_INVALID,
-                                       LOOM_VALUE_ID_INVALID};
+  loom_value_id_t source_packets[LOOM_AIE2P_VECTOR_PACKET_MAX_COUNT];
   IREE_RETURN_IF_ERROR(
       loom_aie2p_transpose_read_source_packets(state, source_packets));
-  loom_value_id_t result_packets[2] = {LOOM_VALUE_ID_INVALID,
-                                       LOOM_VALUE_ID_INVALID};
+  loom_value_id_t result_packets[LOOM_AIE2P_VECTOR_PACKET_MAX_COUNT];
   const uint8_t controls[] = {state->plan->layout.low_control,
                               state->plan->layout.high_control};
-  for (uint8_t packet = 0; packet < 2; ++packet) {
+  for (uint8_t part = 0; part < 2; ++part) {
     loom_value_id_t control = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
-        loom_aie2p_transpose_emit_control(state, controls[packet], &control));
-    IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_shuffle(
-        state, source_packets[0], source_packets[1], control,
-        &result_packets[packet]));
+        loom_aie2p_transpose_emit_control(state, controls[part], &control));
+    for (uint8_t packet = 0; packet < state->plan->layout.packet_count;
+         packet += 2) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_shuffle(
+          state, source_packets[packet], source_packets[packet + 1], control,
+          &result_packets[packet + part]));
+    }
   }
   return loom_aie2p_transpose_bind_vector_packets(state, result_packets);
 }
@@ -744,26 +732,37 @@ static iree_status_t loom_aie2p_transpose_emit_packet_stage(
 
 static iree_status_t loom_aie2p_transpose_emit_cross_packet_stage(
     loom_aie2p_transpose_emit_state_t* state, uint64_t switch_mask,
-    loom_value_id_t* packets) {
-  uint64_t byte_mask = 0;
-  const uint16_t lane_distance = LOOM_AIE2P_TRANSPOSE_PACKET_BYTE_COUNT /
-                                 state->plan->layout.lane_byte_count;
-  for (uint8_t pair = 0; pair < lane_distance; ++pair) {
-    if ((switch_mask & (UINT64_C(1) << pair)) != 0) {
-      byte_mask |= loom_aie2p_transpose_lane_byte_mask(
-          pair, state->plan->layout.lane_byte_count);
+    uint16_t lane_distance, loom_value_id_t* packets) {
+  const uint8_t packet_distance =
+      (uint8_t)(lane_distance * state->plan->layout.lane_byte_count /
+                LOOM_AIE2P_TRANSPOSE_PACKET_BYTE_COUNT);
+  for (uint8_t packet = 0; packet < state->plan->layout.packet_count;
+       ++packet) {
+    if ((packet & packet_distance) != 0) {
+      continue;
     }
+    uint64_t lower_mask = 0;
+    uint64_t upper_mask = 0;
+    loom_aie2p_transpose_stage_packet_masks(state->plan, switch_mask,
+                                            lane_distance, packet, &lower_mask,
+                                            &upper_mask);
+    if (lower_mask == 0) {
+      continue;
+    }
+    const uint8_t upper_packet = packet + packet_distance;
+    const loom_value_id_t lower_source = packets[packet];
+    const loom_value_id_t upper_source = packets[upper_packet];
+    IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_select(
+        state, lower_source, upper_source, lower_mask, &packets[packet]));
+    IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_select(
+        state, upper_source, lower_source, upper_mask, &packets[upper_packet]));
   }
-  const loom_value_id_t source_packets[] = {packets[0], packets[1]};
-  IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_select(
-      state, source_packets[0], source_packets[1], byte_mask, &packets[0]));
-  return loom_aie2p_transpose_emit_select(
-      state, source_packets[1], source_packets[0], byte_mask, &packets[1]);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_transpose_emit_benes(
     loom_aie2p_transpose_emit_state_t* state) {
-  loom_value_id_t packets[2] = {LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID};
+  loom_value_id_t packets[LOOM_AIE2P_VECTOR_PACKET_MAX_COUNT];
   IREE_RETURN_IF_ERROR(
       loom_aie2p_transpose_read_source_packets(state, packets));
   const uint8_t log_lane_count = state->plan->layout.padded_lane_log2;
@@ -778,13 +777,12 @@ static iree_status_t loom_aie2p_transpose_emit_benes(
     const uint16_t lane_distance = (uint16_t)(1u << distance_log2);
     const uint8_t byte_distance =
         (uint8_t)(lane_distance * state->plan->layout.lane_byte_count);
-    if (byte_distance == LOOM_AIE2P_TRANSPOSE_PACKET_BYTE_COUNT) {
+    if (byte_distance >= LOOM_AIE2P_TRANSPOSE_PACKET_BYTE_COUNT) {
       IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_cross_packet_stage(
-          state, switch_mask, packets));
+          state, switch_mask, lane_distance, packets));
       continue;
     }
 
-    loom_value_id_t next_packets[2] = {packets[0], packets[1]};
     for (uint8_t packet = 0; packet < state->plan->layout.packet_count;
          ++packet) {
       uint64_t lower_mask = 0;
@@ -797,10 +795,8 @@ static iree_status_t loom_aie2p_transpose_emit_benes(
       }
       IREE_RETURN_IF_ERROR(loom_aie2p_transpose_emit_packet_stage(
           state, packets[packet], byte_distance, lower_mask, upper_mask,
-          &next_packets[packet]));
+          &packets[packet]));
     }
-    memcpy(packets, next_packets,
-           state->plan->layout.packet_count * sizeof(packets[0]));
   }
   return loom_aie2p_transpose_bind_vector_packets(state, packets);
 }

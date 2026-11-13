@@ -200,6 +200,7 @@ loom_corpus_test(
             "numeric/integer/division.loom",
             "numeric/integer/widening.loom",
             "numeric/vector/coordinates.loom",
+            "numeric/vector/lanes.loom",
             "numeric/vector/refinement.loom",
         ],
     },

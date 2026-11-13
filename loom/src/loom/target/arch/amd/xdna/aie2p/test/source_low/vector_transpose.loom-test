@@ -2,6 +2,451 @@
 
 aie2p.target<core> @target
 
+func.def target(@target) @transpose_f32_8x8(%source: vector<8x8xf32>) -> (vector<8x8xf32>) {
+  %result = vector.transpose<[1, 0]> %source : vector<8x8xf32> -> vector<8x8xf32>
+  func.return %result : vector<8x8xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @transpose_f32_8x8(%source: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %5 = slice %source[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %source[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %9 = slice %source[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %10 = vmov.accumulator512.to.vector512 %9
+  %11 = slice %source[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %12 = vmov.accumulator512.to.vector512 %11
+  %13 = mova.i32 4
+  %14 = vshift %6, %6, %13
+  %15 = mova.i32 60
+  %16 = vshift %6, %6, %15
+  %17 = predicate.constant.low32 0
+  %18 = predicate.complete.constant.high32 %17, 252645135
+  %19 = vsel.8 %6, %14, %18
+  %20 = predicate.constant.low32 0
+  %21 = predicate.complete.constant.high32 %20, -252645136
+  %22 = vsel.8 %19, %16, %21
+  %23 = vshift %8, %8, %13
+  %24 = vshift %8, %8, %15
+  %25 = predicate.constant.low32 0
+  %26 = predicate.complete.constant.high32 %25, 252645135
+  %27 = vsel.8 %8, %23, %26
+  %28 = predicate.constant.low32 0
+  %29 = predicate.complete.constant.high32 %28, -252645136
+  %30 = vsel.8 %27, %24, %29
+  %31 = vshift %10, %10, %13
+  %32 = vshift %10, %10, %15
+  %33 = predicate.constant.low32 0
+  %34 = predicate.complete.constant.high32 %33, 252645135
+  %35 = vsel.8 %10, %31, %34
+  %36 = predicate.constant.low32 0
+  %37 = predicate.complete.constant.high32 %36, -252645136
+  %38 = vsel.8 %35, %32, %37
+  %39 = vshift %12, %12, %13
+  %40 = vshift %12, %12, %15
+  %41 = predicate.constant.low32 0
+  %42 = predicate.complete.constant.high32 %41, 252645135
+  %43 = vsel.8 %12, %39, %42
+  %44 = predicate.constant.low32 0
+  %45 = predicate.complete.constant.high32 %44, -252645136
+  %46 = vsel.8 %43, %40, %45
+  %47 = mova.i32 8
+  %48 = vshift %30, %30, %47
+  %49 = mova.i32 56
+  %50 = vshift %30, %30, %49
+  %51 = predicate.constant.low32 16711935
+  %52 = predicate.complete.constant.high32 %51, 16711935
+  %53 = vsel.8 %30, %48, %52
+  %54 = predicate.constant.low32 -16711936
+  %55 = predicate.complete.constant.high32 %54, -16711936
+  %56 = vsel.8 %53, %50, %55
+  %57 = vshift %46, %46, %47
+  %58 = vshift %46, %46, %49
+  %59 = predicate.constant.low32 16711935
+  %60 = predicate.complete.constant.high32 %59, 16711935
+  %61 = vsel.8 %46, %57, %60
+  %62 = predicate.constant.low32 -16711936
+  %63 = predicate.complete.constant.high32 %62, -16711936
+  %64 = vsel.8 %61, %58, %63
+  %65 = mova.i32 16
+  %66 = vshift %38, %38, %65
+  %67 = mova.i32 48
+  %68 = vshift %38, %38, %67
+  %69 = predicate.constant.low32 65535
+  %70 = predicate.complete.constant.high32 %69, 65535
+  %71 = vsel.8 %38, %66, %70
+  %72 = predicate.constant.low32 -65536
+  %73 = predicate.complete.constant.high32 %72, -65536
+  %74 = vsel.8 %71, %68, %73
+  %75 = vshift %64, %64, %65
+  %76 = vshift %64, %64, %67
+  %77 = predicate.constant.low32 65535
+  %78 = predicate.complete.constant.high32 %77, 65535
+  %79 = vsel.8 %64, %75, %78
+  %80 = predicate.constant.low32 -65536
+  %81 = predicate.complete.constant.high32 %80, -65536
+  %82 = vsel.8 %79, %76, %81
+  %83 = mova.i32 32
+  %84 = vshift %22, %22, %83
+  %85 = predicate.constant.low32 -252645136
+  %86 = predicate.complete.constant.high32 %85, -252645136
+  %87 = vsel.8 %22, %84, %86
+  %88 = vshift %56, %56, %83
+  %89 = predicate.constant.low32 -252645136
+  %90 = predicate.complete.constant.high32 %89, -252645136
+  %91 = vsel.8 %56, %88, %90
+  %92 = vshift %74, %74, %83
+  %93 = predicate.constant.low32 -252645136
+  %94 = predicate.complete.constant.high32 %93, -252645136
+  %95 = vsel.8 %74, %92, %94
+  %96 = vshift %82, %82, %83
+  %97 = predicate.constant.low32 -252645136
+  %98 = predicate.complete.constant.high32 %97, -252645136
+  %99 = vsel.8 %82, %96, %98
+  %100 = predicate.constant.low32 -16711936
+  %101 = predicate.complete.constant.high32 %100, -16711936
+  %102 = vsel.8 %87, %91, %101
+  %103 = predicate.constant.low32 -16711936
+  %104 = predicate.complete.constant.high32 %103, -16711936
+  %105 = vsel.8 %91, %87, %104
+  %106 = predicate.constant.low32 -16711936
+  %107 = predicate.complete.constant.high32 %106, -16711936
+  %108 = vsel.8 %95, %99, %107
+  %109 = predicate.constant.low32 -16711936
+  %110 = predicate.complete.constant.high32 %109, -16711936
+  %111 = vsel.8 %99, %95, %110
+  %112 = predicate.constant.low32 -65536
+  %113 = predicate.complete.constant.high32 %112, -65536
+  %114 = vsel.8 %102, %108, %113
+  %115 = predicate.constant.low32 -65536
+  %116 = predicate.complete.constant.high32 %115, -65536
+  %117 = vsel.8 %108, %102, %116
+  %118 = predicate.constant.low32 -65536
+  %119 = predicate.complete.constant.high32 %118, -65536
+  %120 = vsel.8 %105, %111, %119
+  %121 = predicate.constant.low32 -65536
+  %122 = predicate.complete.constant.high32 %121, -65536
+  %123 = vsel.8 %111, %105, %122
+  %124 = vshift %117, %117, %65
+  %125 = vshift %117, %117, %67
+  %126 = predicate.constant.low32 65535
+  %127 = predicate.complete.constant.high32 %126, 65535
+  %128 = vsel.8 %117, %124, %127
+  %129 = predicate.constant.low32 -65536
+  %130 = predicate.complete.constant.high32 %129, -65536
+  %131 = vsel.8 %128, %125, %130
+  %132 = vshift %123, %123, %65
+  %133 = vshift %123, %123, %67
+  %134 = predicate.constant.low32 65535
+  %135 = predicate.complete.constant.high32 %134, 65535
+  %136 = vsel.8 %123, %132, %135
+  %137 = predicate.constant.low32 -65536
+  %138 = predicate.complete.constant.high32 %137, -65536
+  %139 = vsel.8 %136, %133, %138
+  %140 = vshift %120, %120, %47
+  %141 = vshift %120, %120, %49
+  %142 = predicate.constant.low32 16711935
+  %143 = predicate.complete.constant.high32 %142, 16711935
+  %144 = vsel.8 %120, %140, %143
+  %145 = predicate.constant.low32 -16711936
+  %146 = predicate.complete.constant.high32 %145, -16711936
+  %147 = vsel.8 %144, %141, %146
+  %148 = vshift %139, %139, %47
+  %149 = vshift %139, %139, %49
+  %150 = predicate.constant.low32 16711935
+  %151 = predicate.complete.constant.high32 %150, 16711935
+  %152 = vsel.8 %139, %148, %151
+  %153 = predicate.constant.low32 -16711936
+  %154 = predicate.complete.constant.high32 %153, -16711936
+  %155 = vsel.8 %152, %149, %154
+  %156 = vshift %114, %114, %13
+  %157 = vshift %114, %114, %15
+  %158 = predicate.constant.low32 0
+  %159 = predicate.complete.constant.high32 %158, 252645135
+  %160 = vsel.8 %114, %156, %159
+  %161 = predicate.constant.low32 0
+  %162 = predicate.complete.constant.high32 %161, -252645136
+  %163 = vsel.8 %160, %157, %162
+  %164 = vshift %147, %147, %13
+  %165 = vshift %147, %147, %15
+  %166 = predicate.constant.low32 0
+  %167 = predicate.complete.constant.high32 %166, 252645135
+  %168 = vsel.8 %147, %164, %167
+  %169 = predicate.constant.low32 0
+  %170 = predicate.complete.constant.high32 %169, -252645136
+  %171 = vsel.8 %168, %165, %170
+  %172 = vshift %131, %131, %13
+  %173 = vshift %131, %131, %15
+  %174 = predicate.constant.low32 0
+  %175 = predicate.complete.constant.high32 %174, 252645135
+  %176 = vsel.8 %131, %172, %175
+  %177 = predicate.constant.low32 0
+  %178 = predicate.complete.constant.high32 %177, -252645136
+  %179 = vsel.8 %176, %173, %178
+  %180 = vshift %155, %155, %13
+  %181 = vshift %155, %155, %15
+  %182 = predicate.constant.low32 0
+  %183 = predicate.complete.constant.high32 %182, 252645135
+  %184 = vsel.8 %155, %180, %183
+  %185 = predicate.constant.low32 0
+  %186 = predicate.complete.constant.high32 %185, -252645136
+  %187 = vsel.8 %184, %181, %186
+  %188 = vmov.vector512.to.accumulator512 %163
+  %189 = vmov.vector512.to.accumulator512 %171
+  %190 = vmov.vector512.to.accumulator512 %179
+  %191 = vmov.vector512.to.accumulator512 %187
+  %result = concat(%188, %189, %190, %191) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @transpose_i32_tiles(%source: vector<4x4x4xi32>) -> (vector<4x4x4xi32>) {
+  %result = vector.transpose<[0, 2, 1]> %source : vector<4x4x4xi32> -> vector<4x4x4xi32>
+  func.return %result : vector<4x4x4xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @transpose_i32_tiles(%source: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %5 = slice %source[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %source[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %9 = slice %source[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %10 = vmov.accumulator512.to.vector512 %9
+  %11 = slice %source[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %12 = vmov.accumulator512.to.vector512 %11
+  %13 = mova.i32 34
+  %14 = vshuffle %6, %6, %13
+  %15 = vshuffle %8, %8, %13
+  %16 = vshuffle %10, %10, %13
+  %17 = vshuffle %12, %12, %13
+  %18 = vmov.vector512.to.accumulator512 %14
+  %19 = vmov.vector512.to.accumulator512 %15
+  %20 = vmov.vector512.to.accumulator512 %16
+  %21 = vmov.vector512.to.accumulator512 %17
+  %result = concat(%18, %19, %20, %21) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @transpose_i64_tiles(%source: vector<2x2x8xi64>) -> (vector<2x8x2xi64>) {
+  %result = vector.transpose<[0, 2, 1]> %source : vector<2x2x8xi64> -> vector<2x8x2xi64>
+  func.return %result : vector<2x8x2xi64>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @transpose_i64_tiles(%source: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %5 = slice %source[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %source[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %9 = slice %source[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %10 = vmov.accumulator512.to.vector512 %9
+  %11 = slice %source[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %12 = vmov.accumulator512.to.vector512 %11
+  %13 = mova.i32 14
+  %14 = vshuffle %6, %8, %13
+  %15 = vshuffle %10, %12, %13
+  %16 = mova.i32 15
+  %17 = vshuffle %6, %8, %16
+  %18 = vshuffle %10, %12, %16
+  %19 = vmov.vector512.to.accumulator512 %14
+  %20 = vmov.vector512.to.accumulator512 %17
+  %21 = vmov.vector512.to.accumulator512 %15
+  %22 = vmov.vector512.to.accumulator512 %18
+  %result = concat(%19, %20, %21, %22) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @transpose_offset_tail(%source: vector<5x7xoffset>) -> (vector<7x5xoffset>) {
+  %result = vector.transpose<[1, 0]> %source : vector<5x7xoffset> -> vector<7x5xoffset>
+  func.return %result : vector<7x5xoffset>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @transpose_offset_tail(%source: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %5 = slice %source[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %source[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %9 = slice %source[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %10 = vmov.accumulator512.to.vector512 %9
+  %11 = slice %source[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %12 = vmov.accumulator512.to.vector512 %11
+  %13 = mova.i32 8
+  %14 = vshift %6, %6, %13
+  %15 = mova.i32 56
+  %16 = vshift %6, %6, %15
+  %17 = predicate.constant.low32 15728640
+  %18 = predicate.complete.constant.high32 %17, 15
+  %19 = vsel.8 %6, %14, %18
+  %20 = predicate.constant.low32 -268435456
+  %21 = predicate.complete.constant.high32 %20, 3840
+  %22 = vsel.8 %19, %16, %21
+  %23 = vshift %8, %8, %13
+  %24 = vshift %8, %8, %15
+  %25 = predicate.constant.low32 16711920
+  %26 = predicate.complete.constant.high32 %25, 15728655
+  %27 = vsel.8 %8, %23, %26
+  %28 = predicate.constant.low32 -16715776
+  %29 = predicate.complete.constant.high32 %28, -268431616
+  %30 = vsel.8 %27, %24, %29
+  %31 = vshift %10, %10, %13
+  %32 = vshift %10, %10, %15
+  %33 = predicate.constant.low32 255
+  %34 = predicate.complete.zero.high32 %33, 0
+  %35 = vsel.8 %10, %31, %34
+  %36 = predicate.constant.low32 65280
+  %37 = predicate.complete.zero.high32 %36, 0
+  %38 = vsel.8 %35, %32, %37
+  %39 = mova.i32 16
+  %40 = vshift %22, %22, %39
+  %41 = mova.i32 48
+  %42 = vshift %22, %22, %41
+  %43 = predicate.constant.low32 61680
+  %44 = predicate.complete.constant.high32 %43, 3840
+  %45 = vsel.8 %22, %40, %44
+  %46 = predicate.constant.low32 -252706816
+  %47 = predicate.complete.constant.high32 %46, 251658240
+  %48 = vsel.8 %45, %42, %47
+  %49 = vshift %30, %30, %39
+  %50 = vshift %30, %30, %41
+  %51 = predicate.constant.low32 65295
+  %52 = predicate.complete.constant.high32 %51, 61680
+  %53 = vsel.8 %30, %49, %52
+  %54 = predicate.constant.low32 -15794176
+  %55 = predicate.complete.constant.high32 %54, -252706816
+  %56 = vsel.8 %53, %50, %55
+  %57 = vshift %38, %38, %39
+  %58 = vshift %38, %38, %41
+  %59 = predicate.constant.low32 61440
+  %60 = predicate.complete.zero.high32 %59, 0
+  %61 = vsel.8 %38, %57, %60
+  %62 = predicate.constant.low32 -268435456
+  %63 = predicate.complete.zero.high32 %62, 0
+  %64 = vsel.8 %61, %58, %63
+  %65 = mova.i32 32
+  %66 = vshift %48, %48, %65
+  %67 = predicate.constant.low32 -16711936
+  %68 = predicate.complete.constant.high32 %67, -16711936
+  %69 = vsel.8 %48, %66, %68
+  %70 = vshift %56, %56, %65
+  %71 = predicate.constant.low32 16715775
+  %72 = predicate.complete.constant.high32 %71, 16715775
+  %73 = vsel.8 %56, %70, %72
+  %74 = vshift %64, %64, %65
+  %75 = predicate.constant.low32 -268431616
+  %76 = predicate.complete.constant.high32 %75, -268431616
+  %77 = vsel.8 %64, %74, %76
+  %78 = predicate.constant.low32 1044480
+  %79 = predicate.complete.constant.high32 %78, 268431375
+  %80 = vsel.8 %69, %73, %79
+  %81 = predicate.constant.low32 1044480
+  %82 = predicate.complete.constant.high32 %81, 268431375
+  %83 = vsel.8 %73, %69, %82
+  %84 = predicate.constant.low32 0
+  %85 = predicate.complete.constant.high32 %84, -268431616
+  %86 = vsel.8 %77, %12, %85
+  %87 = predicate.constant.low32 0
+  %88 = predicate.complete.constant.high32 %87, -268431616
+  %89 = vsel.8 %12, %77, %88
+  %90 = predicate.constant.low32 0
+  %91 = predicate.complete.constant.high32 %90, -268431616
+  %92 = vsel.8 %83, %89, %91
+  %93 = predicate.constant.low32 0
+  %94 = predicate.complete.constant.high32 %93, -268431616
+  %95 = vsel.8 %89, %83, %94
+  %96 = predicate.constant.low32 0
+  %97 = predicate.complete.constant.high32 %96, -268431616
+  %98 = vsel.8 %86, %95, %97
+  %99 = predicate.constant.low32 0
+  %100 = predicate.complete.constant.high32 %99, -268431616
+  %101 = vsel.8 %95, %86, %100
+  %102 = vshift %92, %92, %65
+  %103 = predicate.constant.low32 15
+  %104 = predicate.complete.constant.high32 %103, 15
+  %105 = vsel.8 %92, %102, %104
+  %106 = vshift %98, %98, %65
+  %107 = predicate.constant.low32 -268431616
+  %108 = predicate.complete.constant.high32 %107, -268431616
+  %109 = vsel.8 %98, %106, %108
+  %110 = vshift %105, %105, %39
+  %111 = vshift %105, %105, %41
+  %112 = predicate.constant.low32 61440
+  %113 = predicate.complete.constant.high32 %112, 15
+  %114 = vsel.8 %105, %110, %113
+  %115 = predicate.constant.low32 -268435456
+  %116 = predicate.complete.constant.high32 %115, 983040
+  %117 = vsel.8 %114, %111, %116
+  %118 = vshift %109, %109, %39
+  %119 = vshift %109, %109, %41
+  %120 = predicate.constant.low32 61440
+  %121 = predicate.complete.zero.high32 %120, 0
+  %122 = vsel.8 %109, %118, %121
+  %123 = predicate.constant.low32 -268435456
+  %124 = predicate.complete.zero.high32 %123, 0
+  %125 = vsel.8 %122, %119, %124
+  %126 = vshift %80, %80, %13
+  %127 = vshift %80, %80, %15
+  %128 = predicate.constant.low32 0
+  %129 = predicate.complete.constant.high32 %128, 240
+  %130 = vsel.8 %80, %126, %129
+  %131 = predicate.constant.low32 0
+  %132 = predicate.complete.constant.high32 %131, 61440
+  %133 = vsel.8 %130, %127, %132
+  %134 = vshift %117, %117, %13
+  %135 = vshift %117, %117, %15
+  %136 = predicate.constant.low32 15728880
+  %137 = predicate.complete.constant.high32 %136, 15728895
+  %138 = vsel.8 %117, %134, %137
+  %139 = predicate.constant.low32 -268374016
+  %140 = predicate.complete.constant.high32 %139, -268370176
+  %141 = vsel.8 %138, %135, %140
+  %142 = vshift %125, %125, %13
+  %143 = vshift %125, %125, %15
+  %144 = predicate.constant.low32 255
+  %145 = predicate.complete.zero.high32 %144, 0
+  %146 = vsel.8 %125, %142, %145
+  %147 = predicate.constant.low32 65280
+  %148 = predicate.complete.zero.high32 %147, 0
+  %149 = vsel.8 %146, %143, %148
+  %150 = vmov.vector512.to.accumulator512 %133
+  %151 = vmov.vector512.to.accumulator512 %141
+  %152 = vmov.vector512.to.accumulator512 %149
+  %153 = vmov.vector512.to.accumulator512 %101
+  %result = concat(%150, %151, %152, %153) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @transpose_index_unit_axis(%source: vector<1x64xindex>) -> (vector<64x1xindex>) {
+  %result = vector.transpose<[1, 0]> %source : vector<1x64xindex> -> vector<64x1xindex>
+  func.return %result : vector<64x1xindex>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @transpose_index_unit_axis(%result: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
 func.def target(@target) @transpose_unit_axis(%source: vector<1x2x4xbf16>) -> (vector<2x1x4xbf16>) {
   %result = vector.transpose<[1, 0, 2]> %source : vector<1x2x4xbf16> -> vector<2x1x4xbf16>
   func.return %result : vector<2x1x4xbf16>
