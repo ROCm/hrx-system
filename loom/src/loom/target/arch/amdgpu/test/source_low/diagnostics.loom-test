@@ -780,3 +780,31 @@ func.def target(@target) @fragment_repack_result_to_lhs_shape_rejected(%payload:
   %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %k] : vector<16xf32> -> vector<8xbf16>
   func.return %repacked : vector<8xbf16>
 }
+
+// ====
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+
+// ERROR@+1: TARGET/033 {op_name="kernel.def", field_name="source", actual_type="buffer"}
+kernel.def target(@target) @select_global_or_private(%select_private: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_private: index, %input: buffer, %output: buffer) {
+  %c1 = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %initial = scalar.constant 7 : i32
+  %condition = index.cmp eq, %select_private, %c1 : index
+  %scratch = buffer.alloca<private> align(4) %bytes : buffer
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%c0] : buffer -> view<1xi32>
+  %scratch_view = buffer.view %scratch[%c0] : buffer -> view<1xi32>
+  view.store %initial, %scratch_view[0] : i32, view<1xi32>
+  %selected = scf.select %condition, %scratch_view, %input_view : view<1xi32>
+  %output_view = buffer.view %output_aligned[%c0] : buffer -> view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}

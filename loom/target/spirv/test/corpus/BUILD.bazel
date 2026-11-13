@@ -291,6 +291,7 @@ _ALL_PROFILE_XFAILS = {
     "memory/atomic/workgroup/observations.loom:@lds_publication_i32": "TARGET/032",
     "memory/atomic/workgroup/observations.loom:@lds_publication_i64": "TARGET/032",
     "memory/atomic/workgroup/panel_stream.loom:@panel_stream": "TARGET/032",
+    "memory/storage/byte_banks.loom:@raw_byte_spaces": "TARGET/001",
     "memory/storage/private.loom:@private_selected_addresses": "TARGET/003",
     "memory/storage/private.loom:@private_vector_lookup": "TARGET/003",
     "memory/storage/workgroup.loom:@initialized_workgroup_buffers": "TARGET/001",
@@ -473,6 +474,7 @@ _ALL_ROOTS_XFAIL = [
     "memory/atomic/workgroup/global.loom",
     "memory/atomic/workgroup/observations.loom",
     "memory/atomic/workgroup/panel_stream.loom",
+    "memory/storage/byte_banks.loom",
     "memory/storage/private.loom",
 ]
 
@@ -522,6 +524,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "memory/buffer/positions.loom:@local_position_equality": "TARGET/003",
     "memory/buffer/positions.loom:@storage_domain_equality": "TARGET/003",
     "memory/packed/tails.loom:@stage_private_i8_3_values": "TARGET/003",
+    "memory/storage/byte_banks.loom:@raw_byte_storage_values": "TARGET/001",
     "memory/storage/private.loom:@private_selected_address_values": "TARGET/003",
     "memory/storage/private.loom:@private_vector_lookup_values": "TARGET/003",
     "memory/storage/word.loom:@copy_word_index_coordinates": "TARGET/050",
