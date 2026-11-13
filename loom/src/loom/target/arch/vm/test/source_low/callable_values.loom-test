@@ -16,8 +16,8 @@ func.def noinline @add_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<vm.core> abi(vm_function) @call_mixed_i32(%20: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
-  %mixed = low.func.call pure @add_i32(%20, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
+low.func.def public target<vm.core> abi(vm_function) @call_mixed_i32(%21: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  %mixed = low.func.call pure @add_i32(%21, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
   %uniform = low.func.call pure @add_i32(%delta, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
   return %mixed, %uniform
 }
@@ -42,8 +42,8 @@ func.def noinline @add_i64(%value: i64, %delta: i64) -> (i64) {
 }
 
 // ----
-low.func.def public target<vm.core> abi(vm_function) @call_mixed_i64(%16: reg<vm.value : i64>, %delta: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
-  %mixed = low.func.call pure @add_i64(%16, %delta) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>)
+low.func.def public target<vm.core> abi(vm_function) @call_mixed_i64(%17: reg<vm.value : i64>, %delta: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %mixed = low.func.call pure @add_i64(%17, %delta) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>)
   %uniform = low.func.call pure @add_i64(%delta, %delta) : (reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>)
   return %mixed, %uniform
 }
@@ -75,12 +75,12 @@ low.func.def public target<vm.core> abi(vm_function) @call_vector_result(%input:
   %c1 = constant.i32 1
   %c2 = constant.i32 2
   %c3 = constant.i32 3
-  %39, %40, %41, %42 = low.func.call pure @identity_i32x4(%input, %c1, %c2, %c3) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>)
-  return %39, %42
+  %40, %41, %42, %43 = low.func.call pure @identity_i32x4(%input, %c1, %c2, %c3) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>)
+  return %40, %43
 }
 
-low.func.def noinline target<vm.core> @identity_i32x4(%43: reg<vm.value : i32>, %44: reg<vm.value : i32>, %45: reg<vm.value : i32>, %46: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
-  return %43, %44, %45, %46
+low.func.def noinline target<vm.core> @identity_i32x4(%44: reg<vm.value : i32>, %45: reg<vm.value : i32>, %46: reg<vm.value : i32>, %47: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  return %44, %45, %46, %47
 }
 
 // ====
@@ -109,22 +109,22 @@ func.def noinline @advance_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<vm.core> abi(vm_function) @call_loop(%50: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
-  %54 = low.func.call pure @repeat_add(%50, %delta, %count) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i64>) -> (reg<vm.value : i32>)
-  return %54
+low.func.def public target<vm.core> abi(vm_function) @call_loop(%52: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+  %56 = low.func.call pure @repeat_add(%52, %delta, %count) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i64>) -> (reg<vm.value : i32>)
+  return %56
 }
 
-low.func.def noinline target<vm.core> @repeat_add(%55: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def noinline target<vm.core> @repeat_add(%57: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %c0 = constant.i64 0
   %c1 = constant.i64 1
-  low.br ^_bb1(%c0: reg<vm.value : i64>, %55: reg<vm.value : i32>)
+  low.br ^_bb1(%c0: reg<vm.value : i64>, %57: reg<vm.value : i32>)
 ^_bb1(%i: reg<vm.value : i64>, %current_slot_0: reg<vm.value : i32>):
-  %63 = integer.compare.i64 %i, %count, "slt"
-  low.cond_br %63, ^_bb2, ^_bb3 : reg<vm.value : i1>
+  %65 = integer.compare.i64 %i, %count, "slt"
+  low.cond_br %65, ^_bb2, ^_bb3 : reg<vm.value : i1>
 ^_bb2:
   %next_value = low.func.call pure @advance_i32(%current_slot_0, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
-  %65 = integer.add.i64 %i, %c1
-  low.br ^_bb1(%65: reg<vm.value : i64>, %next_value: reg<vm.value : i32>)
+  %67 = integer.add.i64 %i, %c1
+  low.br ^_bb1(%67: reg<vm.value : i64>, %next_value: reg<vm.value : i32>)
 ^_bb3:
   return %current_slot_0
 }
@@ -163,12 +163,12 @@ func.def noinline @identity_integer_vectors(%predicate: vector<1xi1>, %byte: vec
 
 // ----
 low.func.def public target<vm.core> abi(vm_function) @call_integer_vector_family(%predicate: reg<vm.value : i1>, %byte: reg<vm.value : i8>, %half: reg<vm.value : i16>, %word: reg<vm.value : i32>, %wide: reg<vm.value : i64>, %position: reg<vm.value : i64>, %address: reg<vm.value : i64>) -> (reg<vm.value : i1>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
-  %112, %113, %114, %115, %116, %117, %118 = low.func.call pure @identity_integer_vectors(%predicate, %byte, %half, %word, %wide, %position, %address) : (reg<vm.value : i1>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i1>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>)
-  return %112, %113, %114, %115, %116, %117, %118
+  %119, %120, %121, %122, %123, %124, %125 = low.func.call pure @identity_integer_vectors(%predicate, %byte, %half, %word, %wide, %position, %address) : (reg<vm.value : i1>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i1>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>)
+  return %119, %120, %121, %122, %123, %124, %125
 }
 
-low.func.def noinline target<vm.core> @identity_integer_vectors(%119: reg<vm.value : i1>, %120: reg<vm.value : i8>, %121: reg<vm.value : i16>, %122: reg<vm.value : i32>, %123: reg<vm.value : i64>, %124: reg<vm.value : i64>, %125: reg<vm.value : i64>) -> (reg<vm.value : i1>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
-  return %119, %120, %121, %122, %123, %124, %125
+low.func.def noinline target<vm.core> @identity_integer_vectors(%126: reg<vm.value : i1>, %127: reg<vm.value : i8>, %128: reg<vm.value : i16>, %129: reg<vm.value : i32>, %130: reg<vm.value : i64>, %131: reg<vm.value : i64>, %132: reg<vm.value : i64>) -> (reg<vm.value : i1>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  return %126, %127, %128, %129, %130, %131, %132
 }
 
 // ====
@@ -196,12 +196,12 @@ func.def noinline @identity_float_vectors(%e4m3: vector<1xf8E4M3>, %e5m2: vector
 
 // ----
 low.func.def public target<vm.core> abi(vm_function) @call_float_vector_family(%e4m3: reg<vm.value : f8E4M3>, %e5m2: reg<vm.value : f8E5M2>, %half: reg<vm.value : f16>, %brain: reg<vm.value : bf16>, %single: reg<vm.value : f32>, %double: reg<vm.value : f64>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
-  %96, %97, %98, %99, %100, %101 = low.func.call pure @identity_float_vectors(%e4m3, %e5m2, %half, %brain, %single, %double) : (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>)
-  return %96, %97, %98, %99, %100, %101
+  %102, %103, %104, %105, %106, %107 = low.func.call pure @identity_float_vectors(%e4m3, %e5m2, %half, %brain, %single, %double) : (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>)
+  return %102, %103, %104, %105, %106, %107
 }
 
-low.func.def noinline target<vm.core> @identity_float_vectors(%102: reg<vm.value : f8E4M3>, %103: reg<vm.value : f8E5M2>, %104: reg<vm.value : f16>, %105: reg<vm.value : bf16>, %106: reg<vm.value : f32>, %107: reg<vm.value : f64>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
-  return %102, %103, %104, %105, %106, %107
+low.func.def noinline target<vm.core> @identity_float_vectors(%108: reg<vm.value : f8E4M3>, %109: reg<vm.value : f8E5M2>, %110: reg<vm.value : f16>, %111: reg<vm.value : bf16>, %112: reg<vm.value : f32>, %113: reg<vm.value : f64>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
+  return %108, %109, %110, %111, %112, %113
 }
 
 // ====
@@ -224,12 +224,12 @@ func.def noinline @identity_i32x2x2(%matrix: vector<2x2xi32>) -> (vector<2x2xi32
 
 // ----
 low.func.def public target<vm.core> abi(vm_function) @call_shaped_vector(%a: reg<vm.value : i32>, %b: reg<vm.value : i32>, %c: reg<vm.value : i32>, %d: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
-  %45, %46, %47, %48 = low.func.call pure @identity_i32x2x2(%a, %b, %c, %d) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>)
-  return %45, %46, %47, %48
+  %46, %47, %48, %49 = low.func.call pure @identity_i32x2x2(%a, %b, %c, %d) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>)
+  return %46, %47, %48, %49
 }
 
-low.func.def noinline target<vm.core> @identity_i32x2x2(%49: reg<vm.value : i32>, %50: reg<vm.value : i32>, %51: reg<vm.value : i32>, %52: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
-  return %49, %50, %51, %52
+low.func.def noinline target<vm.core> @identity_i32x2x2(%50: reg<vm.value : i32>, %51: reg<vm.value : i32>, %52: reg<vm.value : i32>, %53: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  return %50, %51, %52, %53
 }
 
 // ====

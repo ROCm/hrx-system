@@ -117,3 +117,101 @@ func.def public target(@target) @float8_branch(%input: buffer, %output: buffer, 
   vector.store %e5_result, %e5_output[0] : vector<2xf8E5M2>, view<2xf8E5M2>
   func.return
 }
+
+// ====
+
+// Ordinary shapes share the packet schema across branches: a six-lane bank
+// needs a tail packet, while rank-three and singleton shapes need only flattening.
+spirv.target<vulkan1_3> @target
+
+func.def public target(@target) @shaped_branch(%condition: i1, %matrix: vector<2x3xi32>, %cube: vector<1x2x2xf32>, %singleton: vector<1x1xi32>) -> (vector<2x3xi32>, vector<1x2x2xf32>, vector<1x1xi32>) {
+  %a, %b, %c = scf.if %condition -> (vector<2x3xi32>, vector<1x2x2xf32>, vector<1x1xi32>) {
+    scf.yield %matrix, %cube, %singleton : vector<2x3xi32>, vector<1x2x2xf32>, vector<1x1xi32>
+  } else {
+    %alternate = vector.splati 7 : vector<2x3xi32>
+    scf.yield %alternate, %cube, %singleton : vector<2x3xi32>, vector<1x2x2xf32>, vector<1x1xi32>
+  }
+  func.return %a, %b, %c : vector<2x3xi32>, vector<1x2x2xf32>, vector<1x1xi32>
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+func.def public target(@target) @shaped_branch(%condition: i1, %31: vector<4xi32>, %32: vector<2xi32>, %33: vector<4xf32>, %34: vector<1xi32>) -> (vector<4xi32>, vector<2xi32>, vector<4xf32>, vector<1xi32>) {
+  %17 = vector.concat<0> %31, %32 : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+  %matrix = vector.bitcast %17 : vector<6xi32> to vector<2x3xi32>
+  %cube = vector.bitcast %33 : vector<4xf32> to vector<1x2x2xf32>
+  %singleton = vector.bitcast %34 : vector<1xi32> to vector<1x1xi32>
+  %11, %12, %13, %14 = scf.if %condition -> (vector<4xi32>, vector<2xi32>, vector<4xf32>, vector<1xi32>) {
+    scf.yield %31, %32, %33, %34 : vector<4xi32>, vector<2xi32>, vector<4xf32>, vector<1xi32>
+  } else {
+    %alternate = vector.splati 7 : vector<2x3xi32>
+    %23 = vector.bitcast %alternate : vector<2x3xi32> to vector<6xi32>
+    %24 = vector.slice %23[0] : vector<6xi32> -> vector<4xi32>
+    %25 = vector.slice %23[4] : vector<6xi32> -> vector<2xi32>
+    scf.yield %24, %25, %33, %34 : vector<4xi32>, vector<2xi32>, vector<4xf32>, vector<1xi32>
+  }
+  %c = vector.bitcast %14 : vector<1xi32> to vector<1x1xi32>
+  %b = vector.bitcast %13 : vector<4xf32> to vector<1x2x2xf32>
+  %26 = vector.concat<0> %11, %12 : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+  %a = vector.bitcast %26 : vector<6xi32> to vector<2x3xi32>
+  func.return %11, %12, %13, %14 : vector<4xi32>, vector<2xi32>, vector<4xf32>, vector<1xi32>
+}
+
+// ====
+
+// The callable result, loop argument, yield, and loop result agree on packet
+// order. The authored row access still sees its rank-two type after projection.
+spirv.target<vulkan1_3> @target
+
+func.def @update_row(%bank: vector<2x3xi32>, %row: index) -> (vector<2x3xi32>) {
+  %values = vector.extract %bank[%row] : vector<2x3xi32> -> vector<3xi32>
+  %doubled = vector.addi %values, %values : vector<3xi32>
+  %next = vector.insert %doubled into %bank[%row] : vector<3xi32>, vector<2x3xi32>
+  func.return %next : vector<2x3xi32>
+}
+
+func.def public target(@target) @shaped_loop(%initial: vector<2x3xi32>) -> (vector<2x3xi32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %result = scf.for %row = [%c0 to %c2 step %c1](%bank = %initial : vector<2x3xi32>) -> (vector<2x3xi32>) {
+    %next = func.call @update_row(%bank, %row) : (vector<2x3xi32>, index) -> (vector<2x3xi32>)
+    scf.yield %next : vector<2x3xi32>
+  }
+  func.return %result : vector<2x3xi32>
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+func.def @update_row(%39: vector<4xi32>, %40: vector<2xi32>, %row: index) -> (vector<4xi32>, vector<2xi32>) {
+  %19 = vector.concat<0> %39, %40 : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+  %bank = vector.bitcast %19 : vector<6xi32> to vector<2x3xi32>
+  %values = vector.extract %bank[%row] : vector<2x3xi32> -> vector<3xi32>
+  %doubled = vector.addi %values, %values : vector<3xi32>
+  %next = vector.insert %doubled into %bank[%row] : vector<3xi32>, vector<2x3xi32>
+  %36 = vector.bitcast %next : vector<2x3xi32> to vector<6xi32>
+  %37 = vector.slice %36[0] : vector<6xi32> -> vector<4xi32>
+  %38 = vector.slice %36[4] : vector<6xi32> -> vector<2xi32>
+  func.return %37, %38 : vector<4xi32>, vector<2xi32>
+}
+
+func.def public target(@target) @shaped_loop(%44: vector<4xi32>, %45: vector<2xi32>) -> (vector<4xi32>, vector<2xi32>) {
+  %23 = vector.concat<0> %44, %45 : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+  %initial = vector.bitcast %23 : vector<6xi32> to vector<2x3xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %25, %26 = scf.for %row = [%c0 to %c2 step %c1](%28 = %44 : vector<4xi32>, %29 = %45 : vector<2xi32>) -> (vector<4xi32>, vector<2xi32>) {
+    %30 = vector.concat<0> %28, %29 : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+    %bank = vector.bitcast %30 : vector<6xi32> to vector<2x3xi32>
+    %15, %16 = func.call @update_row(%28, %29, %row) : (vector<4xi32>, vector<2xi32>, index) -> (vector<4xi32>, vector<2xi32>)
+    %34 = vector.concat<0> %15, %16 : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+    %next = vector.bitcast %34 : vector<6xi32> to vector<2x3xi32>
+    scf.yield %15, %16 : vector<4xi32>, vector<2xi32>
+  }
+  %32 = vector.concat<0> %25, %26 : vector<4xi32>, vector<2xi32> -> vector<6xi32>
+  %result = vector.bitcast %32 : vector<6xi32> to vector<2x3xi32>
+  func.return %25, %26 : vector<4xi32>, vector<2xi32>
+}

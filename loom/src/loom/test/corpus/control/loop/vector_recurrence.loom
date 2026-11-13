@@ -177,3 +177,98 @@ check.scenario @wide_conditional_accumulation_values {
   }
   check.return
 }
+
+// A shaped bank retains its original load across an intervening overwrite,
+// nested loops, and a branch. Runtime rows select whole native packets, then
+// insert the updated row into the next iteration's bank.
+func.def @dynamic_row_bank(%input: buffer, %output: buffer, %row_count: index, %rounds: index, %enabled: i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<16xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<16xi32>
+  %loaded = vector.load %source[0] : view<16xi32> -> vector<16xi32>
+  %initial = vector.bitcast %loaded : vector<16xi32> to vector<4x4xi32>
+  %replacement = scalar.constant 12345 : i32
+  view.store %replacement, %source[0] : i32, view<16xi32>
+  %nonnegative_rows = index.max %row_count, %c0 : index
+  %rows = index.min %nonnegative_rows, %c4 : index
+  %nonnegative_rounds = index.max %rounds, %c0 : index
+  %end = index.min %nonnegative_rounds, %c4 : index
+  %result = scf.for %iteration = [%c0 to %end step %c1](%state = %initial : vector<4x4xi32>) -> (vector<4x4xi32>) {
+    %next = scf.if %enabled -> (vector<4x4xi32>) {
+      %updated = scf.for %row = [%c0 to %rows step %c1](%bank = %state : vector<4x4xi32>) -> (vector<4x4xi32>) {
+        %values = vector.extract %bank[%row] : vector<4x4xi32> -> vector<4xi32>
+        %doubled = vector.addi %values, %values : vector<4xi32>
+        %changed = vector.insert %doubled into %bank[%row] : vector<4xi32>, vector<4x4xi32>
+        scf.yield %changed : vector<4x4xi32>
+      }
+      scf.yield %updated : vector<4x4xi32>
+    } else {
+      scf.yield %state : vector<4x4xi32>
+    }
+    scf.yield %next : vector<4x4xi32>
+  }
+  %flat = vector.bitcast %result : vector<4x4xi32> to vector<16xi32>
+  vector.store %flat, %destination[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// Compute each final lane directly, without a vector or row recurrence. The
+// input overwrite happens last so the oracle reads the original scalar values.
+func.def @dynamic_row_bank_oracle(%input: buffer, %output: buffer, %row_count: index, %rounds: index, %enabled: i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<16xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<16xi32>
+  %nonnegative = index.max %rounds, %c0 : index
+  %bounded = index.min %nonnegative, %c4 : index
+  %shift = index.cast %bounded : index to i32
+  %c1_word = scalar.constant 1 : i32
+  %factor = scalar.shli %c1_word, %shift : i32
+  scf.for %position = [%c0 to %c16 step %c1] {
+    %row = index.div %position, %c4 : index
+    %selected = index.cmp slt, %row, %row_count : index
+    %active = scalar.andi %selected, %enabled : i1
+    %value = view.load %source[%position] : view<16xi32> -> i32
+    %scaled = scalar.muli %value, %factor : i32
+    %result = scf.select %active, %scaled, %value : i32
+    view.store %result, %destination[%position] : i32, view<16xi32>
+  }
+  %replacement = scalar.constant 12345 : i32
+  view.store %replacement, %source[0] : i32, view<16xi32>
+  func.return
+}
+
+func.def @dynamic_row_bank_inputs(%trial: index) -> (index, index, i1) {
+  %c0 = index.constant 0 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c7 = index.constant 7 : index
+  %parity = index.rem %trial, %c2 : index
+  %enabled = index.cmp ne, %parity, %c0 : index
+  %pair = index.div %trial, %c2 : index
+  %rows = index.rem %pair, %c7 : index
+  %rounds = index.div %pair, %c7 : index
+  %iterations = index.mul %rounds, %c3 : index
+  func.return %rows, %iterations, %enabled : index, index, i1
+}
+
+check.scenario @dynamic_row_bank_values {
+  check.trial[42](%trial: index, %entropy: check.entropy) {
+    %rows, %rounds, %enabled = check.generate<@dynamic_row_bank_inputs>(%trial) : (index) -> (index, index, i1)
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-100 to 100) : tensor<16xi32>
+    %storage = check.generate.fill value(-777) : tensor<24xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<24xi32> -> tensor<16xi32>
+    check.compare<@dynamic_row_bank, @dynamic_row_bank_oracle>(%input, %output, %rows, %rounds, %enabled) : (tensor<16xi32>, tensor<16xi32>, index, index, i1) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<24xi32>
+    }
+  }
+  check.return
+}

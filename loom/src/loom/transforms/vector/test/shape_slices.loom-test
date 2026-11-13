@@ -106,24 +106,70 @@ func.def @strided_volume(%values: vector<2x3x4xi32>) -> (vector<2x2x2xi32>) {
 
 // ====
 
-// Register rectangles retain one runtime base and constant row displacements.
-func.def @register_rectangle(%values: vector<4x8xi16>, %row: index, %column: index) -> (vector<2x4xi16>) {
-  %result = vector.slice %values[%row, %column] : vector<4x8xi16> -> vector<2x4xi16>
-  func.return %result : vector<2x4xi16>
+// Captured rows share a runtime column while retaining their constant stride.
+func.def @register_rectangle(%values: vector<2x4xi16>, %column: index) -> (vector<2x2xi16>) {
+  %result = vector.slice %values[0, %column] : vector<2x4xi16> -> vector<2x2xi16>
+  func.return %result : vector<2x2xi16>
 }
 
 // ----
-func.def @register_rectangle(%values: vector<4x8xi16>, %row: index, %column: index) -> (vector<2x4xi16>) {
-  %5 = index.constant 8 : index
-  %6 = index.madd %row, %5, %column : index
-  %7 = vector.bitcast %values : vector<4x8xi16> to vector<32xi16>
-  %8 = vector.slice %7[%6] : vector<32xi16> -> vector<4xi16>
-  %9 = index.constant 8 : index
-  %10 = index.add %6, %9 : index
-  %11 = vector.slice %7[%10] : vector<32xi16> -> vector<4xi16>
-  %12 = vector.concat<0> %8, %11 : vector<4xi16>, vector<4xi16> -> vector<8xi16>
-  %result = vector.bitcast %12 : vector<8xi16> to vector<2x4xi16>
-  func.return %result : vector<2x4xi16>
+func.def @register_rectangle(%values: vector<2x4xi16>, %column: index) -> (vector<2x2xi16>) {
+  %4 = vector.bitcast %values : vector<2x4xi16> to vector<8xi16>
+  %36 = index.constant 1 : index
+  %37 = index.cmp eq, %column, %36 : index
+  %38 = index.constant 2 : index
+  %39 = index.cmp eq, %column, %38 : index
+  %40 = index.constant 3 : index
+  %41 = index.cmp eq, %column, %40 : index
+  %42 = index.constant 4 : index
+  %43 = index.cmp eq, %column, %42 : index
+  %44 = index.constant 5 : index
+  %45 = index.cmp eq, %column, %44 : index
+  %46 = index.constant 6 : index
+  %47 = index.cmp eq, %column, %46 : index
+  %48 = vector.slice %4[0] : vector<8xi16> -> vector<2xi16>
+  %49 = vector.slice %4[1] : vector<8xi16> -> vector<2xi16>
+  %50 = scf.select %37, %49, %48 : vector<2xi16>
+  %51 = vector.slice %4[2] : vector<8xi16> -> vector<2xi16>
+  %52 = scf.select %39, %51, %50 : vector<2xi16>
+  %53 = vector.slice %4[3] : vector<8xi16> -> vector<2xi16>
+  %54 = scf.select %41, %53, %52 : vector<2xi16>
+  %55 = vector.slice %4[4] : vector<8xi16> -> vector<2xi16>
+  %56 = scf.select %43, %55, %54 : vector<2xi16>
+  %57 = vector.slice %4[5] : vector<8xi16> -> vector<2xi16>
+  %58 = scf.select %45, %57, %56 : vector<2xi16>
+  %59 = vector.slice %4[6] : vector<8xi16> -> vector<2xi16>
+  %60 = scf.select %47, %59, %58 : vector<2xi16>
+  %6 = index.constant 4 : index
+  %7 = index.add %column, %6 : index
+  %11 = index.constant 1 : index
+  %12 = index.cmp eq, %7, %11 : index
+  %13 = index.constant 2 : index
+  %14 = index.cmp eq, %7, %13 : index
+  %15 = index.constant 3 : index
+  %16 = index.cmp eq, %7, %15 : index
+  %17 = index.constant 4 : index
+  %18 = index.cmp eq, %7, %17 : index
+  %19 = index.constant 5 : index
+  %20 = index.cmp eq, %7, %19 : index
+  %21 = index.constant 6 : index
+  %22 = index.cmp eq, %7, %21 : index
+  %23 = vector.slice %4[0] : vector<8xi16> -> vector<2xi16>
+  %24 = vector.slice %4[1] : vector<8xi16> -> vector<2xi16>
+  %25 = scf.select %12, %24, %23 : vector<2xi16>
+  %26 = vector.slice %4[2] : vector<8xi16> -> vector<2xi16>
+  %27 = scf.select %14, %26, %25 : vector<2xi16>
+  %28 = vector.slice %4[3] : vector<8xi16> -> vector<2xi16>
+  %29 = scf.select %16, %28, %27 : vector<2xi16>
+  %30 = vector.slice %4[4] : vector<8xi16> -> vector<2xi16>
+  %31 = scf.select %18, %30, %29 : vector<2xi16>
+  %32 = vector.slice %4[5] : vector<8xi16> -> vector<2xi16>
+  %33 = scf.select %20, %32, %31 : vector<2xi16>
+  %34 = vector.slice %4[6] : vector<8xi16> -> vector<2xi16>
+  %35 = scf.select %22, %34, %33 : vector<2xi16>
+  %9 = vector.concat<0> %60, %35 : vector<2xi16>, vector<2xi16> -> vector<4xi16>
+  %result = vector.bitcast %9 : vector<4xi16> to vector<2x2xi16>
+  func.return %result : vector<2x2xi16>
 }
 
 // ====
@@ -190,23 +236,39 @@ func.def @shared_load(%input: buffer, %row: index, %column: index) -> (vector<2x
 
 // ----
 func.def @shared_load(%input: buffer, %row: index, %column: index) -> (vector<2x4xi32>, vector<1x2xi32>) {
-  %20 = index.constant 32 : offset
-  %21 = buffer.alloca<private> align(16) %20 : buffer
-  %22 = index.constant 0 : offset
-  %23 = buffer.view %21[%22] : buffer -> view<8xi32>
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<2x4xi32>
-  %14 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
-  %17 = vector.load %14[0] : view<8xi32> -> vector<4xi32>
-  vector.store %17, %23[0] : vector<4xi32>, view<8xi32>
-  %18 = vector.load %14[4] : view<8xi32> -> vector<4xi32>
-  vector.store %18, %23[4] : vector<4xi32>, view<8xi32>
-  %19 = vector.concat<0> %17, %18 : vector<4xi32>, vector<4xi32> -> vector<8xi32>
-  %values = vector.bitcast %19 : vector<8xi32> to vector<2x4xi32>
+  %39 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
+  %40 = vector.load %39[0] : view<8xi32> -> vector<8xi32>
+  %values = vector.bitcast %40 : vector<8xi32> to vector<2x4xi32>
   %9 = index.constant 4 : index
   %10 = index.madd %row, %9, %column : index
-  %25 = vector.load %23[%10] : view<8xi32> -> vector<2xi32>
-  %result = vector.bitcast %25 : vector<2xi32> to vector<1x2xi32>
+  %14 = index.constant 1 : index
+  %15 = index.cmp eq, %10, %14 : index
+  %16 = index.constant 2 : index
+  %17 = index.cmp eq, %10, %16 : index
+  %18 = index.constant 3 : index
+  %19 = index.cmp eq, %10, %18 : index
+  %20 = index.constant 4 : index
+  %21 = index.cmp eq, %10, %20 : index
+  %22 = index.constant 5 : index
+  %23 = index.cmp eq, %10, %22 : index
+  %24 = index.constant 6 : index
+  %25 = index.cmp eq, %10, %24 : index
+  %26 = vector.slice %40[0] : vector<8xi32> -> vector<2xi32>
+  %27 = vector.slice %40[1] : vector<8xi32> -> vector<2xi32>
+  %28 = scf.select %15, %27, %26 : vector<2xi32>
+  %29 = vector.slice %40[2] : vector<8xi32> -> vector<2xi32>
+  %30 = scf.select %17, %29, %28 : vector<2xi32>
+  %31 = vector.slice %40[3] : vector<8xi32> -> vector<2xi32>
+  %32 = scf.select %19, %31, %30 : vector<2xi32>
+  %33 = vector.slice %40[4] : vector<8xi32> -> vector<2xi32>
+  %34 = scf.select %21, %33, %32 : vector<2xi32>
+  %35 = vector.slice %40[5] : vector<8xi32> -> vector<2xi32>
+  %36 = scf.select %23, %35, %34 : vector<2xi32>
+  %37 = vector.slice %40[6] : vector<8xi32> -> vector<2xi32>
+  %38 = scf.select %25, %37, %36 : vector<2xi32>
+  %result = vector.bitcast %38 : vector<2xi32> to vector<1x2xi32>
   func.return %values, %result : vector<2x4xi32>, vector<1x2xi32>
 }
 
@@ -224,22 +286,39 @@ func.def @write_barrier(%input: buffer, %row: index, %column: index, %replacemen
 
 // ----
 func.def @write_barrier(%input: buffer, %row: index, %column: index, %replacement: i32) -> (vector<1x2xi32>) {
-  %20 = index.constant 32 : offset
-  %21 = buffer.alloca<private> align(16) %20 : buffer
-  %22 = index.constant 0 : offset
-  %23 = buffer.view %21[%22] : buffer -> view<8xi32>
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<2x4xi32>
-  %14 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
-  %17 = vector.load %14[0] : view<8xi32> -> vector<4xi32>
-  vector.store %17, %23[0] : vector<4xi32>, view<8xi32>
-  %18 = vector.load %14[4] : view<8xi32> -> vector<4xi32>
-  vector.store %18, %23[4] : vector<4xi32>, view<8xi32>
+  %39 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
+  %40 = vector.load %39[0] : view<8xi32> -> vector<8xi32>
   view.store %replacement, %view[0, 0] : i32, view<2x4xi32>
   %9 = index.constant 4 : index
   %10 = index.madd %row, %9, %column : index
-  %24 = vector.load %23[%10] : view<8xi32> -> vector<2xi32>
-  %result = vector.bitcast %24 : vector<2xi32> to vector<1x2xi32>
+  %14 = index.constant 1 : index
+  %15 = index.cmp eq, %10, %14 : index
+  %16 = index.constant 2 : index
+  %17 = index.cmp eq, %10, %16 : index
+  %18 = index.constant 3 : index
+  %19 = index.cmp eq, %10, %18 : index
+  %20 = index.constant 4 : index
+  %21 = index.cmp eq, %10, %20 : index
+  %22 = index.constant 5 : index
+  %23 = index.cmp eq, %10, %22 : index
+  %24 = index.constant 6 : index
+  %25 = index.cmp eq, %10, %24 : index
+  %26 = vector.slice %40[0] : vector<8xi32> -> vector<2xi32>
+  %27 = vector.slice %40[1] : vector<8xi32> -> vector<2xi32>
+  %28 = scf.select %15, %27, %26 : vector<2xi32>
+  %29 = vector.slice %40[2] : vector<8xi32> -> vector<2xi32>
+  %30 = scf.select %17, %29, %28 : vector<2xi32>
+  %31 = vector.slice %40[3] : vector<8xi32> -> vector<2xi32>
+  %32 = scf.select %19, %31, %30 : vector<2xi32>
+  %33 = vector.slice %40[4] : vector<8xi32> -> vector<2xi32>
+  %34 = scf.select %21, %33, %32 : vector<2xi32>
+  %35 = vector.slice %40[5] : vector<8xi32> -> vector<2xi32>
+  %36 = scf.select %23, %35, %34 : vector<2xi32>
+  %37 = vector.slice %40[6] : vector<8xi32> -> vector<2xi32>
+  %38 = scf.select %25, %37, %36 : vector<2xi32>
+  %result = vector.bitcast %38 : vector<2xi32> to vector<1x2xi32>
   func.return %result : vector<1x2xi32>
 }
 
@@ -257,21 +336,38 @@ func.def @volatile_footprint(%input: buffer, %row: index, %column: index) -> (ve
 
 // ----
 func.def @volatile_footprint(%input: buffer, %row: index, %column: index) -> (vector<1x2xi32>) {
-  %19 = index.constant 32 : offset
-  %20 = buffer.alloca<private> align(16) %19 : buffer
-  %21 = index.constant 0 : offset
-  %22 = buffer.view %20[%21] : buffer -> view<8xi32>
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<2x4xi32>
-  %13 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
-  %16 = vector.load<volatile> %13[0] : view<8xi32> -> vector<4xi32>
-  vector.store %16, %22[0] : vector<4xi32>, view<8xi32>
-  %17 = vector.load<volatile> %13[4] : view<8xi32> -> vector<4xi32>
-  vector.store %17, %22[4] : vector<4xi32>, view<8xi32>
+  %38 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
+  %39 = vector.load<volatile> %38[0] : view<8xi32> -> vector<8xi32>
   %8 = index.constant 4 : index
   %9 = index.madd %row, %8, %column : index
-  %23 = vector.load %22[%9] : view<8xi32> -> vector<2xi32>
-  %result = vector.bitcast %23 : vector<2xi32> to vector<1x2xi32>
+  %13 = index.constant 1 : index
+  %14 = index.cmp eq, %9, %13 : index
+  %15 = index.constant 2 : index
+  %16 = index.cmp eq, %9, %15 : index
+  %17 = index.constant 3 : index
+  %18 = index.cmp eq, %9, %17 : index
+  %19 = index.constant 4 : index
+  %20 = index.cmp eq, %9, %19 : index
+  %21 = index.constant 5 : index
+  %22 = index.cmp eq, %9, %21 : index
+  %23 = index.constant 6 : index
+  %24 = index.cmp eq, %9, %23 : index
+  %25 = vector.slice %39[0] : vector<8xi32> -> vector<2xi32>
+  %26 = vector.slice %39[1] : vector<8xi32> -> vector<2xi32>
+  %27 = scf.select %14, %26, %25 : vector<2xi32>
+  %28 = vector.slice %39[2] : vector<8xi32> -> vector<2xi32>
+  %29 = scf.select %16, %28, %27 : vector<2xi32>
+  %30 = vector.slice %39[3] : vector<8xi32> -> vector<2xi32>
+  %31 = scf.select %18, %30, %29 : vector<2xi32>
+  %32 = vector.slice %39[4] : vector<8xi32> -> vector<2xi32>
+  %33 = scf.select %20, %32, %31 : vector<2xi32>
+  %34 = vector.slice %39[5] : vector<8xi32> -> vector<2xi32>
+  %35 = scf.select %22, %34, %33 : vector<2xi32>
+  %36 = vector.slice %39[6] : vector<8xi32> -> vector<2xi32>
+  %37 = scf.select %24, %36, %35 : vector<2xi32>
+  %result = vector.bitcast %37 : vector<2xi32> to vector<1x2xi32>
   func.return %result : vector<1x2xi32>
 }
 
@@ -289,22 +385,39 @@ func.def @fence_barrier(%input: buffer, %row: index, %column: index) -> (vector<
 
 // ----
 func.def @fence_barrier(%input: buffer, %row: index, %column: index) -> (vector<1x2xi32>) {
-  %19 = index.constant 32 : offset
-  %20 = buffer.alloca<private> align(16) %19 : buffer
-  %21 = index.constant 0 : offset
-  %22 = buffer.view %20[%21] : buffer -> view<8xi32>
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<2x4xi32>
-  %13 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
-  %16 = vector.load %13[0] : view<8xi32> -> vector<4xi32>
-  vector.store %16, %22[0] : vector<4xi32>, view<8xi32>
-  %17 = vector.load %13[4] : view<8xi32> -> vector<4xi32>
-  vector.store %17, %22[4] : vector<4xi32>, view<8xi32>
+  %38 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
+  %39 = vector.load %38[0] : view<8xi32> -> vector<8xi32>
   buffer.fence scope(system) ordering(acquire)
   %8 = index.constant 4 : index
   %9 = index.madd %row, %8, %column : index
-  %23 = vector.load %22[%9] : view<8xi32> -> vector<2xi32>
-  %result = vector.bitcast %23 : vector<2xi32> to vector<1x2xi32>
+  %13 = index.constant 1 : index
+  %14 = index.cmp eq, %9, %13 : index
+  %15 = index.constant 2 : index
+  %16 = index.cmp eq, %9, %15 : index
+  %17 = index.constant 3 : index
+  %18 = index.cmp eq, %9, %17 : index
+  %19 = index.constant 4 : index
+  %20 = index.cmp eq, %9, %19 : index
+  %21 = index.constant 5 : index
+  %22 = index.cmp eq, %9, %21 : index
+  %23 = index.constant 6 : index
+  %24 = index.cmp eq, %9, %23 : index
+  %25 = vector.slice %39[0] : vector<8xi32> -> vector<2xi32>
+  %26 = vector.slice %39[1] : vector<8xi32> -> vector<2xi32>
+  %27 = scf.select %14, %26, %25 : vector<2xi32>
+  %28 = vector.slice %39[2] : vector<8xi32> -> vector<2xi32>
+  %29 = scf.select %16, %28, %27 : vector<2xi32>
+  %30 = vector.slice %39[3] : vector<8xi32> -> vector<2xi32>
+  %31 = scf.select %18, %30, %29 : vector<2xi32>
+  %32 = vector.slice %39[4] : vector<8xi32> -> vector<2xi32>
+  %33 = scf.select %20, %32, %31 : vector<2xi32>
+  %34 = vector.slice %39[5] : vector<8xi32> -> vector<2xi32>
+  %35 = scf.select %22, %34, %33 : vector<2xi32>
+  %36 = vector.slice %39[6] : vector<8xi32> -> vector<2xi32>
+  %37 = scf.select %24, %36, %35 : vector<2xi32>
+  %result = vector.bitcast %37 : vector<2xi32> to vector<1x2xi32>
   func.return %result : vector<1x2xi32>
 }
 
@@ -325,31 +438,48 @@ func.def @region_barrier(%input: buffer, %row: index, %column: index, %replace: 
 
 // ----
 func.def @region_barrier(%input: buffer, %row: index, %column: index, %replace: i1, %replacement: i32) -> (vector<1x2xi32>) {
-  %21 = index.constant 32 : offset
-  %22 = buffer.alloca<private> align(16) %21 : buffer
-  %23 = index.constant 0 : offset
-  %24 = buffer.view %22[%23] : buffer -> view<8xi32>
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<2x4xi32>
-  %15 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
-  %18 = vector.load %15[0] : view<8xi32> -> vector<4xi32>
-  vector.store %18, %24[0] : vector<4xi32>, view<8xi32>
-  %19 = vector.load %15[4] : view<8xi32> -> vector<4xi32>
-  vector.store %19, %24[4] : vector<4xi32>, view<8xi32>
+  %40 = view.bitcast %view : view<2x4xi32> -> view<8xi32>
+  %41 = vector.load %40[0] : view<8xi32> -> vector<8xi32>
   scf.if %replace {
     view.store %replacement, %view[0, 0] : i32, view<2x4xi32>
   }
   %10 = index.constant 4 : index
   %11 = index.madd %row, %10, %column : index
-  %25 = vector.load %24[%11] : view<8xi32> -> vector<2xi32>
-  %result = vector.bitcast %25 : vector<2xi32> to vector<1x2xi32>
+  %15 = index.constant 1 : index
+  %16 = index.cmp eq, %11, %15 : index
+  %17 = index.constant 2 : index
+  %18 = index.cmp eq, %11, %17 : index
+  %19 = index.constant 3 : index
+  %20 = index.cmp eq, %11, %19 : index
+  %21 = index.constant 4 : index
+  %22 = index.cmp eq, %11, %21 : index
+  %23 = index.constant 5 : index
+  %24 = index.cmp eq, %11, %23 : index
+  %25 = index.constant 6 : index
+  %26 = index.cmp eq, %11, %25 : index
+  %27 = vector.slice %41[0] : vector<8xi32> -> vector<2xi32>
+  %28 = vector.slice %41[1] : vector<8xi32> -> vector<2xi32>
+  %29 = scf.select %16, %28, %27 : vector<2xi32>
+  %30 = vector.slice %41[2] : vector<8xi32> -> vector<2xi32>
+  %31 = scf.select %18, %30, %29 : vector<2xi32>
+  %32 = vector.slice %41[3] : vector<8xi32> -> vector<2xi32>
+  %33 = scf.select %20, %32, %31 : vector<2xi32>
+  %34 = vector.slice %41[4] : vector<8xi32> -> vector<2xi32>
+  %35 = scf.select %22, %34, %33 : vector<2xi32>
+  %36 = vector.slice %41[5] : vector<8xi32> -> vector<2xi32>
+  %37 = scf.select %24, %36, %35 : vector<2xi32>
+  %38 = vector.slice %41[6] : vector<8xi32> -> vector<2xi32>
+  %39 = scf.select %26, %38, %37 : vector<2xi32>
+  %result = vector.bitcast %39 : vector<2xi32> to vector<1x2xi32>
   func.return %result : vector<1x2xi32>
 }
 
 // ====
 
-// Captured block arguments share storage with their runtime windows. The
-// allocation dominates the stores, while the full tuple remains in registers.
+// An explicit packet tuple keeps its private snapshot strategy. Both windows
+// share the staged values while the complete tuple retains its original uses.
 func.def @argument_snapshot(%left: vector<4xi32>, %right: vector<4xi32>, %position: index) -> (vector<8xi32>, vector<2xi32>, vector<2xi32>) {
   %source = vector.concat<0> %left, %right : vector<4xi32>, vector<4xi32> -> vector<8xi32>
   %c2 = index.constant 2 : index
@@ -373,4 +503,47 @@ func.def @argument_snapshot(%left: vector<4xi32>, %right: vector<4xi32>, %positi
   %head = vector.load %14[%position] : view<8xi32> -> vector<2xi32>
   %tail = vector.load %14[%tail_position] : view<8xi32> -> vector<2xi32>
   func.return %source, %head, %tail : vector<8xi32>, vector<2xi32>, vector<2xi32>
+}
+
+// ====
+
+// A native loop argument is a captured bank, not a replayable producer. Range
+// facts bound the window choices without unrolling the user loop or staging it.
+func.def @loop_window(%initial: vector<4xi32>, %count: index) -> (vector<4xi32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %seed = scalar.constant 0 : i32
+  %result = scf.for %iteration = [%c0 to %count step %c1](%bank = %initial : vector<4xi32>) -> (vector<4xi32>) {
+    %position = index.rem %iteration, %c3 : index
+    %window = vector.slice %bank[%position] : vector<4xi32> -> vector<2xi32>
+    %sum = vector.reduce<addi> %window, %seed : vector<2xi32>, i32
+    %next = vector.insert %sum into %bank[0] : i32, vector<4xi32>
+    scf.yield %next : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+func.def @loop_window(%initial: vector<4xi32>, %count: index) -> (vector<4xi32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %seed = scalar.constant 0 : i32
+  %result = scf.for %iteration = [%c0 to %count step %c1](%bank = %initial : vector<4xi32>) -> (vector<4xi32>) {
+    %position = index.rem %iteration, %c3 : index
+    %14 = index.constant 1 : index
+    %15 = index.cmp eq, %position, %14 : index
+    %16 = index.constant 2 : index
+    %17 = index.cmp eq, %position, %16 : index
+    %18 = vector.slice %bank[0] : vector<4xi32> -> vector<2xi32>
+    %19 = vector.slice %bank[1] : vector<4xi32> -> vector<2xi32>
+    %20 = scf.select %15, %19, %18 : vector<2xi32>
+    %21 = vector.slice %bank[2] : vector<4xi32> -> vector<2xi32>
+    %window = scf.select %17, %21, %20 : vector<2xi32>
+    %sum = vector.reduce<addi> %window, %seed : vector<2xi32>, i32
+    %next = vector.insert %sum into %bank[0] : i32, vector<4xi32>
+    scf.yield %next : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
 }

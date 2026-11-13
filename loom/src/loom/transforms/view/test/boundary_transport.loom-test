@@ -208,10 +208,10 @@ func.def noinline target(@carrier_target) @forward_window(%input_root: buffer, %
 func.def public target(@carrier_target) @call_window(%storage: buffer, %base: offset, %position: index) -> (buffer, offset) {
   %whole = buffer.view %storage[%base] : buffer -> view<8xi32>
   %window = view.subview %whole[%position] : view<8xi32> -> view<1xi32>
-  %13 = index.constant 4 : offset
-  %14 = index.scale %position, %13 : index, offset -> offset
-  %15 = index.add %base, %14 : offset
-  %result_root, %result_offset = func.call @forward_window(%storage, %15) : (buffer, offset) -> (buffer, offset)
+  %14 = index.constant 4 : offset
+  %15 = index.scale %position, %14 : index, offset -> offset
+  %16 = index.add %base, %15 : offset
+  %result_root, %result_offset = func.call @forward_window(%storage, %16) : (buffer, offset) -> (buffer, offset)
   %result = buffer.view %result_root[%result_offset] : buffer -> view<1xi32>
   func.return %result_root, %result_offset : buffer, offset
 }
@@ -258,14 +258,14 @@ func.def public target(@carrier_target) @choose_crops(%left_root: buffer, %left_
   } else {
     scf.yield %right_root, %right_offset : buffer, offset
   }
-  %18 = index.constant 4 : offset
-  %19 = index.add %selected_offset, %18 : offset
   %20 = index.constant 4 : offset
-  %21 = index.scale %position, %20 : index, offset -> offset
-  %22 = index.add %19, %21 : offset
-  %23 = index.constant 24 : offset
-  %24 = index.add %selected_offset, %23 : offset
-  func.return %selected_root, %selected_offset, %selected_root, %22, %selected_root, %24 : buffer, offset, buffer, offset, buffer, offset
+  %21 = index.add %selected_offset, %20 : offset
+  %22 = index.constant 4 : offset
+  %23 = index.scale %position, %22 : index, offset -> offset
+  %24 = index.add %21, %23 : offset
+  %25 = index.constant 24 : offset
+  %26 = index.add %selected_offset, %25 : offset
+  func.return %selected_root, %selected_offset, %selected_root, %24, %selected_root, %26 : buffer, offset, buffer, offset, buffer, offset
 }
 
 // ====

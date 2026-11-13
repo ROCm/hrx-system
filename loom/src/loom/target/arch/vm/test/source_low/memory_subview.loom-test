@@ -150,29 +150,29 @@ func.def public @subview_composed_helpers(%input: buffer, %output: buffer, %widt
 
 // ----
 low.func.def noinline target<vm.core> @make_storage_crop(%input_aligned: reg<vm.ref : buffer>, %columns: reg<vm.value : i64>) -> (%result_storage_stride_0: reg<vm.value : i64>, %result_storage_stride_1: reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>) asm {
-  %67 = constant.i64 16
-  %68 = constant.i64 4
-  %69 = integer.mul.i64 %columns, %68
-  %70 = integer.add.i64 %67, %69
-  %71 = constant.i64 1
-  return %columns, %71, %input_aligned, %70
+  %69 = constant.i64 16
+  %70 = constant.i64 4
+  %71 = integer.mul.i64 %columns, %70
+  %72 = integer.add.i64 %69, %71
+  %73 = constant.i64 1
+  return %columns, %73, %input_aligned, %72
 }
 
 low.func.def noinline target<vm.core> @read_storage_crop(%storage_stride_0: reg<vm.value : i64>, %storage_stride_1: reg<vm.value : i64>, %crop: reg<vm.ref : buffer>, %crop_offset: reg<vm.value : i64>) -> (reg<vm.value : f32>) asm {
-  %77 = constant.i64 4
-  %78 = constant.i64 2 : reg<vm.value>
-  %79 = integer.shift.left.i64 %storage_stride_0, %78
-  %80 = integer.add.i64 %crop_offset, %79
-  %81 = integer.add.i64 %80, %77
-  %value = buffer.load %crop, %81, %81, 0, "i32.x1" : reg<vm.value : f32>
+  %79 = constant.i64 4
+  %80 = constant.i64 2 : reg<vm.value>
+  %81 = integer.shift.left.i64 %storage_stride_0, %80
+  %82 = integer.add.i64 %crop_offset, %81
+  %83 = integer.add.i64 %82, %79
+  %value = buffer.load %crop, %83, %83, 0, "i32.x1" : reg<vm.value : f32>
   return %value
 }
 
 low.func.def public target<vm.core> abi(vm_function) @subview_composed_helpers(%input: reg<vm.ref : buffer>, %destination: reg<vm.ref : buffer>, %columns: reg<vm.value : i64>) asm {
   %storage_stride_0, %storage_stride_1, %crop_root, %crop_offset = low.func.call pure @make_storage_crop(%input, %columns) : (reg<vm.ref : buffer>, reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>)
   %value = low.func.call @read_storage_crop(%storage_stride_0, %storage_stride_1, %crop_root, %crop_offset) : (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>) -> (reg<vm.value : f32>)
-  %91 = constant.i64 4
-  buffer.store %destination, %91, %91, %value, 0, "i32.x1"
+  %93 = constant.i64 4
+  buffer.store %destination, %93, %93, %value, 0, "i32.x1"
   return
 }
 
