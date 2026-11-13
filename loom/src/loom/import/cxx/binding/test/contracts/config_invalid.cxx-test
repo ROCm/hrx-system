@@ -248,5 +248,5 @@ extern const unsigned tile;
 [[loom::config("model.tile"),
   loom::where(loom::predicate::multiple_of(16u))]]
 extern const unsigned tile_alias;
-// ERROR@+1: LOWERING/059 "symbol '@model.tile' value 18 violates constraint 'multiple_of'"
+// ERROR@+1: SYMBOL/008 {symbol_name="model.tile", value="18", predicate="multiple_of"}
 [[loom::config("model.tile")]] const unsigned tile = 18u;

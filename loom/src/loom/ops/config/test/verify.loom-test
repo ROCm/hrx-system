@@ -52,6 +52,12 @@ config.def @bad_flag = 2 : i1
 
 // ====
 
+// Invalid values stop before exact constraint evaluation.
+// ERROR@+1: TYPE/005 "value"
+config.def @bad_flag_predicate = 2 : %value: i1 where [eq(%value, 1)]
+
+// ====
+
 // Float configs require float literal values.
 // ERROR@+1: TYPE/005 "value"
 config.def @bad_float = 1 : f32
@@ -121,12 +127,12 @@ config.def @bad_float_predicate = 1.0 : %value: f32 where [range(%value, 0, 4)]
 
 // ====
 
-// ERROR@+1: STRUCTURE/014 "value" "99" "violates constraint 'range'"
+// ERROR@+1: SYMBOL/008 {symbol_name="bad_default", value="99", predicate="range"}
 config.def @bad_default = 99 : %value: index where [range(%value, 1, 8)]
 
 // ====
 
-// ERROR@+1: STRUCTURE/014 "value" "7" "violates constraint 'multiple_of'"
+// ERROR@+1: SYMBOL/008 {symbol_name="bad_multiple", value="7", predicate="multiple_of"}
 config.def @bad_multiple = 7 : %value: i32 where [multiple_of(%value, 4)]
 
 // ====
@@ -134,3 +140,27 @@ config.def @bad_multiple = 7 : %value: i32 where [multiple_of(%value, 4)]
 config.def @valid_signed = -8 : %value: i8 where [range(%value, -16, 16)]
 
 config.def @valid_flag = true : %value: i1 where [eq(%value, 1)]
+
+// ====
+
+// Repeated references name the same exact value.
+config.def @self_equal = 2.5 : %value: f32 where [eq(%value, %value)]
+
+config.def @self_range = 7 : %value: i32 where [range(%value, %value, %value)]
+
+// ====
+
+// ERROR@+1: SYMBOL/008 {symbol_name="self_unequal", value="2.5", predicate="ne"}
+config.def @self_unequal = 2.5 : %value: f32 where [ne(%value, %value)]
+
+// ====
+
+// Rounded constants retain their declared type in the diagnostic.
+// ERROR@+1: SYMBOL/008 {symbol_name="rounded", value="2048", predicate="eq"}
+config.def @rounded = 2049.0 : %value: f16 where [eq(%value, 2049)]
+
+// ====
+
+// Integer literals are not rounded into equality by the floating comparison.
+// ERROR@+1: SYMBOL/008 {symbol_name="large", value="9007199254740992", predicate="eq"}
+config.def @large = 9007199254740992.0 : %value: f64 where [eq(%value, 9007199254740993)]

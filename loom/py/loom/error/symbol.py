@@ -103,6 +103,24 @@ ERR_SYMBOL_007 = ErrorDef(
     fix_hint="Supply an exact config value before final compilation",
 )
 
+# ERR_SYMBOL_008: An exact symbol value must satisfy its declared predicates.
+ERR_SYMBOL_008 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=8,
+    severity=Severity.ERROR,
+    summary="Exact value violates its symbol contract.",
+    message=(
+        "symbol '@{symbol_name}' value {value} of type {type} "
+        "violates constraint '{predicate}'"
+    ),
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("value", ParamKind.STRING),
+        ErrorParam("type", ParamKind.TYPE),
+        ErrorParam("predicate", ParamKind.STRING),
+    ),
+)
+
 ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_001,
     ERR_SYMBOL_002,
@@ -111,4 +129,5 @@ ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_005,
     ERR_SYMBOL_006,
     ERR_SYMBOL_007,
+    ERR_SYMBOL_008,
 )
