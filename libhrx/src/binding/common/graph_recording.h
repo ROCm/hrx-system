@@ -131,10 +131,8 @@ iree_hal_streaming_graph_block_memory(const hrx_graph_block_t* block) {
 typedef struct iree_hal_streaming_graph_recording_t {
   // Owns block descriptors and copied submission parameters.
   iree_arena_allocator_t arena_allocator;
-  // Arena-owned immutable submission order.
-  hrx_graph_block_t** blocks;
-  // Initialized entries, including during partial compilation.
-  uint32_t block_count;
+  // Compiled submission order and borrowed internal completion timelines.
+  hrx_graph_block_list_t blocks;
   // This recording or one of its children records an event.
   bool records_events;
   // An event producer can change between launches and need an independent
@@ -142,10 +140,6 @@ typedef struct iree_hal_streaming_graph_recording_t {
   bool waits_for_events;
   // A cooperative dispatch needs residency admission before submission.
   bool has_cooperative_dispatches;
-  // Internal completion points used by the compiled dependency spans.
-  uint32_t semaphore_count;
-  // Contiguous timeline references borrowed from resource_set.
-  iree_hal_semaphore_t** semaphores;
   // Owns explicitly captured buffers, executables, and command buffers.
   iree_hal_resource_set_t* resource_set;
   // Arena-owned graph-allocation claims held by this recording.

@@ -451,8 +451,8 @@ iree_status_t iree_hal_streaming_graph_exec_set_event_node_event(
   node = iree_hal_streaming_graph_exec_lock_node(exec, node, &edit);
   hrx_graph_block_t* selected_block = NULL;
   if (node) {
-    for (uint32_t i = 0; i < exec->recording.block_count; ++i) {
-      hrx_graph_block_t* block = exec->recording.blocks[i];
+    for (uint32_t i = 0; i < exec->recording.blocks.count; ++i) {
+      hrx_graph_block_t* block = exec->recording.blocks.values[i];
       if (block->type == block_type &&
           iree_hal_streaming_graph_block_event(block)->source_node == node) {
         selected_block = block;
@@ -585,9 +585,9 @@ static iree_status_t
 iree_hal_streaming_graph_exec_preflight_cooperative_dispatches_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_queue_t* cooperative_queue,
     bool* out_exceeds_residency) {
-  for (uint32_t block_index = 0; block_index < exec->recording.block_count;
+  for (uint32_t block_index = 0; block_index < exec->recording.blocks.count;
        ++block_index) {
-    hrx_graph_block_t* block = exec->recording.blocks[block_index];
+    hrx_graph_block_t* block = exec->recording.blocks.values[block_index];
     if (block->type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH) {
       iree_hal_streaming_graph_exec_t* child =
           iree_hal_streaming_graph_block_child_graph(block)->exec;
@@ -684,15 +684,10 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           queue, wait_semaphores, signal_semaphores, record_point);
       break;
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT:
-    case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER: {
-      const iree_hal_queue_barrier_flags_t flags =
-          block->type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
-              ? hrx_graph_block_barrier(block)->flags
-              : IREE_HAL_QUEUE_BARRIER_FLAG_NONE;
       status = iree_hal_queue_barrier(queue, wait_semaphores, signal_semaphores,
-                                      /*barriers=*/NULL, flags);
+                                      /*barriers=*/NULL,
+                                      IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
       break;
-    }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH: {
       const iree_hal_streaming_graph_dispatch_block_attrs_t* dispatch =
           iree_hal_streaming_graph_block_dispatch(block);
@@ -709,13 +704,6 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
                                        dispatch->config, dispatch->constants,
                                        dispatch->bindings,
                                        /*barriers=*/NULL, dispatch->flags);
-      break;
-    }
-    case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE: {
-      const hrx_graph_execute_block_t* execute = hrx_graph_block_execute(block);
-      status = iree_hal_queue_execute(
-          queue, wait_semaphores, signal_semaphores, execute->command_buffer,
-          iree_hal_buffer_binding_table_empty(), execute->flags);
       break;
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL: {
@@ -736,9 +724,8 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
       break;
     }
     default:
-      status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                                "unsupported block type %u", block->type);
-      break;
+      IREE_CHECK_UNREACHABLE(
+          "compiler emitted an unknown frontend graph operation");
   }
 
   return status;
@@ -756,7 +743,7 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_semaphore_list_t external_signal_semaphores,
     iree_hal_streaming_dropped_graph_list_t* dropped_graphs,
     bool* inout_retirement_failed) {
-  if (exec->recording.block_count == 0) {
+  if (exec->recording.blocks.count == 0) {
     return iree_hal_queue_barrier(
         queue, external_wait_semaphores, external_signal_semaphores,
         /*barriers=*/NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
@@ -768,21 +755,29 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
   // skipping their generation leaves all subsequent edge values unambiguous.
   const uint64_t generation = ++exec->launch_generation;
   uint64_t values[HRX_GRAPH_MAX_WORKSTREAMS];
-  if (exec->recording.semaphore_count) {
+  if (exec->recording.blocks.semaphore_count) {
     for (uint32_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
       values[i] = generation;
     }
   }
   iree_status_t status = iree_ok_status();
   uint32_t block_index = 0;
-  for (; iree_status_is_ok(status) && block_index < exec->recording.block_count;
-       ++block_index) {
-    hrx_graph_block_t* block = exec->recording.blocks[block_index];
+  while (iree_status_is_ok(status) &&
+         block_index < exec->recording.blocks.count) {
+    status = hrx_graph_blocks_submit(
+        &exec->recording.blocks, queue, values, external_wait_semaphores,
+        external_signal_semaphores, /*barriers=*/NULL, &block_index);
+    if (!iree_status_is_ok(status) ||
+        block_index == exec->recording.blocks.count) {
+      break;
+    }
+    hrx_graph_block_t* block = exec->recording.blocks.values[block_index];
     iree_hal_semaphore_list_t wait_semaphores;
     iree_hal_semaphore_list_t signal_semaphores;
     hrx_graph_dependencies_resolve(
-        block->dependencies, block_index, exec->recording.semaphore_count,
-        exec->recording.semaphores, values, external_wait_semaphores,
+        block->dependencies, block_index,
+        exec->recording.blocks.semaphore_count,
+        exec->recording.blocks.semaphores, values, external_wait_semaphores,
         external_signal_semaphores, &wait_semaphores, &signal_semaphores);
 
     // Event nodes add one dynamic point to a bounded partition join. Child
@@ -854,18 +849,20 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
       }
     }
     iree_hal_streaming_event_release_recorded_point(&event_wait_point);
+    if (iree_status_is_ok(status)) {
+      ++block_index;
+    }
   }
   if (!iree_status_is_ok(status)) {
-    // The failed iteration has advanced block_index once. Every earlier block
-    // was accepted and signals its indexed internal semaphore at generation;
-    // only the final block signals externally, so no rejected tail enters this
-    // span. A completed child contributes its parent point, while a rejected
-    // child already drained its own partial prefix during recursive unwind.
-    const uint32_t accepted_count = block_index - 1;
-    for (uint32_t i = 0; i < accepted_count; ++i) {
+    // The index names the first unaccepted block. Every earlier block signals
+    // its indexed internal semaphore at generation; only the final block
+    // signals externally, so no rejected tail enters this span. A completed
+    // child contributes its parent point, while a rejected child already
+    // drained its own partial prefix during recursive unwind.
+    for (uint32_t i = 0; i < block_index; ++i) {
       iree_status_t drain_status = iree_hal_semaphore_wait(
-          exec->recording.semaphores[i], generation, iree_infinite_timeout(),
-          IREE_ASYNC_WAIT_FLAG_NONE);
+          exec->recording.blocks.semaphores[i], generation,
+          iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
       if (!iree_status_is_ok(drain_status)) {
         *inout_retirement_failed = true;
       }
@@ -905,7 +902,7 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   }
   // An empty recording needs no submission unless it must carry a previous
   // launch across streams after a parameter update removed all executable work.
-  if (exec->recording.block_count == 0 &&
+  if (exec->recording.blocks.count == 0 &&
       (!exec->last_launch.semaphore ||
        exec->last_launch.semaphore == stream->timeline_semaphore)) {
     *out_result = IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;

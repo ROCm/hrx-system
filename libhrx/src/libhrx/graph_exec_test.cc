@@ -130,15 +130,15 @@ TEST_F(GraphExecSemaphoreTest,
   hrx_graph_exec_t exec = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_instantiate(
       graph, hrx_device_get_queue(device_, 0, 0), 0, &exec)));
-  ASSERT_EQ(exec->recording.semaphore_count, 2u);
+  ASSERT_EQ(exec->recording.blocks.semaphore_count, 2u);
 
   // Take an independent reference on each semaphore so the reference counts
   // stay observable once the executable is gone.
   std::vector<iree_hal_semaphore_t*> semaphores;
-  for (uint32_t i = 0; i < exec->recording.semaphore_count; ++i) {
-    ASSERT_NE(exec->recording.semaphores[i], nullptr);
-    iree_hal_semaphore_retain(exec->recording.semaphores[i]);
-    semaphores.push_back(exec->recording.semaphores[i]);
+  for (uint32_t i = 0; i < exec->recording.blocks.semaphore_count; ++i) {
+    ASSERT_NE(exec->recording.blocks.semaphores[i], nullptr);
+    iree_hal_semaphore_retain(exec->recording.blocks.semaphores[i]);
+    semaphores.push_back(exec->recording.blocks.semaphores[i]);
   }
 
   hrx_graph_exec_release(exec);

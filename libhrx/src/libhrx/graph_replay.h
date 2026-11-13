@@ -41,6 +41,19 @@ typedef struct hrx_graph_execute_block_t {
   iree_hal_queue_execute_flags_t flags;
 } hrx_graph_execute_block_t;
 
+// Compiled submission order and its indexed internal completion points.
+// Storage and resource retention belong to the enclosing recording.
+typedef struct hrx_graph_block_list_t {
+  // Number of blocks published by the compiler.
+  uint32_t count;
+  // Every nonfinal block signals one internal timeline at its block ordinal.
+  uint32_t semaphore_count;
+  // Arena-owned block pointers in submission order.
+  hrx_graph_block_t** values;
+  // Borrowed timelines retained by the recording's resource set.
+  iree_hal_semaphore_t** semaphores;
+} hrx_graph_block_list_t;
+
 // Allocates a compiler-selected payload. Its type and size are established by
 // the producer; replay consumes them without dynamic checks or size metadata.
 iree_status_t hrx_graph_block_allocate(iree_arena_allocator_t* arena,
@@ -59,6 +72,51 @@ static inline hrx_graph_barrier_block_t* hrx_graph_block_barrier(
 static inline hrx_graph_execute_block_t* hrx_graph_block_execute(
     const hrx_graph_block_t* block) {
   return (hrx_graph_execute_block_t*)block->data;
+}
+
+// Submits ordinary blocks starting at |inout_block_index|, stopping at a
+// frontend operation, a rejected queue call, or the end of the recording.
+// The index advances only after acceptance and therefore also identifies the
+// accepted prefix on failure. Frontends perform their own operations and resume
+// with the same generation and external points; this loop owns no stream,
+// submission state, resource references, or failure/retry policy.
+//
+// |barriers| preserves the frontend's cache contract for dependency joins.
+// Command buffers carry their own memory transitions. |values| is the existing
+// bounded generation array used by hrx_graph_dependencies_resolve.
+static inline iree_status_t hrx_graph_blocks_submit(
+    const hrx_graph_block_list_t* blocks, iree_hal_queue_t* queue,
+    uint64_t* values, iree_hal_semaphore_list_t external_waits,
+    iree_hal_semaphore_list_t external_signals,
+    const iree_hal_queue_barriers_t* barriers, uint32_t* inout_block_index) {
+  iree_status_t status = iree_ok_status();
+  uint32_t block_index = *inout_block_index;
+  while (iree_status_is_ok(status) && block_index < blocks->count) {
+    const hrx_graph_block_t* block = blocks->values[block_index];
+    if (block->type >= HRX_GRAPH_BLOCK_TYPE_FRONTEND) {
+      break;
+    }
+    iree_hal_semaphore_list_t waits;
+    iree_hal_semaphore_list_t signals;
+    hrx_graph_dependencies_resolve(block->dependencies, block_index,
+                                   blocks->semaphore_count, blocks->semaphores,
+                                   values, external_waits, external_signals,
+                                   &waits, &signals);
+    if (block->type == HRX_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE) {
+      const hrx_graph_execute_block_t* execute = hrx_graph_block_execute(block);
+      status = iree_hal_queue_execute(
+          queue, waits, signals, execute->command_buffer,
+          iree_hal_buffer_binding_table_empty(), execute->flags);
+    } else {
+      status = iree_hal_queue_barrier(queue, waits, signals, barriers,
+                                      hrx_graph_block_barrier(block)->flags);
+    }
+    if (iree_status_is_ok(status)) {
+      ++block_index;
+    }
+  }
+  *inout_block_index = block_index;
+  return status;
 }
 
 #ifdef __cplusplus

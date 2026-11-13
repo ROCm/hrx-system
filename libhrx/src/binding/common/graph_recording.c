@@ -85,8 +85,9 @@ static iree_status_t iree_hal_streaming_graph_memory_acquire_claims(
 
 static void iree_hal_streaming_graph_recording_release_children(
     iree_hal_streaming_graph_recording_t* recording) {
-  for (uint32_t i = 0; recording->blocks && i < recording->block_count; ++i) {
-    hrx_graph_block_t* block = recording->blocks[i];
+  for (uint32_t i = 0; recording->blocks.values && i < recording->blocks.count;
+       ++i) {
+    hrx_graph_block_t* block = recording->blocks.values[i];
     switch (block->type) {
       case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH:
         iree_hal_streaming_graph_exec_release(
@@ -600,15 +601,15 @@ static iree_status_t iree_hal_streaming_graph_recording_compile_schedule(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_arena_allocate(
               &compiler->recording->arena_allocator,
-              cursor.block_count * sizeof(*compiler->recording->blocks),
-              (void**)&compiler->recording->blocks));
+              cursor.block_count * sizeof(*compiler->recording->blocks.values),
+              (void**)&compiler->recording->blocks.values));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, hrx_graph_dependencies_allocate(compiler->params->context->device,
-                                          cursor.semaphore_count,
-                                          &compiler->recording->arena_allocator,
-                                          compiler->recording->resource_set,
-                                          &compiler->recording->semaphores));
-  compiler->recording->semaphore_count = cursor.semaphore_count;
+      z0, hrx_graph_dependencies_allocate(
+              compiler->params->context->device, cursor.semaphore_count,
+              &compiler->recording->arena_allocator,
+              compiler->recording->resource_set,
+              &compiler->recording->blocks.semaphores));
+  compiler->recording->blocks.semaphore_count = cursor.semaphore_count;
 
   hrx_graph_dependency_block_t plan;
   iree_status_t status = iree_ok_status();
@@ -620,7 +621,8 @@ static iree_status_t iree_hal_streaming_graph_recording_compile_schedule(
     if (iree_status_is_ok(status)) {
       // Publish only initialized entries so partial compilation releases child
       // executable and event references alongside the shared resource set.
-      compiler->recording->blocks[compiler->recording->block_count++] = block;
+      compiler->recording->blocks.values[compiler->recording->blocks.count++] =
+          block;
     }
   }
   IREE_TRACE_ZONE_END(z0);
