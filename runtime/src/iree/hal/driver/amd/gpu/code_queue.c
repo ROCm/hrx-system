@@ -247,7 +247,8 @@ static amdf_status_t iree_hal_amd_gpu_code_queue_submit_user(
     const amdf_status_t status = iree_hal_amd_gpu_aql_ring_publish_header(
         &queue->aql_ring, &queue->user, position, packet.words[0]);
     if (amdf_status_is_ok(status)) {
-      iree_hal_amd_gpu_aql_ring_notify(&queue->aql_ring);
+      iree_hal_amd_gpu_aql_ring_notify(&queue->aql_ring,
+                                       queue->aql_ring.reserved - 1);
     }
     return status;
   }

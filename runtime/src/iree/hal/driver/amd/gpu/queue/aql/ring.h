@@ -104,9 +104,12 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets_with_completion(
     uint32_t packet_count, const iree_hal_amd_gpu_aql_packet_t* packets,
     uint64_t completion_address, uint32_t completion_stride);
 
-// Fences host device stores and notifies the last reserved packet index.
-// Called once per accepted nonempty chunk, without reading the MMIO aperture.
-void iree_hal_amd_gpu_aql_ring_notify(const iree_hal_amd_gpu_aql_ring_t* ring);
+// Fences host device stores and notifies the inclusive last packet of a
+// published chunk. Later reservations may still belong to the host and remain
+// unnotified. GPU-owned fixup targets may be INVALID within the notified chunk.
+// Neither the native reservation index nor the MMIO aperture is read here.
+void iree_hal_amd_gpu_aql_ring_notify(const iree_hal_amd_gpu_aql_ring_t* ring,
+                                      uint64_t published);
 
 // Exact GPU address of a reserved slot, without reading mapped native storage.
 static inline uint64_t iree_hal_amd_gpu_aql_ring_packet_address(

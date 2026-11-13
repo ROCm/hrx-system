@@ -139,18 +139,19 @@ struct iree_hal_amd_gpu_aql_queue_t {
     // contract.
     bool argument_streaming;
   } producer;
-  // A finite packet run held behind its first INVALID header. Only the current
-  // publisher touches its packet coordinates and physical completion.
+  // A finite physical completion run published in bounded groups. Its final
+  // group stays behind an INVALID header until sealing. Only the current
+  // publisher touches packet coordinates and the physical completion.
   struct {
     // Retained physical completion for the run, or NULL while none is open.
     iree_hal_amd_gpu_signal_t* completion;
-    // First reserved packet, whose header is the run's publication gate.
+    // First reserved packet, establishing the publication group coordinates.
     uint64_t first;
     // Last reserved packet, which receives the physical completion at sealing.
     uint64_t last;
-    // Complete first header/setup word retained in ordinary CPU memory.
-    uint32_t header;
-    // Complete final header/setup word, mutable until the first is published.
+    // Complete header/setup word of the unpublished group's first packet.
+    uint32_t group_header;
+    // Complete final header/setup word, mutable until its group is published.
     uint32_t last_header;
     // First logical position plus one; zero means no open run.
     iree_atomic_int64_t position;

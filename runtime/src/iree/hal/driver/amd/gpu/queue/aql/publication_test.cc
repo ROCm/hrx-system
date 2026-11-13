@@ -33,12 +33,12 @@ class AqlPublicationTest
     iree_hal_amd_gpu_signal_cache_t cache = {};
     // Allocation metadata shared by independent producer and reader owners.
     iree_hal_amd_gpu_signal_block_t block = {};
-    // Host ownership for sixteen native completion descriptors.
-    std::array<iree_hal_amd_gpu_signal_t, 16> signals = {};
+    // Host ownership for native completion descriptors.
+    std::array<iree_hal_amd_gpu_signal_t, 128> signals = {};
     // Coherent native completion allocation.
-    std::array<iree_hal_amd_gpu_aql_signal_t, 16> values = {};
+    std::array<iree_hal_amd_gpu_aql_signal_t, 128> values = {};
     // Two-queue causal vectors owned by the allocation.
-    std::array<uint64_t, 2 + 16 * 2> frontiers = {};
+    std::array<uint64_t, 2 + 128 * 2> frontiers = {};
   };
 
   void SetUp() override {
@@ -55,7 +55,7 @@ class AqlPublicationTest
       const amdf_gpu_event_info_t event = {};
       iree_hal_amd_gpu_aql_signal_block_attach(
           &signals.cache.pool, &context_, &event, signals.values.data(),
-          0x1000 + i * 0x1000, &signals.block);
+          0x1000 + i * 0x10000, &signals.block);
     }
     queue_.base.queue_family = &family_;
     queue_.context = &context_;
@@ -230,7 +230,7 @@ class AqlPublicationTest
   // Native completion allocations for this queue and an independent producer.
   std::array<Signals, 2> signals_;
   // Retirement storage with the production inline capture extent.
-  std::array<iree_hal_amd_gpu_aql_retirement_t, 16> issued_ = {};
+  std::array<iree_hal_amd_gpu_aql_retirement_t, 128> issued_ = {};
   // Native packet allocation observed after publication.
   std::array<iree_hal_amd_gpu_aql_packet_t, 64> packets_ = {};
   // Firmware-owned packet consumption index.
@@ -321,6 +321,103 @@ TEST_P(AqlPublicationTest, HostPublicationAcquiresEachRunBeforePayloadScopes) {
       EXPECT_EQ(packets_[first + i].words[0], payload_header);
     }
     EXPECT_EQ(doorbell_, first + 3);
+  }
+}
+
+TEST_P(AqlPublicationTest, PublishedGroupsStayImmutableAcrossRingWrap) {
+  // Begin near the ring's end with no outstanding native packets. Logical
+  // retirement positions and native packet positions are independent domains.
+  queue_.producer.ring.reserved = 60;
+  queue_.producer.ring.consumed = 60;
+  iree_atomic_store(&read_index_, 60, iree_memory_order_release);
+  iree_atomic_store(&write_index_, 60, iree_memory_order_release);
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  Publish(Semaphore(), waits);
+  const uint64_t first = queue_.producer.ring.reserved;
+  const uint32_t acquire = std::get<1>(GetParam()) ? 1u << 9 : 0;
+  const uint32_t release = 1u << 11;
+  const uint32_t payload_header =
+      (1u << 16) | IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+      IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | acquire | release;
+  const uint32_t group_header = (payload_header & ~(3u << 9)) |
+                                IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
+  iree_hal_semaphore_t* tail = nullptr;
+  for (uint32_t i = 0; i < 9; ++i) {
+    tail = Semaphore();
+    Publish(tail, waits, false, acquire, release);
+    EXPECT_EQ(doorbell_, i < 8 ? first - 1 : first + 7);
+  }
+  std::array<iree_hal_amd_gpu_aql_packet_t, 8> published;
+  for (uint32_t i = 0; i < published.size(); ++i) {
+    const uint32_t slot = (first + i) & (packets_.size() - 1);
+    published[i] = packets_[slot];
+    EXPECT_EQ(published[i].words[0], i ? payload_header : group_header);
+    EXPECT_EQ(PacketAddress(slot, 14), 0u);
+  }
+  EXPECT_EQ(packets_[(first + 8) & (packets_.size() - 1)].words[0],
+            IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+  for (uint32_t i = 9; i < 14; ++i) {
+    tail = Semaphore();
+    Publish(tail, waits, false, acquire, release);
+    EXPECT_EQ(doorbell_, first + 7);
+  }
+  const uint64_t logical = queue_.producer.count;
+  waits = {{.semaphore = tail, .value = 1}};
+  request_.function = nullptr;
+  Publish(Semaphore(), waits, false, 0,
+          IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM);
+  EXPECT_EQ(queue_.producer.ring.reserved, first + 14);
+  EXPECT_EQ(doorbell_, first + 13);
+  EXPECT_EQ(queue_.run.completion, nullptr);
+  for (uint32_t i = 0; i < published.size(); ++i) {
+    const uint32_t slot = (first + i) & (packets_.size() - 1);
+    EXPECT_EQ(std::memcmp(&published[i], &packets_[slot], sizeof(published[i])),
+              0);
+  }
+  for (uint32_t i = 8; i < 14; ++i) {
+    const uint32_t slot = (first + i) & (packets_.size() - 1);
+    uint32_t header = i == 8 ? group_header : payload_header;
+    if (i == 13) {
+      header =
+          (header & ~(3u << 11)) | IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
+    }
+    EXPECT_EQ(packets_[slot].words[0], header);
+    EXPECT_EQ(PacketAddress(slot, 14),
+              i == 13 ? issued_[logical].signal->device_address : 0u);
+  }
+}
+
+TEST_P(AqlPublicationTest, FullRunHasOnePhysicalCompletionAcrossEightGroups) {
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  Publish(Semaphore(), waits);
+  // Firmware can reclaim the standalone packet before host retirement. This
+  // permits the following full run to wrap without reusing its logical owner.
+  packets_[0].words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
+  iree_atomic_store(&read_index_, 1, iree_memory_order_release);
+  const uint32_t payload_header =
+      (1u << 16) | IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+      IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | (1u << 9) | (1u << 11);
+  for (uint32_t i = 0; i < 64; ++i) {
+    Publish(Semaphore(), waits, false, 1u << 9, 1u << 11);
+    if (i < 63) {
+      EXPECT_NE(queue_.run.completion, nullptr);
+      EXPECT_EQ(doorbell_, i < 8 ? 0 : (i / 8) * 8);
+    }
+    EXPECT_EQ(issued_[i + 1].signal->host_value, issued_[1].signal->host_value);
+  }
+  EXPECT_EQ(queue_.run.completion, nullptr);
+  EXPECT_EQ(queue_.run.position, 0);
+  EXPECT_EQ(queue_.producer.ring.reserved, 65u);
+  EXPECT_EQ(doorbell_, 64u);
+  for (uint32_t i = 0; i < 64; ++i) {
+    const uint32_t slot = (i + 1) & (packets_.size() - 1);
+    const uint32_t header =
+        i % 8 ? payload_header
+              : (payload_header & ~(3u << 9)) |
+                    IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
+    EXPECT_EQ(packets_[slot].words[0], header);
+    EXPECT_EQ(PacketAddress(slot, 14),
+              i == 63 ? issued_[1].signal->device_address : 0u);
   }
 }
 

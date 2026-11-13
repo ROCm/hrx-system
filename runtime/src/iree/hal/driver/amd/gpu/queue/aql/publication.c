@@ -9,6 +9,11 @@
 #include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/state.h"
 
+// Release completed groups while retaining a private terminal packet for the
+// run's completion and final payload release. Grouping amortizes the native
+// SYSTEM acquisition without holding the entire physical completion run.
+enum { IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK = 7 };
+
 static amdf_status_t iree_hal_amd_gpu_aql_write_packet(
     iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
@@ -21,12 +26,13 @@ static amdf_status_t iree_hal_amd_gpu_aql_write_packet(
 // Accepted ownership is already visible to retirement even when publication
 // fails. Wake the existing terminal path; no failed release proves completion.
 static void iree_hal_amd_gpu_aql_publish_notify(
-    iree_hal_amd_gpu_aql_queue_t* queue, amdf_status_t status) {
+    iree_hal_amd_gpu_aql_queue_t* queue, amdf_status_t status,
+    uint64_t published) {
   if (IREE_UNLIKELY(!amdf_status_is_ok(status))) {
     iree_hal_amd_gpu_aql_queue_fail_native(&queue->base, status,
                                            "flush AQL command publication");
   } else {
-    iree_hal_amd_gpu_aql_ring_notify(&queue->producer.ring);
+    iree_hal_amd_gpu_aql_ring_notify(&queue->producer.ring, published);
   }
 }
 
@@ -43,8 +49,12 @@ amdf_status_t iree_hal_amd_gpu_aql_publish_run(
   queue->run.completion = NULL;
   iree_atomic_store(&queue->run.position, 0, iree_memory_order_release);
   const amdf_status_t status = iree_hal_amd_gpu_aql_ring_publish_header(
-      ring, &queue->storage, queue->run.first, queue->run.header);
-  iree_hal_amd_gpu_aql_publish_notify(queue, status);
+      ring, &queue->storage,
+      queue->run.first +
+          ((queue->run.last - queue->run.first) &
+           ~(uint64_t)IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK),
+      queue->run.group_header);
+  iree_hal_amd_gpu_aql_publish_notify(queue, status, queue->run.last);
   iree_hal_amd_gpu_signal_release(completion);
   return status;
 }
@@ -375,15 +385,17 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     }
   }
   if (run_release) {
-    // The first INVALID header still guards every packet in this run. Its
-    // ordered final dispatch can perform the terminal release without another
+    // The final group's INVALID header still guards the last dispatch. Its
+    // ordered release covers the already published groups without another
     // packet. Preserve independent logical ownership on a completion alias.
     const uint32_t release = iree_max(before & (3u << 11), after & (3u << 11));
     const uint32_t header =
         (queue->run.last_header & ~(3u << 11)) |
         iree_max(queue->run.last_header & (3u << 11), release);
-    if (queue->run.first == queue->run.last) {
-      queue->run.header = header;
+    queue->run.last_header = header;
+    if (((queue->run.last - queue->run.first) &
+         IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK) == 0) {
+      queue->run.group_header = header;
     } else {
       iree_memcpy_write_only(
           ring->packets[queue->run.last & (ring->capacity - 1)].words, &header,
@@ -469,6 +481,9 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   const bool grouped =
       run_eligible && (queue->run.completion || position != completed);
   const bool first_in_run = grouped && !queue->run.completion;
+  const bool first_in_group =
+      first_in_run || ((ring->reserved - queue->run.first) &
+                       IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK) == 0;
   if (grouped) {
     if (first_in_run) {
       queue->run.completion = signal;
@@ -477,11 +492,11 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   }
   // Prepare the terminal packet before a retirement slot can be consumed.
   // A ready request may borrow the same capture which native retirement frees.
-  // Every host-authored input in a finite run precedes its first valid header.
+  // Every host-authored input in a group precedes its first valid header.
   // Its SYSTEM acquisition covers that publication on every memory route;
   // later dispatches retain their requested payload scopes. Standalone work
   // has the same host-to-device boundary, even without invocation arguments.
-  const uint32_t acquire = grouped && !first_in_run
+  const uint32_t acquire = grouped && !first_in_group
                                ? before & (3u << 9)
                                : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
   const uint32_t dispatch_header =
@@ -536,19 +551,28 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   if (grouped) {
     if (first_in_run) {
       queue->run.first = packet_position;
-      queue->run.header = payload.words[0];
+      queue->run.group_header = payload.words[0];
     }
-    queue->run.last = packet_position;
-    queue->run.last_header = payload.words[0];
     iree_hal_amd_gpu_aql_ring_write_body(ring, packet_position, &payload);
     if (!first_in_run) {
-      iree_memcpy_write_only(
-          ring->packets[packet_position & (ring->capacity - 1)].words,
-          payload.words, sizeof(uint32_t));
+      if (first_in_group) {
+        const amdf_status_t status = iree_hal_amd_gpu_aql_ring_publish_header(
+            ring, &queue->storage,
+            queue->run.last - IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK,
+            queue->run.group_header);
+        iree_hal_amd_gpu_aql_publish_notify(queue, status, queue->run.last);
+        queue->run.group_header = payload.words[0];
+      } else {
+        iree_memcpy_write_only(
+            ring->packets[packet_position & (ring->capacity - 1)].words,
+            payload.words, sizeof(uint32_t));
+      }
     } else {
       iree_atomic_store(&queue->run.position, position + 1,
                         iree_memory_order_release);
     }
+    queue->run.last = packet_position;
+    queue->run.last_header = payload.words[0];
     if (queue->run.last - queue->run.first + 1 == 64) {
       iree_hal_amd_gpu_aql_publish_run(queue);
     } else if (first_in_run) {
@@ -597,7 +621,8 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
             0, NULL, signal_address));
   }
   // No capture/signal/request access follows the terminal header publication.
-  iree_hal_amd_gpu_aql_publish_notify(queue, publication_status);
+  iree_hal_amd_gpu_aql_publish_notify(queue, publication_status,
+                                      ring->reserved - 1);
   return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
 }
 
@@ -734,7 +759,8 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_control(
                 IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | (after & (3u << 9)),
             0, NULL, signal_address));
   }
-  iree_hal_amd_gpu_aql_publish_notify(queue, publication_status);
+  iree_hal_amd_gpu_aql_publish_notify(queue, publication_status,
+                                      ring->reserved - 1);
   return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
 }
 
@@ -1016,7 +1042,8 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
             0, NULL, signal_address));
   }
   // No invocation access follows the terminal header: it may retire now.
-  iree_hal_amd_gpu_aql_publish_notify(queue, publication_status);
+  iree_hal_amd_gpu_aql_publish_notify(queue, publication_status,
+                                      ring->reserved - 1);
   return terminal ? IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE
                   : IREE_HAL_AMD_GPU_AQL_PUBLISH_MORE;
 }
@@ -1210,7 +1237,8 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_transfer(
     publication_status = iree_hal_amd_gpu_aql_write_packet(
         ring, &queue->storage, packet_position, completion);
   }
-  iree_hal_amd_gpu_aql_publish_notify(queue, publication_status);
+  iree_hal_amd_gpu_aql_publish_notify(queue, publication_status,
+                                      ring->reserved - 1);
   return terminal ? IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE
                   : IREE_HAL_AMD_GPU_AQL_PUBLISH_MORE;
 }
