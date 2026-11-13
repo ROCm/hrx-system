@@ -42,6 +42,7 @@ typedef struct iree_hal_amd_gpu_pm4_program_pool_t {
 } iree_hal_amd_gpu_pm4_program_pool_t;
 
 // Cold construction; failure leaves a deinitializable partial owner.
+// The owner publishes code with iree_hal_amd_gpu_code_publish before use.
 iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
     iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
     uint32_t queue_count, bool chain, iree_allocator_t host_allocator,

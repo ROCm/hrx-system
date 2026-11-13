@@ -140,10 +140,7 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     *builtin->kernel_object = address + descriptor_offset;
     code_offset += iree_align_uint64(builtin->code.data_length, 256);
   }
-  return out_pool->code_upload ? iree_ok_status()
-                               : iree_hal_amd_gpu_code_publish(
-                                     context, NULL, iree_infinite_timeout(),
-                                     &out_pool->code, &out_pool->code_upload);
+  return iree_ok_status();
 }
 
 void iree_hal_amd_gpu_aql_program_pool_deinitialize(

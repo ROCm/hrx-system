@@ -372,10 +372,6 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
       first ? submission->before : (iree_hal_amd_gpu_pm4_barrier_t){0};
   // Every preceding publication drains its own CP DMA before retirement.
   before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
-  if (program) {
-    // Publish resident builtin instructions.
-    before.acquire_cache_control |= 1u;
-  }
   if (argument_length || chunk.staging_length > chunk.download.length) {
     // Host-written ABI and transport bytes need visibility even with empty
     // payload barriers. Their storage and retirement owners are independent.
@@ -718,9 +714,9 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
       before.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
       after.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
     }
-    // Instruction upload and host argument publication remain mandatory even
-    // when the caller supplies an empty optional payload boundary.
-    before.acquire_cache_control |= 1u | queue->options.barriers.acquire;
+    // Loading has already published the immutable instructions. Host argument
+    // publication remains mandatory with an empty optional payload boundary.
+    before.acquire_cache_control |= queue->options.barriers.acquire;
     if (function->launch.requirements &
         IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN) {
       before.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;

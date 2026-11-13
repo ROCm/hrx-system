@@ -33,7 +33,7 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   // at native access ordinal zero. Host visibility is optional; placement is
   // always device-local. The loader never substitutes host backing.
   const iree_hal_amd_fabric_memory_options_t* memory;
-  // Device-owned code publisher, present for unmapped code or AQL caches.
+  // Required device-owned publisher for immutable executable instructions.
   iree_hal_amd_gpu_code_queue_t* code_queue;
   // Relative synchronous publication budget, converted once by each load.
   iree_timeout_t code_publication_timeout;

@@ -116,7 +116,7 @@ TEST_P(ProgramTest, NativeEntryPublishesItsActualProducers) {
     }
     offset += length;
   }
-  std::vector<uint32_t> expected_cache = {profile.acquire | 1u};
+  std::vector<uint32_t> expected_cache = {profile.acquire};
   const uint32_t publication = profile_index ? profile.release : 0;
   if (!initialized && large) {
     // A shader clone must publish before a bypassing CP overwrites its bytes.
@@ -179,7 +179,7 @@ TEST(ProgramReplayTest, PreservedAddressesNeedNoRepairOrReaderJoin) {
                                       &program, &instance, &profile, 0, 0));
     const std::vector<uint32_t> expected = {
         0xc0065800, 0,          0xffffffff, 0xff,
-        0,          0,          0x0a,       profile.acquire | 1u,
+        0,          0,          0x0a,       profile.acquire,
         0xc0023f00, 0x45670100, 0x23,       1024u | (1u << 23),
     };
     EXPECT_EQ(std::vector<uint32_t>(words.data(), end), expected);

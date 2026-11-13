@@ -15,6 +15,8 @@
 #include <vector>
 
 #include "iree/base/alignment.h"
+#include "iree/hal/driver/amd/fabric/event.h"
+#include "iree/hal/driver/amd/gpu/code_queue.h"
 #include "iree/hal/driver/amd/gpu/feedback.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco_test_util.h"
@@ -35,6 +37,8 @@ struct NativeMemory {
   std::vector<uint8_t> bytes;
   // Construction geometry captured from the actual allocation request.
   amdf_memory_create_info_t request = {};
+  // Independent device address assigned to this native allocation domain.
+  uint64_t device_address = UINT64_C(0x1200000000);
   // Ordinal of the fallible native call to fail, or zero for normal operation.
   uint32_t fail_at = 0;
   // Number of fallible calls performed in this construction.
@@ -163,7 +167,7 @@ struct NativeMemory {
     }
     EXPECT_EQ(ordinal, 0u);
     EXPECT_EQ(kind, AMDF_MEMORY_ADDRESS_GPU);
-    *out_address = UINT64_C(0x1200000000);
+    *out_address = self.device_address;
     return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL QueryPair(const amdf_memory_site_t* producer,
@@ -362,6 +366,8 @@ class ExecutableTest : public ::testing::TestWithParam<
     native_families_[1].command_type = std::get<1>(GetParam());
     context_.api = &native_.api;
     context_.families = native_families_;
+    context_.gpu = &gpu_;
+    context_.device = reinterpret_cast<amdf_device_t*>(this);
     // Only identity is borrowed from the parent. These tests never invoke a
     // device method or pretend to qualify public queue execution.
     family_.device = reinterpret_cast<iree_hal_device_t*>(this);
@@ -394,6 +400,7 @@ class ExecutableTest : public ::testing::TestWithParam<
         .target = &target_,
         .native_family_ordinal = 1,
         .memory = &memory_,
+        .code_publication_timeout = iree_infinite_timeout(),
         .placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, 17},
     };
     IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
@@ -405,15 +412,87 @@ class ExecutableTest : public ::testing::TestWithParam<
     context_.fabric = fabric_;
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
+    ASSERT_NO_FATAL_FAILURE(InitializePublisher());
   }
   void TearDown() override {
     iree_hal_executable_release(executable_);
+    EXPECT_EQ(iree_hal_amd_gpu_code_queue_free(options_.code_queue),
+              AMDF_STATUS_OK);
     iree_hal_amd_gpu_context_deinitialize_memory(&context_);
+    iree_async_event_native_deinitialize(&context_.kernel_event);
     iree_hal_amd_fabric_release(fabric_);
     iree_hal_amd_gpu_source_context_registry_deinitialize(&feedback_.sources);
     EXPECT_EQ(native_.mappings, 0u);
     EXPECT_EQ(native_.allocations, 0u);
+    EXPECT_EQ(publication_memory_.mappings, 0u);
+    EXPECT_EQ(publication_memory_.allocations, 0u);
     iree_hal_amd_gpu_image_deinitialize(&image_);
+  }
+  void InitializePublisher() {
+    // One supported native cache protocol serves the loader dependency.
+    // Artifact-family cases exercise placement/reflection, not ISA execution.
+    context_.target_info.gfx_ip.major = 11;
+    native_families_[0].command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
+    gpu_.kernel_queue_create =
+        [](amdf_device_t* device,
+           const amdf_gpu_kernel_queue_create_info_t* info,
+           amdf_kernel_queue_t** out_queue) {
+          EXPECT_EQ(info->queue_family_ordinal, 0u);
+          *out_queue = reinterpret_cast<amdf_kernel_queue_t*>(device);
+          return AMDF_STATUS_OK;
+        };
+    native_.api.kernel_queue_query_info = [](amdf_kernel_queue_t* queue,
+                                             amdf_kernel_queue_info_t* info) {
+      auto* self = reinterpret_cast<ExecutableTest*>(queue);
+      info->maximum_pending_submission_count = 1;
+      info->notification_types = UINT64_C(1)
+                                 << self->context_.kernel_notification.type;
+      return AMDF_STATUS_OK;
+    };
+    gpu_.kernel_queue_submit =
+        [](amdf_kernel_queue_t* queue,
+           const amdf_gpu_kernel_queue_submission_info_t* info,
+           uint64_t* out_point) {
+          auto* self = reinterpret_cast<ExecutableTest*>(queue);
+          EXPECT_EQ(info->command_count, 1u);
+          const auto& command = info->commands[0];
+          const auto& memory = *reinterpret_cast<NativeMemory*>(command.memory);
+          const auto* words = reinterpret_cast<const uint32_t*>(
+              memory.bytes.data() + command.byte_offset);
+          EXPECT_EQ(command.byte_length, 32u);
+          EXPECT_EQ(words[0], 0xc0065800u);
+          EXPECT_NE(words[7] & 1u, 0u);
+          EXPECT_GT(self->native_.flushes, 0u);
+          *out_point = ++self->published_;
+          return AMDF_STATUS_OK;
+        };
+    native_.api.kernel_queue_request_notification =
+        [](amdf_kernel_queue_t*, uint64_t, const amdf_native_event_t*) {
+          return AMDF_STATUS_OK;
+        };
+    native_.api.kernel_queue_refresh_status =
+        [](amdf_kernel_queue_t* queue, amdf_kernel_queue_status_t* info) {
+          info->retired_submission =
+              reinterpret_cast<ExecutableTest*>(queue)->published_;
+          return AMDF_STATUS_OK;
+        };
+    native_.api.kernel_queue_wait = [](amdf_kernel_queue_t* queue,
+                                       uint64_t point, uint64_t, uint64_t) {
+      EXPECT_LE(point, reinterpret_cast<ExecutableTest*>(queue)->published_);
+      return AMDF_STATUS_OK;
+    };
+    native_.api.kernel_queue_destroy = [](amdf_kernel_queue_t*) {
+      return AMDF_STATUS_OK;
+    };
+    IREE_ASSERT_OK(iree_async_event_native_initialize(&context_.kernel_event));
+    context_.kernel_notification =
+        iree_hal_amd_fabric_event_native_handle(&context_.kernel_event);
+    auto control = memory_;
+    publication_memory_.device_address = UINT64_C(0x1300000000);
+    control.scope = publication_memory_.scope();
+    IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_allocate(
+        &context_, 0, AMDF_QUEUE_PUBLICATION_MODE_KERNEL, &control,
+        iree_allocator_system(), &options_.code_queue));
   }
   void Release() {
     iree_hal_executable_release(executable_);
@@ -459,6 +538,12 @@ class ExecutableTest : public ::testing::TestWithParam<
   iree_hal_amd_gpu_target_identity_t target_ = {};
   // Native allocation/mapping dependency with explicit failure points.
   NativeMemory native_;
+  // Independent native backing for the cold publisher's command storage.
+  NativeMemory publication_memory_;
+  // Native queue dependency; image loading and publication remain real.
+  amdf_gpu_api_t gpu_ = {};
+  // Native points completed by the synchronous queue dependency.
+  uint64_t published_ = 0;
   // Parent native owner, borrowed without executable ownership cycles.
   iree_hal_amd_gpu_context_t context_ = {};
   // Selected native protocol family differs from the HAL family ordinal.
@@ -482,6 +567,7 @@ class ExecutableTest : public ::testing::TestWithParam<
 TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
   IREE_ASSERT_OK(Load());
   EXPECT_EQ(native_.flushes, 1u);
+  EXPECT_EQ(published_, 1u);
   EXPECT_EQ(native_.allocation_thread, std::this_thread::get_id());
   std::vector<uint64_t> descriptors;
   for (size_t i = 0; i < image_.metadata.kernel_count; ++i) {

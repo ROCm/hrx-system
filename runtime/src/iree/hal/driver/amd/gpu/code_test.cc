@@ -33,6 +33,8 @@ class CodeTest : public ::testing::Test {
     bool allocated = false;
     // Native host view remains owned until explicit destruction.
     bool mapped = false;
+    // Completed host flushes before native code publication.
+    uint32_t flush_count = 0;
     // Calling thread that acquired this native backing.
     std::thread::id allocation_thread;
   };
@@ -111,10 +113,11 @@ class CodeTest : public ::testing::Test {
       info->properties = AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK;
       return AMDF_STATUS_OK;
     };
-    api_.host_mapping_cache_control = [](amdf_host_mapping_t*,
+    api_.host_mapping_cache_control = [](amdf_host_mapping_t* mapping,
                                          amdf_host_cache_operation_t operation,
                                          uint64_t, uint64_t) {
       EXPECT_EQ(operation, AMDF_HOST_CACHE_OPERATION_FLUSH);
+      ++reinterpret_cast<Memory*>(mapping)->flush_count;
       return AMDF_STATUS_OK;
     };
     api_.memory_query_pair_info = [](const amdf_memory_site_t*,
@@ -193,8 +196,13 @@ class CodeTest : public ::testing::Test {
                 break;
               }
               case 0x58:  // ACQUIRE_MEM: invalidate code after its last write.
+                EXPECT_EQ(count, 8u);
+                EXPECT_NE(words[i + 7] & 1u, 0u);
                 ++self->cache_actions_;
                 EXPECT_EQ(self->copied_bytes_, self->expected_copy_length_);
+                if (self->resident_.host_access) {
+                  EXPECT_EQ(self->memories_[1].flush_count, 1u);
+                }
                 break;
               case 0x10:  // NOP aligns KERNEL commands.
                 break;
@@ -461,7 +469,7 @@ class CodeTest : public ::testing::Test {
   NativeCache native_cache_;
 };
 
-TEST_F(CodeTest, MappedLocalCodeNeedsNoUpload) {
+TEST_F(CodeTest, MappedCodePublishesInstructionsWithoutUpload) {
   resident_.host_access = control_.host_access;
   IREE_ASSERT_OK(Allocate());
   EXPECT_EQ(upload_, nullptr);
@@ -470,9 +478,11 @@ TEST_F(CodeTest, MappedLocalCodeNeedsNoUpload) {
   EXPECT_EQ(acquisitions_, 2u);
   EXPECT_EQ(memories_[1].flags, AMDF_MEMORY_FLAG_DEVICE_LOCAL);
   EXPECT_EQ(memories_[1].allocation_thread, std::this_thread::get_id());
-  IREE_ASSERT_OK(iree_hal_amd_gpu_code_publish(
-      &context_, nullptr, iree_infinite_timeout(), &code_, &upload_));
-  EXPECT_EQ(submitted_, 0u);
+  IREE_ASSERT_OK(Publish());
+  EXPECT_EQ(submitted_, 1u);
+  EXPECT_EQ(retired_, submitted_);
+  EXPECT_EQ(cache_actions_, 1u);
+  EXPECT_EQ(copied_bytes_, 0u);
 }
 
 TEST_F(CodeTest, UnmappedCodeUsesOneNativeAllocationAndBoundedChunks) {

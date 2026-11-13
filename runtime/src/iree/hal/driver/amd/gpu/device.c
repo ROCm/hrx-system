@@ -1361,7 +1361,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     status = prepare.status;
     device->memory.mappings.failure = &device->feedback.failure_code;
   }
-  if (iree_status_is_ok(status) && (aql || device->programs.pm4.code_upload)) {
+  if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_code_queue_allocate(
         context, family_ordinal, publication_mode, &device->memory.control,
         host_allocator, &device->code_queue);
@@ -1518,15 +1518,9 @@ iree_status_t iree_hal_amd_gpu_device_create(
   iree_hal_amd_gpu_code_upload_t** upload =
       aql ? &device->programs.aql.code_upload
           : &device->programs.pm4.code_upload;
-  if (*upload) {
-    status = iree_hal_amd_gpu_code_publish(context, device->code_queue,
-                                           device->code_publication_timeout,
-                                           code, upload);
-  } else if (device->code_queue) {
-    status = iree_hal_amd_gpu_code_queue_publish(
-        device->code_queue, device->code_publication_timeout, code,
-        iree_const_byte_span_empty());
-  }
+  status = iree_hal_amd_gpu_code_publish(context, device->code_queue,
+                                         device->code_publication_timeout, code,
+                                         upload);
   if (iree_status_is_ok(status)) {
     *out_device = base;
   } else {

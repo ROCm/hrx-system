@@ -70,11 +70,7 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
         gfxip, format_features, &kernels[i], address, launch);
     offset += iree_align_uint64(code[i].data_length, 256);
   }
-  IREE_RETURN_IF_ERROR(status);
-  return out_pool->code_upload ? iree_ok_status()
-                               : iree_hal_amd_gpu_code_publish(
-                                     context, NULL, iree_infinite_timeout(),
-                                     &out_pool->code, &out_pool->code_upload);
+  return status;
 }
 
 void iree_hal_amd_gpu_pm4_program_pool_deinitialize(
@@ -232,7 +228,7 @@ uint32_t* iree_hal_amd_gpu_pm4_program_emit(
   if (instance->join_previous && fixup) {
     words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
   }
-  words = iree_hal_amd_gpu_pm4_emit_acquire(words, profile->acquire | 1u);
+  words = iree_hal_amd_gpu_pm4_emit_acquire(words, profile->acquire);
   if (!instance->initialized) {
     const uint64_t length =
         iree_hal_amd_gpu_pm4_program_copy_length(program, instance);
