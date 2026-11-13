@@ -174,13 +174,6 @@ static iree_status_t loom_amdgpu_spill_lowering_emit_unsupported_storage_space(
     const loom_amdgpu_storage_layout_reference_t* storage_reference) {
   const iree_string_view_t storage_space =
       loom_low_storage_type_space_name(storage_reference->reservation.space);
-  if (context->emitter.fn == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU spill lowering cannot lower storage space '%.*s'",
-        (int)storage_space.size, storage_space.data);
-  }
-
   iree_string_view_t supported_storage_space_names[LOOM_STORAGE_SPACE_COUNT_];
   const iree_host_size_t supported_storage_space_count =
       loom_low_storage_space_set_names(
@@ -213,11 +206,6 @@ static iree_status_t loom_amdgpu_spill_lowering_emit_out_of_bounds_access(
     loom_value_id_t storage_value_id, int64_t access_byte_offset,
     uint64_t access_byte_length,
     const loom_amdgpu_storage_layout_reference_t* storage_reference) {
-  if (context->emitter.fn == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU spill lowering cannot lower out-of-bounds spill access");
-  }
   loom_diagnostic_param_t params[] = {
       loom_param_string(loom_low_diagnostic_function_name(
           context->emission.module, context->function_op)),
@@ -280,11 +268,6 @@ static iree_status_t loom_amdgpu_spill_lowering_make_offset_attr(
 static iree_status_t loom_amdgpu_spill_lowering_emit_unsupported_register_type(
     const loom_amdgpu_spill_lowering_context_t* context, const loom_op_t* op,
     loom_value_id_t value_id, loom_type_t type) {
-  if (context->emitter.fn == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU spill lowering cannot lower spill value type");
-  }
   loom_diagnostic_param_t params[] = {
       loom_param_string(loom_low_diagnostic_function_name(
           context->emission.module, context->function_op)),
@@ -1053,20 +1036,8 @@ iree_status_t loom_amdgpu_lower_spill_traffic(
     loom_amdgpu_storage_layout_segment_sizes_t segment_prefix,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* scratch_arena,
     loom_amdgpu_spill_lowering_result_t* out_result) {
-  if (module == NULL || function_op == NULL || descriptor_set == NULL ||
-      out_result == NULL || scratch_arena == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU spill lowering requires module, function, descriptor set, "
-        "result, and scratch arena");
-  }
   *out_result = (loom_amdgpu_spill_lowering_result_t){0};
   loom_region_t* body = loom_low_function_body(function_op);
-  if (body == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU spill lowering requires a low function body");
-  }
 
   loom_op_t** ops = NULL;
   iree_host_size_t op_count = 0;

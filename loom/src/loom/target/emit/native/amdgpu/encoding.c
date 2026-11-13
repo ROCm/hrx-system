@@ -1047,13 +1047,8 @@ static iree_status_t loom_amdgpu_encode_move(
       loom_amdgpu_accumulator_copy_ref(descriptor_set,
                                        destination->descriptor_reg_class_id,
                                        source->descriptor_reg_class_id);
-  if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU native encoding move from descriptor register class ID "
-        "%" PRIu16 " to %" PRIu16 " is unsupported",
-        source->descriptor_reg_class_id, destination->descriptor_reg_class_id);
-  }
+  IREE_ASSERT_NE(descriptor_ref, LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
+                 "verified structural transfer must have a native move");
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_descriptor_ref_descriptor(descriptor_set, descriptor_ref);
   const loom_low_descriptor_layout_t* descriptor_layout =
