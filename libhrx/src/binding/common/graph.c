@@ -419,22 +419,37 @@ static iree_status_t iree_hal_streaming_graph_validate_dependencies(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "dependency array must be provided");
   }
-  for (iree_host_size_t i = 0; i < dependency_count; ++i) {
+  // Graph mutations are externally serialized. Borrow a flag in each supplied
+  // predecessor instead of allocating a set or searching the input prefix.
+  // The zero/one-dependency paths never need to write the predecessor.
+  const uint8_t mark =
+      dependency_count > 1
+          ? IREE_HAL_STREAMING_GRAPH_NODE_FLAG_VALIDATING_DEPENDENCY
+          : 0;
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t marked_count = 0;
+  for (iree_host_size_t i = 0;
+       i < dependency_count && iree_status_is_ok(status); ++i) {
     if (!iree_hal_streaming_graph_node_is_active_in_graph(graph,
                                                           dependencies[i])) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dependency at index %" PRIhsz
-                              " does not belong to the target graph",
-                              i);
-    }
-    for (iree_host_size_t j = 0; j < i; ++j) {
-      if (dependencies[j] == dependencies[i]) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "duplicate dependency at index %" PRIhsz, i);
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "dependency at index %" PRIhsz
+                                " does not belong to the target graph",
+                                i);
+    } else if (mark) {
+      if (dependencies[i]->flags & mark) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "duplicate dependency at index %" PRIhsz, i);
+      } else {
+        dependencies[i]->flags |= mark;
+        ++marked_count;
       }
     }
   }
-  return iree_ok_status();
+  for (iree_host_size_t i = 0; i < marked_count; ++i) {
+    dependencies[i]->flags &= ~mark;
+  }
+  return status;
 }
 
 static bool iree_hal_streaming_graph_list_contains(

@@ -60,6 +60,8 @@ typedef enum iree_hal_streaming_graph_node_flag_bits_e {
   IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN = 1u << 0,
   // Node is disabled in an executable graph and omitted from scheduling.
   IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED = 1u << 1,
+  // Temporary membership mark, cleared before dependency validation returns.
+  IREE_HAL_STREAMING_GRAPH_NODE_FLAG_VALIDATING_DEPENDENCY = 1u << 2,
 } iree_hal_streaming_graph_node_flag_bits_t;
 
 // Returns true if the node type can be recorded into a command buffer.
