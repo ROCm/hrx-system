@@ -35,6 +35,7 @@ class DmaQueuesTest : public ::testing::Test {
     pools_[0] = &tiles_[1];
     context_.pool_tiles = pools_;
     context_.workers = workers_;
+    context_.core_engines = core_engines_;
     context_.dma_queue_count = 6;
     realization_.invocations.workers = ownership_;
     realization_.invocations.worker_count = IREE_ARRAYSIZE(workers_);
@@ -83,8 +84,8 @@ class DmaQueuesTest : public ::testing::Test {
   }
   void Assign() {
     std::vector<iree_host_size_t> distributions;
-    for (size_t i = 0; i < IREE_ARRAYSIZE(workers_); ++i) {
-      if (workers_[i].distribution_plan) {
+    for (size_t i = 0; i < realization_.invocations.worker_count; ++i) {
+      if (context_.workers[i].distribution_plan) {
         distributions.push_back(i);
       }
     }
@@ -115,6 +116,8 @@ class DmaQueuesTest : public ::testing::Test {
   loom_pipeline_invocation_worker_t ownership_[3] = {};
   // Native requests in root, first child, and second child order.
   loom_aie2p_native_worker_t workers_[3] = {};
+  // Physical command sources for the three worker occurrences.
+  iree_host_size_t core_engines_[3] = {2, 3, 4};
   // Root's ordinary shim/local endpoint pair.
   loom_aie2p_native_dma_path_t ordinary_ = {};
   // Logical multicast geometries sharing one physical demand.
@@ -239,6 +242,183 @@ TEST_F(DmaQueuesTest, TokenFreeUsersDoNotChangeCompletionDestination) {
   EXPECT_FALSE(tiles_[0].dma_controls[1][1].dynamic);
   EXPECT_EQ(tiles_[0].dma_controls[1][0].controller, UINT8_MAX);
   EXPECT_EQ(tiles_[1].dma_controls[0][1].controller, UINT8_MAX);
+}
+
+TEST_F(DmaQueuesTest, ShimOverflowPreservesCompleteSerialLifetimeClasses) {
+  for (bool ingress : {false, true}) {
+    for (uint16_t column : {0, 3, 7}) {
+      const size_t tile_index = column * context_.family->row_count;
+      const uint16_t neighboring_column = column ? column - 1 : 1;
+      const size_t neighbor = neighboring_column * context_.family->row_count;
+      loom_aie2p_native_dma_path_t paths[4] = {};
+      for (size_t i = 0; i < IREE_ARRAYSIZE(workers_); ++i) {
+        workers_[i] = {};
+      }
+      for (auto& path : paths) {
+        path.local = &tiles_[tile_index + 1];
+        path.shim = &tiles_[tile_index];
+        path.ingress = ingress;
+      }
+      // The root has two independent local endpoints. Its two shim queues
+      // coexist with either serial child, whose shared third queue must move.
+      paths[1].local = &tiles_[tile_index + 2];
+      paths[0].next_demand = &paths[1];
+      workers_[0].transfer_paths = paths;
+      workers_[1].transfer_paths = &paths[2];
+      workers_[2].transfer_paths = &paths[3];
+      context_.dma_queue_count = 8;
+      Assign();
+      EXPECT_EQ(paths[0].shim, &tiles_[tile_index]);
+      EXPECT_EQ(paths[1].shim, &tiles_[tile_index]);
+      EXPECT_EQ(paths[0].shim_engine, 0);
+      EXPECT_EQ(paths[1].shim_engine, 1);
+      EXPECT_EQ(paths[2].shim, &tiles_[neighbor]);
+      EXPECT_EQ(paths[3].shim, paths[2].shim);
+      EXPECT_EQ(paths[2].shim_engine, 0);
+      EXPECT_EQ(paths[3].shim_engine, paths[2].shim_engine);
+      EXPECT_EQ(paths[2].local_engine, paths[3].local_engine);
+      EXPECT_EQ(
+          ingress ? tiles_[neighbor].mm2s_count : tiles_[neighbor].s2mm_count,
+          1);
+    }
+  }
+}
+
+TEST_F(DmaQueuesTest, OrdinaryAndPhasedIngressShareRelocatedSerialQueue) {
+  loom_aie2p_native_dma_path_t extra = ordinary_;
+  extra.local = &tiles_[2];
+  ordinary_.next_demand = &extra;
+  loom_aie2p_native_dma_path_t child = ordinary_;
+  child.next_demand = nullptr;
+  workers_[1] = {};
+  workers_[1].transfer_paths = &child;
+  context_.dma_queue_count = 8;
+  Assign();
+  const size_t neighbor = context_.family->row_count;
+  EXPECT_EQ(ordinary_.shim, &tiles_[0]);
+  EXPECT_EQ(extra.shim, &tiles_[0]);
+  EXPECT_EQ(child.shim, &tiles_[neighbor]);
+  EXPECT_EQ(input_path_.shim, child.shim);
+  EXPECT_EQ(input_path_.input_engine, child.shim_engine);
+  EXPECT_EQ(tiles_[neighbor].mm2s_count, 1);
+  EXPECT_EQ(phases_[0].receiver.engine, child.local_engine);
+  EXPECT_EQ(phases_[1].receiver.engine, child.local_engine);
+}
+
+TEST_F(DmaQueuesTest, ConcurrentShimOverflowKeepsIndependentQueues) {
+  nodes_[2].kind = LOOM_PIPELINE_LIFETIME_CONCURRENT;
+  realization_.invocations.lifetimes.has_serial = false;
+  loom_aie2p_native_dma_path_t paths[4] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(workers_); ++i) {
+    workers_[i] = {};
+  }
+  for (auto& path : paths) {
+    path.local = &tiles_[1];
+    path.shim = &tiles_[0];
+  }
+  paths[1].local = &tiles_[2];
+  paths[0].next_demand = &paths[1];
+  workers_[0].transfer_paths = paths;
+  workers_[1].transfer_paths = &paths[2];
+  workers_[2].transfer_paths = &paths[3];
+  context_.dma_queue_count = 8;
+  Assign();
+  const size_t neighbor = context_.family->row_count;
+  EXPECT_EQ(paths[2].shim, &tiles_[neighbor]);
+  EXPECT_EQ(paths[3].shim, paths[2].shim);
+  EXPECT_NE(paths[2].shim_engine, paths[3].shim_engine);
+  EXPECT_EQ(tiles_[neighbor].s2mm_count, 2);
+}
+
+TEST_F(DmaQueuesTest, OverflowPreservesPreferredQueuesInOtherColumns) {
+  const size_t neighbor = context_.family->row_count;
+  loom_aie2p_native_dma_path_t paths[4] = {};
+  for (auto& worker : workers_) {
+    worker = {};
+  }
+  for (size_t i = 0; i < IREE_ARRAYSIZE(paths); ++i) {
+    paths[i].local = &tiles_[i + 2];
+    paths[i].shim = &tiles_[i == 3 ? neighbor : 0];
+    if (i + 1 < IREE_ARRAYSIZE(paths)) {
+      paths[i].next_demand = &paths[i + 1];
+    }
+  }
+  workers_[0].transfer_paths = paths;
+  context_.dma_queue_count = 8;
+  Assign();
+  // Column one's preferred demand is reserved before placing column zero's
+  // third queue. Earlier overflow cannot displace a later preferred request.
+  EXPECT_EQ(paths[3].shim, &tiles_[neighbor]);
+  EXPECT_EQ(paths[3].shim_engine, 0);
+  EXPECT_EQ(paths[2].shim, &tiles_[neighbor]);
+  EXPECT_EQ(paths[2].shim_engine, 1);
+  EXPECT_EQ(tiles_[neighbor].s2mm_count, 2);
+}
+
+TEST_F(DmaQueuesTest, OverflowAccountsForIndependentCommandSources) {
+  for (uint16_t column : {0, 3, 7}) {
+    SCOPED_TRACE(column);
+    const uint16_t neighbor = column ? column - 1 : 1;
+    const uint16_t farther = column == 7 ? 5 : column ? column + 1 : 2;
+    const size_t rows = context_.family->row_count;
+    loom_aie2p_native_worker_t workers[5] = {};
+    loom_pipeline_invocation_worker_t ownership[5] = {};
+    loom_aie2p_native_dma_path_t paths[5] = {};
+    iree_host_size_t cores[5];
+    for (size_t i = 0; i < IREE_ARRAYSIZE(workers); ++i) {
+      const size_t local = i < 4 ? column * rows + i + 2 : neighbor * rows + 2;
+      cores[i] = local;
+      ownership[i].invocation = &invocations_[0];
+      workers[i].transfer_paths = &paths[i];
+      paths[i].local = &tiles_[local];
+      paths[i].shim = &tiles_[(i < 4 ? column : neighbor) * rows];
+      paths[i].ingress = i == 4;
+    }
+    context_.workers = workers;
+    context_.core_engines = cores;
+    context_.dma_queue_count = 10;
+    realization_.invocations.workers = ownership;
+    realization_.invocations.worker_count = IREE_ARRAYSIZE(workers);
+    Assign();
+    EXPECT_EQ(paths[0].shim->coordinate.column, column);
+    EXPECT_EQ(paths[1].shim->coordinate.column, column);
+    EXPECT_EQ(paths[2].shim->coordinate.column, neighbor);
+    // Two relocated outputs plus their controls and the independent input
+    // controller would need five southbound lanes. Only the last queue moves
+    // farther; the neighbor's preferred input assignment stays in place.
+    EXPECT_EQ(paths[3].shim->coordinate.column, farther);
+    EXPECT_EQ(paths[4].shim->coordinate.column, neighbor);
+    EXPECT_EQ(tiles_[neighbor * rows].s2mm_count, 1);
+    EXPECT_EQ(tiles_[farther * rows].s2mm_count, 1);
+  }
+}
+
+TEST_F(DmaQueuesTest, SharedQueueRetainsEverySerialCommandSource) {
+  const size_t rows = context_.family->row_count;
+  loom_aie2p_native_dma_path_t paths[5] = {};
+  for (auto& worker : workers_) {
+    worker = {};
+  }
+  for (size_t i = 0; i < IREE_ARRAYSIZE(paths); ++i) {
+    paths[i].local = &tiles_[2];
+    paths[i].shim = &tiles_[0];
+  }
+  paths[0].local = &tiles_[1];
+  paths[0].next_demand = &paths[1];
+  paths[1].next_demand = &paths[2];
+  paths[2].local = &tiles_[rows + 2];
+  paths[2].shim = &tiles_[rows];
+  workers_[0].transfer_paths = paths;
+  workers_[1].transfer_paths = &paths[3];
+  workers_[2].transfer_paths = &paths[4];
+  context_.dma_queue_count = 10;
+  Assign();
+  // The nearest column has a parent output and its controller. Both serial
+  // children need immutable control routes, even though they share one queue.
+  EXPECT_EQ(paths[2].shim, &tiles_[rows]);
+  EXPECT_EQ(paths[3].shim, &tiles_[2 * rows]);
+  EXPECT_EQ(paths[4].shim, paths[3].shim);
+  EXPECT_EQ(paths[4].shim_engine, paths[3].shim_engine);
 }
 
 }  // namespace

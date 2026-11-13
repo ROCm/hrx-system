@@ -55,11 +55,12 @@ static iree_status_t loom_pipeline_transport_cohorts(
     const loom_pipeline_transport_cohort_t** out_cohorts,
     iree_host_size_t* out_cohort_count,
     const loom_pipeline_transport_copy_t** out_copies,
-    iree_host_size_t* out_copy_count) {
+    iree_host_size_t* out_copy_count, bool* out_serial_records) {
   *out_cohorts = NULL;
   *out_cohort_count = 0;
   *out_copies = NULL;
   *out_copy_count = 0;
+  *out_serial_records = true;
   const loom_channel_plan_t* plan = &worker->channels;
   if (!plan->action_count) {
     return iree_ok_status();
@@ -122,9 +123,14 @@ static iree_status_t loom_pipeline_transport_cohorts(
   // A common source site alone does not establish one dynamic record: copies
   // must stay in its admission scope or in nested replay loops, with final
   // release back in that same admission scope.
+  uint32_t admitted_records = 0;
   for (iree_host_size_t i = 0; i < step_count; ++i) {
     const loom_channel_plan_action_t* action = steps[i].source.channel;
     const loom_op_t* op = action->op;
+    if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE ||
+        action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACCEPT) {
+      ++admitted_records;
+    }
     const bool release = action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE;
     if (!release && action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_COPY) {
       continue;
@@ -137,6 +143,9 @@ static iree_status_t loom_pipeline_transport_cohorts(
     }
     const uint32_t index = cohort_indices[loom_local_value_domain_ordinal(
         plan->value_domain, source_admission)];
+    // A later admission cannot be moved past an earlier record's final copy.
+    // Retain that ordering fact while the owning traversal sees both actions.
+    *out_serial_records &= index + 1 == admitted_records;
     loom_pipeline_transport_cohort_t* cohort = &cohorts[index];
     const uint16_t block = op->parent_block->region_index;
     const uint16_t admission_loop = cohort->admission_scope;
@@ -350,6 +359,70 @@ static iree_status_t loom_pipeline_transport_batches(
   return iree_ok_status();
 }
 
+// Retains the cycle containing all independently reclaimed source records.
+// The common loop only moves outward while visiting admissions, so the work is
+// linear in the admitted sites and loop depth. Fixed destination streams need
+// no additional representation beyond their existing uniform batches.
+static iree_status_t loom_pipeline_transport_copy_stream(
+    const loom_cfg_loop_nest_t* loops, const uint64_t* trip_counts,
+    const loom_pipeline_transport_cohort_t* cohorts, iree_host_size_t count,
+    const loom_pipeline_transport_copy_t* copies, iree_host_size_t copy_count,
+    bool nonuniform_copies, iree_arena_allocator_t* arena,
+    const loom_pipeline_transport_copy_stream_t** out_stream) {
+  const loom_pipeline_transport_cohort_t* first = cohorts;
+  uint16_t scope = first->admission_scope;
+  bool varying = nonuniform_copies;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_pipeline_transport_cohort_t* record = &cohorts[i];
+    if (record->admission->channel != first->admission->channel ||
+        record->admission->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE ||
+        record->release || record->transfers != record->admissions ||
+        record->copy_scope != record->admission_scope) {
+      return iree_ok_status();
+    }
+    while (
+        scope != LOOM_CFG_LOOP_NEST_NONE &&
+        !loom_cfg_loop_nest_contains(
+            loops, scope, record->admission->op->parent_block->region_index)) {
+      scope = loops->loops[scope].parent_loop_index;
+    }
+    varying |= record->destination_count != first->destination_count;
+    for (iree_host_size_t j = 0; !varying && j < record->destination_count;
+         ++j) {
+      varying |=
+          record->destinations[j].channel != first->destinations[j].channel;
+    }
+  }
+  if (!varying) {
+    return iree_ok_status();
+  }
+  uint64_t repetitions = 1;
+  for (uint16_t loop = scope; loop != LOOM_CFG_LOOP_NEST_NONE;
+       loop = loops->loops[loop].parent_loop_index) {
+    repetitions *= trip_counts[loop];
+  }
+  uint64_t records = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const uint64_t contribution = cohorts[i].admissions / repetitions;
+    if (contribution > UINT64_MAX - records) {
+      return iree_ok_status();
+    }
+    records += contribution;
+  }
+  loom_pipeline_transport_copy_stream_t* stream;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, sizeof(*stream), (void**)&stream));
+  *stream = (loom_pipeline_transport_copy_stream_t){
+      .source = first->admission->channel,
+      .copies = copies,
+      .copy_count = copy_count,
+      .records = records,
+      .repetitions = repetitions,
+      .scope = scope};
+  *out_stream = stream;
+  return iree_ok_status();
+}
+
 static uint64_t loom_pipeline_transport_prefix_cycles(
     const loom_cfg_loop_nest_t* loops,
     const loom_pipeline_transport_batch_t* batches, iree_host_size_t count) {
@@ -420,15 +493,16 @@ static iree_status_t loom_pipeline_transport_copy_loops(
   return iree_ok_status();
 }
 
-iree_status_t loom_pipeline_transport_copy_cursor_initialize(
+static iree_status_t loom_pipeline_transport_cursor_initialize(
     const loom_pipeline_transport_t* transport,
-    const loom_pipeline_transport_batch_t* batch, iree_arena_allocator_t* arena,
+    const loom_pipeline_transport_copy_t* copies, iree_host_size_t copy_count,
+    uint16_t scope, iree_arena_allocator_t* arena,
     loom_pipeline_transport_copy_cursor_t* out_cursor) {
-  *out_cursor = (loom_pipeline_transport_copy_cursor_t){
-      .next = batch->copies,
-      .end = batch->copies + batch->copy_count,
-      .loops = transport->copy_loops,
-      .scope = batch->records->admission_scope};
+  *out_cursor =
+      (loom_pipeline_transport_copy_cursor_t){.next = copies,
+                                              .end = copies + copy_count,
+                                              .loops = transport->copy_loops,
+                                              .scope = scope};
   if (transport->copy_loop_count) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, transport->copy_loop_count, sizeof(*out_cursor->remaining),
@@ -438,6 +512,24 @@ iree_status_t loom_pipeline_transport_copy_cursor_initialize(
     }
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_pipeline_transport_copy_cursor_initialize(
+    const loom_pipeline_transport_t* transport,
+    const loom_pipeline_transport_batch_t* batch, iree_arena_allocator_t* arena,
+    loom_pipeline_transport_copy_cursor_t* out_cursor) {
+  return loom_pipeline_transport_cursor_initialize(
+      transport, batch->copies, batch->copy_count,
+      batch->records->admission_scope, arena, out_cursor);
+}
+
+iree_status_t loom_pipeline_transport_stream_cursor_initialize(
+    const loom_pipeline_transport_t* transport, iree_arena_allocator_t* arena,
+    loom_pipeline_transport_copy_cursor_t* out_cursor) {
+  const loom_pipeline_transport_copy_stream_t* stream = transport->copy_stream;
+  return loom_pipeline_transport_cursor_initialize(
+      transport, stream->copies, stream->copy_count, stream->scope, arena,
+      out_cursor);
 }
 
 const loom_pipeline_transport_copy_t* loom_pipeline_transport_copy_cursor_next(
@@ -843,10 +935,11 @@ static iree_status_t loom_pipeline_worker_transport(
   iree_host_size_t cohort_count = 0;
   const loom_pipeline_transport_copy_t* copies = NULL;
   iree_host_size_t copy_count = 0;
+  bool serial_records = false;
   if (!stream_count) {
     IREE_RETURN_IF_ERROR(loom_pipeline_transport_cohorts(
         module, arena, structure, worker, steps, count, &cohorts, &cohort_count,
-        &copies, &copy_count));
+        &copies, &copy_count, &serial_records));
     if (!cohort_count) {
       return iree_ok_status();
     }
@@ -861,16 +954,23 @@ static iree_status_t loom_pipeline_worker_transport(
       return iree_ok_status();
     }
   }
+  const loom_pipeline_transport_copy_stream_t* copy_stream = NULL;
+  bool nonuniform_copies = false;
+  for (iree_host_size_t i = 0; i < batch_count; ++i) {
+    nonuniform_copies |= !batches[i].replays;
+  }
+  if (serial_records && (batch_count > 1 || nonuniform_copies)) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_stream(
+        &structure->loops, worker->loop_trip_counts, cohorts, cohort_count,
+        copies, copy_count, nonuniform_copies, arena, &copy_stream));
+  }
   const loom_pipeline_transport_loop_t* copy_loops = NULL;
   iree_host_size_t copy_loop_count = 0;
-  for (iree_host_size_t i = 0; i < batch_count; ++i) {
-    if (!batches[i].replays && structure->loops.loop_count) {
-      IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_loops(
-          &structure->loops, worker->loop_trip_counts, copies, copy_count,
-          arena, &copy_loops));
-      copy_loop_count = structure->loops.loop_count;
-      break;
-    }
+  if ((copy_stream || nonuniform_copies) && structure->loops.loop_count) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_loops(
+        &structure->loops, worker->loop_trip_counts, copies, copy_count, arena,
+        &copy_loops));
+    copy_loop_count = structure->loops.loop_count;
   }
   worker->transport = (loom_pipeline_transport_t){
       .steps = steps,
@@ -881,6 +981,7 @@ static iree_status_t loom_pipeline_worker_transport(
       .cohort_count = cohort_count,
       .batches = batches,
       .batch_count = batch_count,
+      .copy_stream = copy_stream,
       .prefix_cycles = loom_pipeline_transport_prefix_cycles(
           &structure->loops, batches, batch_count),
       .copy_loops = copy_loops,

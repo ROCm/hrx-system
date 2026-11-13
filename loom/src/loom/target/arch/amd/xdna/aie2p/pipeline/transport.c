@@ -1161,7 +1161,8 @@ iree_status_t loom_aie2p_native_select_transfers(
     const loom_pipeline_transport_t* transport =
         &realization->workers[i].transport;
     for (iree_host_size_t j = 0; j < transport->batch_count; ++j) {
-      owner->distribution_packets |= transport->batches[j].replays == 0;
+      owner->distribution_packets |=
+          transport->copy_stream != NULL || transport->batches[j].replays == 0;
     }
   }
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && valid &&
@@ -1170,7 +1171,7 @@ iree_status_t loom_aie2p_native_select_transfers(
     const loom_pipeline_transport_t* transport =
         &realization->workers[i].transport;
     for (iree_host_size_t j = 0; j < transport->batch_count; ++j) {
-      if (transport->batches[j].records->release) {
+      if (transport->copy_stream || transport->batches[j].records->release) {
         status = loom_aie2p_native_form_worker_distributions(
             context, realization, i, &valid);
         distribution_order[distribution_count++] = i;

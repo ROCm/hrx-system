@@ -1,0 +1,145 @@
+// Four cores in one column each own independent ingress and egress. Two shim
+// queues per direction require the other two paths to use a neighboring column.
+// Three changing records exercise wraparound in each two-slot ring.
+aie2p.target<array> @array_target
+
+func.def inline @make_records(%pool: pool) -> (channel<tile<16xi32>>) {
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 128 : offset
+  %capacity = index.constant 2 : index
+  %storage = buffer.alloca<workgroup> pool(%pool) align(64) %storage_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  func.return %records : channel<tile<16xi32>>
+}
+
+func.def inline @roundtrip(%records: channel<tile<16xi32>>, %input: buffer, %output: buffer, %worker: index) {
+  %begin = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : offset
+  %base = index.mul %worker, %end : index
+  %tag_index = index.add %worker, %step : index
+  %tag = index.cast %tag_index : index to i32
+  %increments = vector.splat %tag : vector<16xi32>
+  scf.for %record = [%begin to %end step %step] {
+    %position = index.add %base, %record : index
+    %offset = index.scale %position, %record_bytes : index, offset -> offset
+    %external_input = buffer.view %input[%offset] : buffer -> view<16xi32>
+    %external_output = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %write, %payload = channel.reserve %records : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %ingress = kernel.async.copy %external_input to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %arrival = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+    %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+    %results = vector.addi %values, %increments : vector<16xi32>
+    vector.store %results, %payload[0] : vector<16xi32>, view<16xi32>
+    channel.publish %write : write<tile<16xi32>>
+    %read, %source = channel.acquire %records : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %egress = kernel.async.copy %source to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %departure = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>>
+  }
+  func.return
+}
+
+pipeline.def<kernel> @four_transfers() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %pool0 = pipeline.memory<workgroup>[0, 2] : pool
+  %pool1 = pipeline.memory<workgroup>[0, 3] : pool
+  %pool2 = pipeline.memory<workgroup>[0, 4] : pool
+  %pool3 = pipeline.memory<workgroup>[0, 5] : pool
+  %records0 = func.call @make_records(%pool0) : (pool) -> (channel<tile<16xi32>>)
+  %records1 = func.call @make_records(%pool1) : (pool) -> (channel<tile<16xi32>>)
+  %records2 = func.call @make_records(%pool2) : (pool) -> (channel<tile<16xi32>>)
+  %records3 = func.call @make_records(%pool3) : (pool) -> (channel<tile<16xi32>>)
+  %worker0 = index.constant 0 : index
+  %worker1 = index.constant 1 : index
+  %worker2 = index.constant 2 : index
+  %worker3 = index.constant 3 : index
+  pipeline.concurrent {
+    pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+      func.call @roundtrip(%records0, %input, %output, %worker0) : (channel<tile<16xi32>>, buffer, buffer, index)
+    }
+    pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+      func.call @roundtrip(%records1, %input, %output, %worker1) : (channel<tile<16xi32>>, buffer, buffer, index)
+    }
+    pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+      func.call @roundtrip(%records2, %input, %output, %worker2) : (channel<tile<16xi32>>, buffer, buffer, index)
+    }
+    pipeline.strand workers([0, 5], [1, 1], [1, 1]) {
+      func.call @roundtrip(%records3, %input, %output, %worker3) : (channel<tile<16xi32>>, buffer, buffer, index)
+    }
+  }
+}
+
+pipeline.def<kernel> public retain target(@array_target) @spread_dma() run(%input: buffer, %output: buffer) {
+  pipeline.compose @four_transfers(%input, %output) : (buffer, buffer)
+}
+
+pipeline.def<kernel> public retain target(@array_target) @spread_dma_phases() run(%input: buffer, %intermediate: buffer, %output: buffer) {
+  pipeline.serial {
+    pipeline.compose @four_transfers(%input, %intermediate) : (buffer, buffer)
+    pipeline.compose @four_transfers(%intermediate, %output) : (buffer, buffer)
+  }
+}
+
+func.def @reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %input_values = buffer.view %input[%origin] : buffer -> view<192xi32>
+  %output_values = buffer.view %output[%origin] : buffer -> view<192xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 192 : index
+  %step = index.constant 1 : index
+  %worker_elements = index.constant 48 : index
+  scf.for %position = [%begin to %end step %step] {
+    %worker = index.div %position, %worker_elements : index
+    %tag_index = index.add %worker, %step : index
+    %tag = index.cast %tag_index : index to i32
+    %value = view.load %input_values[%position] : view<192xi32> -> i32
+    %result = scalar.addi %value, %tag : i32
+    view.store %result, %output_values[%position] : i32, view<192xi32>
+  }
+  func.return
+}
+
+func.def @phased_reference(%input: buffer, %intermediate: buffer, %output: buffer) {
+  func.call @reference(%input, %intermediate) : (buffer, buffer)
+  func.call @reference(%intermediate, %output) : (buffer, buffer)
+  func.return
+}
+
+check.scenario public @neighboring_shim_transfers {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<224xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<224xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<224xi32> -> tensor<192xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<224xi32> -> tensor<192xi32>
+    check.compare<@spread_dma, @reference>(%input, %output) : (tensor<192xi32>, tensor<192xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<224xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<224xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @neighboring_shim_phases {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<224xi32>
+    %intermediate_storage = check.generate.fill value(-8888) : tensor<224xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<224xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<224xi32> -> tensor<192xi32>
+    %intermediate = check.tensor.view %intermediate_storage offset(64) : tensor<224xi32> -> tensor<192xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<224xi32> -> tensor<192xi32>
+    check.compare<@spread_dma_phases, @phased_reference>(%input, %intermediate, %output) : (tensor<192xi32>, tensor<192xi32>, tensor<192xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<224xi32>
+      check.expect.equal actual(%intermediate_storage) expected(%intermediate_storage) : tensor<224xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<224xi32>
+    }
+  }
+  check.return
+}

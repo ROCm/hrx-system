@@ -904,6 +904,8 @@ static iree_status_t loom_aie2p_native_select(
          (context->workers[channel->cursor.writer.worker].execution !=
               LOOM_AIE2P_NATIVE_EXECUTION_DMA &&
           context->workers[channel->cursor.writer.worker].execution !=
+              LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION &&
+          context->workers[channel->cursor.writer.worker].execution !=
               LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION &&
           !(context->workers[channel->cursor.writer.worker].execution ==
                 LOOM_AIE2P_NATIVE_EXECUTION_INPUT &&

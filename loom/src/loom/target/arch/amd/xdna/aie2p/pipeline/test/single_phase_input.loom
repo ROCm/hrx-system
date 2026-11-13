@@ -1,0 +1,223 @@
+// Serial children share receiver storage while reading distinct immutable
+// bindings. Every entry starts fresh DMA iterators and retires both queues
+// before the next child can reuse that storage. SRAM admission has no core
+// reader and uses a single slot; repeated direct input follows the consumer's
+// progress and leaves its four-slot ring partway through a turn on return.
+aie2p.target<array> @device
+
+func.def inline @consume(%channel: channel<tile<16xi32>>, %output: buffer, %epoch: index, %records: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : offset
+  %epoch_value = index.cast %epoch : index to i32
+  %bias = vector.splat %epoch_value : vector<16xi32>
+  %base = index.mul %epoch, %records : index
+  scf.for %record = [%begin to %records step %step] {
+    %read, %payload = channel.acquire<mutable> %channel : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+    %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+    %result = vector.addi %values, %bias : vector<16xi32>
+    vector.store %result, %payload[0] : vector<16xi32>, view<16xi32>
+    %position = index.add %base, %record : index
+    %offset = index.scale %position, %record_bytes : index, offset -> offset
+    %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>, mutable>
+  }
+  func.return
+}
+
+func.def inline @stage_input(%input: buffer, %channel: channel<tile<16xi32>>, %records: index, %period: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %source_stride = index.constant 128 : offset
+  scf.for %record = [%begin to %records step %step] {
+    %panel = index.rem %record, %period : index
+    %offset = index.scale %panel, %source_stride : index, offset -> offset
+    %external = buffer.view %input[%offset] : buffer -> view<2x8xi32, #encoding.layout.strided<strides=[12, 1]>>
+    %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<2x8xi32, #encoding.layout.strided<strides=[12, 1]>> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<16xi32>>
+  }
+  func.return
+}
+
+pipeline.def @phase_sram(%records: index, %period: index) run(%input: buffer, %output: buffer, %storage: buffer, %local_storage: buffer, %epoch: index) {
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %source = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %local_slots = buffer.view %local_storage[%origin] : buffer -> view<1x16xi32>
+  %local = channel.bind<fifo> %local_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @stage_input(%input, %source, %records, %period) : (buffer, channel<tile<16xi32>>, index, index)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %local : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @consume(%local, %output, %epoch, %records) : (channel<tile<16xi32>>, buffer, index, index)
+  }
+}
+
+pipeline.def<kernel> @children_sram(%records: index, %period: index) run(%first_arg: buffer, %second_arg: buffer, %output_arg: buffer) {
+  %first_unique, %second_unique, %output_unique = buffer.assume.noalias %first_arg, %second_arg, %output_arg : buffer, buffer, buffer
+  %first, %second, %output = buffer.assume.alignment %first_unique, %second_unique, %output_unique {minimum_alignment = 64} : buffer, buffer, buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %visits = index.constant 3 : index
+  %children_per_visit = index.constant 2 : index
+  %source_pool = pipeline.memory<workgroup>[0, 1] : pool
+  %storage_bytes = index.constant 64 : offset
+  %storage = buffer.alloca<workgroup> pool(%source_pool) align(64) %storage_bytes : buffer
+  %core = pipeline.memory<workgroup>[0, 2] : pool
+  %local_storage = buffer.alloca<workgroup> pool(%core) align(64) %storage_bytes : buffer
+  pipeline.serial {
+    scf.for %visit = [%begin to %visits step %step] {
+      %first_epoch = index.mul %visit, %children_per_visit : index
+      %second_epoch = index.add %first_epoch, %step : index
+      pipeline.compose @phase_sram[%records, %period](%first, %output, %storage, %local_storage, %first_epoch) : [index, index](buffer, buffer, buffer, buffer, index)
+      pipeline.compose @phase_sram[%records, %period](%second, %output, %storage, %local_storage, %second_epoch) : [index, index](buffer, buffer, buffer, buffer, index)
+    }
+  }
+}
+
+pipeline.def @phase_core(%records: index, %period: index) run(%input: buffer, %output: buffer, %storage: buffer, %epoch: index) {
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 4 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<4x16xi32>
+  %source = channel.bind<fifo> %slots, %capacity : view<4x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @stage_input(%input, %source, %records, %period) : (buffer, channel<tile<16xi32>>, index, index)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @consume(%source, %output, %epoch, %records) : (channel<tile<16xi32>>, buffer, index, index)
+  }
+}
+
+pipeline.def<kernel> @children_core(%records: index, %period: index) run(%first_arg: buffer, %second_arg: buffer, %output_arg: buffer) {
+  %first_unique, %second_unique, %output_unique = buffer.assume.noalias %first_arg, %second_arg, %output_arg : buffer, buffer, buffer
+  %first, %second, %output = buffer.assume.alignment %first_unique, %second_unique, %output_unique {minimum_alignment = 64} : buffer, buffer, buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %visits = index.constant 3 : index
+  %children_per_visit = index.constant 2 : index
+  %source_pool = pipeline.memory<workgroup>[0, 2] : pool
+  %storage_bytes = index.constant 256 : offset
+  %storage = buffer.alloca<workgroup> pool(%source_pool) align(64) %storage_bytes : buffer
+  pipeline.serial {
+    scf.for %visit = [%begin to %visits step %step] {
+      %first_epoch = index.mul %visit, %children_per_visit : index
+      %second_epoch = index.add %first_epoch, %step : index
+      pipeline.compose @phase_core[%records, %period](%first, %output, %storage, %first_epoch) : [index, index](buffer, buffer, buffer, index)
+      pipeline.compose @phase_core[%records, %period](%second, %output, %storage, %second_epoch) : [index, index](buffer, buffer, buffer, index)
+    }
+  }
+}
+
+// Scalar coordinates do not depend on channel cursors, receiver storage, or
+// DMA descriptor repetition. Output bias also proves which child completed.
+func.def inline @reference(%first: buffer, %second: buffer, %output: buffer, %records: index, %period: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 6 : index
+  %bindings = index.constant 2 : index
+  %rows = index.constant 2 : index
+  %columns = index.constant 8 : index
+  %source_stride = index.constant 128 : offset
+  %record_bytes = index.constant 64 : offset
+  scf.for %epoch = [%begin to %epochs step %step] {
+    %binding = index.rem %epoch, %bindings : index
+    %is_first = index.cmp eq, %binding, %begin : index
+    %input = scf.select %is_first, %first, %second : buffer
+    %bias = index.cast %epoch : index to i32
+    %base = index.mul %epoch, %records : index
+    scf.for %record = [%begin to %records step %step] {
+      %panel = index.rem %record, %period : index
+      %input_offset = index.scale %panel, %source_stride : index, offset -> offset
+      %position = index.add %base, %record : index
+      %output_offset = index.scale %position, %record_bytes : index, offset -> offset
+      %source = buffer.view %input[%input_offset] : buffer -> view<2x8xi32, #encoding.layout.strided<strides=[12, 1]>>
+      %destination = buffer.view %output[%output_offset] : buffer -> view<2x8xi32>
+      scf.for %row = [%begin to %rows step %step] {
+        scf.for %column = [%begin to %columns step %step] {
+          %value = view.load %source[%row, %column] : view<2x8xi32, #encoding.layout.strided<strides=[12, 1]>> -> i32
+          %result = scalar.addi %value, %bias : i32
+          view.store %result, %destination[%row, %column] : i32, view<2x8xi32>
+        }
+      }
+    }
+  }
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @finite_sram() run(%first: buffer, %second: buffer, %output: buffer) {
+  %records = index.constant 257 : index
+  %period = index.constant 257 : index
+  pipeline.compose @children_sram[%records, %period](%first, %second, %output) : [index, index](buffer, buffer, buffer)
+}
+
+func.def @finite_sram_reference(%first: buffer, %second: buffer, %output: buffer) {
+  %records = index.constant 257 : index
+  %period = index.constant 257 : index
+  func.call @reference(%first, %second, %output, %records, %period) : (buffer, buffer, buffer, index, index)
+  func.return
+}
+
+check.scenario public @finite_sram_reentry {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %first_storage = check.generate.random.uniform seed(%seed) range(-1000 to -1) : tensor<8244xi32>
+    %second_storage = check.generate.random.uniform seed(%seed) range(1 to 1000) : tensor<8244xi32>
+    %first = check.tensor.view %first_storage offset(64) : tensor<8244xi32> -> tensor<8212xi32>
+    %second = check.tensor.view %second_storage offset(64) : tensor<8244xi32> -> tensor<8212xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<24704xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<24704xi32> -> tensor<24672xi32>
+    check.compare<@finite_sram, @finite_sram_reference>(%first, %second, %output) : (tensor<8212xi32>, tensor<8212xi32>, tensor<24672xi32>) -> () {
+      check.expect.equal actual(%first_storage) expected(%first_storage) : tensor<8244xi32>
+      check.expect.equal actual(%second_storage) expected(%second_storage) : tensor<8244xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<24704xi32>
+    }
+  }
+  check.return
+}
+
+pipeline.def<kernel> public retain target(@device) @cyclic_core() run(%first: buffer, %second: buffer, %output: buffer) {
+  %records = index.constant 1026 : index
+  %period = index.constant 2 : index
+  pipeline.compose @children_core[%records, %period](%first, %second, %output) : [index, index](buffer, buffer, buffer)
+}
+
+func.def @cyclic_core_reference(%first: buffer, %second: buffer, %output: buffer) {
+  %records = index.constant 1026 : index
+  %period = index.constant 2 : index
+  func.call @reference(%first, %second, %output, %records, %period) : (buffer, buffer, buffer, index, index)
+  func.return
+}
+
+check.scenario public @cyclic_core_reentry {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %first_storage = check.generate.random.uniform seed(%seed) range(-1000 to -1) : tensor<84xi32>
+    %second_storage = check.generate.random.uniform seed(%seed) range(1 to 1000) : tensor<84xi32>
+    %first = check.tensor.view %first_storage offset(64) : tensor<84xi32> -> tensor<52xi32>
+    %second = check.tensor.view %second_storage offset(64) : tensor<84xi32> -> tensor<52xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<98528xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<98528xi32> -> tensor<98496xi32>
+    check.compare<@cyclic_core, @cyclic_core_reference>(%first, %second, %output) : (tensor<52xi32>, tensor<52xi32>, tensor<98496xi32>) -> () {
+      check.expect.equal actual(%first_storage) expected(%first_storage) : tensor<84xi32>
+      check.expect.equal actual(%second_storage) expected(%second_storage) : tensor<84xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<98528xi32>
+    }
+  }
+  check.return
+}

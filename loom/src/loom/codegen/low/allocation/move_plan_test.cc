@@ -383,7 +383,7 @@ TEST_F(LowAllocationMovePlanTest, CycleScratchHonorsSparseAndReservedStorage) {
         iree_string_view_equal(name, IREE_SV("test.f32"))
             ? LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID
             : LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-    const loom_low_allocation_budget_t budget = {name, 3};
+    const loom_low_allocation_budget_t budget = {name, 4};
     const loom_liveness_segment_t segments[] = {{0, 2}, {4, 6}};
     uint32_t start = 0;
     uint32_t end = 6;
@@ -428,7 +428,7 @@ TEST_F(LowAllocationMovePlanTest, CycleScratchHonorsSparseAndReservedStorage) {
         };
         loom_low_allocation_move_plan_t plan = {};
         IREE_ASSERT_OK(loom_low_allocation_move_plan_initialize(
-            &context, /*move_input_capacity=*/2, /*raw_group_capacity=*/2,
+            &context, /*move_input_capacity=*/3, /*raw_group_capacity=*/3,
             &arena_, &scratch_, &plan));
         const loom_low_move_location_t lhs = {
             static_cast<uint16_t>(location_kind), register_class, 0};
@@ -436,9 +436,17 @@ TEST_F(LowAllocationMovePlanTest, CycleScratchHonorsSparseAndReservedStorage) {
             static_cast<uint16_t>(location_kind), register_class, 1};
         plan.sequence_scratch.moves[0] = {.destination = lhs, .source = rhs};
         plan.sequence_scratch.moves[1] = {.destination = rhs, .source = lhs};
+        // This acyclic copy completes before the cycle. Its old source is a
+        // candidate only when the independent lifetime/reservation permits it;
+        // its result must remain protected throughout the group.
+        plan.sequence_scratch.moves[2] = {
+            .destination = {static_cast<uint16_t>(location_kind),
+                            register_class, 3},
+            .source = {static_cast<uint16_t>(location_kind), register_class, 2},
+        };
         loom_low_move_group_t group = {};
         IREE_ASSERT_OK(loom_low_allocation_move_plan_append_group(
-            &plan, diagnostic_function_, point, point, /*raw_move_count=*/2,
+            &plan, diagnostic_function_, point, point, /*raw_move_count=*/3,
             &group, nullptr));
         if (reserve || point == 1 || point == 4) {
           EXPECT_EQ(constraints.error_count, 1u);
@@ -448,8 +456,10 @@ TEST_F(LowAllocationMovePlanTest, CycleScratchHonorsSparseAndReservedStorage) {
           EXPECT_EQ(group.moves.count, 0u);
         } else {
           EXPECT_EQ(constraints.error_count, 0u);
-          ASSERT_EQ(group.moves.count, 3u);
-          EXPECT_EQ(plan.moves[group.moves.start].destination.location, 2u);
+          ASSERT_EQ(group.moves.count, 4u);
+          EXPECT_EQ(plan.moves[group.moves.start + 1].destination.location, 2u);
+          EXPECT_EQ(plan.moves[group.moves.start].destination.location, 3u);
+          EXPECT_EQ(plan.moves[group.moves.start].source.location, 2u);
         }
         EXPECT_EQ(plan.storage_count, 0u);
       }

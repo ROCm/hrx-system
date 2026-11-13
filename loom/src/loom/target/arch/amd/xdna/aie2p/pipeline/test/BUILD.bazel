@@ -20,6 +20,7 @@ loom_check_test_suite(
     srcs = [
         "external_metadata.loom-test",
         "packet_iterator_constraints.loom-test",
+        "phased_controller.loom-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/arch:aie2p"]),
 )
@@ -85,6 +86,7 @@ loom_test(
         "retained_lifetime.loom",
         "retained_replay.loom",
         "reusable_sram.loom",
+        "single_phase_input.loom",
         "single_slot.loom",
         "storage_captures.loom",
     ],
@@ -196,7 +198,10 @@ loom_test(
         "joined_phases.loom",
         "ordered_geometry.loom",
         "packet_phases.loom",
+        "packet_stream.loom",
+        "retained_copy.loom",
         "retained_handoff.loom",
+        "shim_placement.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [_XDNA_TWO_COLUMN_PROFILE],
@@ -206,6 +211,14 @@ loom_test(
 loom_test_module(
     name = "channel_sram_module",
     srcs = ["channel_sram.loom"],
+)
+
+loom_test(
+    name = "shim_pressure_test",
+    srcs = ["shim_pressure.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_THREE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:vm_iree_vm"]),
 )
 
 loom_test(

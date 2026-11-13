@@ -27,6 +27,8 @@ typedef struct loom_aie2p_native_dma_control_t {
 // physical path interning and descriptor selection consume these assignments.
 // Distribution workers retain their selection order and precede one-way
 // transfers so same-tile copies can claim matching send and receive indices.
+// External shim queues prefer their issuing column; overflow lifetime classes
+// move together to the nearest free shim without changing local endpoints.
 iree_status_t loom_aie2p_native_assign_dma_queues(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,

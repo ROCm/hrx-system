@@ -77,12 +77,13 @@ const loom_low_descriptor_set_t* ExplicitDescriptorSet() {
                    LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
       },
   };
-  static const uint16_t kAtomicUnits[] = {0, 1, 0, 2, 3, 4, 5};
+  static const uint16_t kAtomicUnits[] = {0, 1, 0, 2, 3, 4, 5, 1};
   static const loom_low_physical_register_t kPhysicalRegisters[] = {
       {.name_string_ref = {}, .atomic_unit_start = 0, .atomic_unit_count = 2},
       {.name_string_ref = {}, .atomic_unit_start = 2, .atomic_unit_count = 1},
       {.name_string_ref = {}, .atomic_unit_start = 3, .atomic_unit_count = 2},
       {.name_string_ref = {}, .atomic_unit_start = 5, .atomic_unit_count = 2},
+      {.name_string_ref = {}, .atomic_unit_start = 7, .atomic_unit_count = 1},
   };
   static const loom_low_descriptor_set_t kDescriptorSet = [] {
     loom_low_descriptor_set_t descriptor_set = {
@@ -694,6 +695,83 @@ TEST(LowMoveSequenceTest, IdentityDestinationCannotBecomeCycleScratch) {
     EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), temporaries,
                              IREE_ARRAYSIZE(temporaries), descriptor_set),
                 ::testing::ElementsAre("0:3<-1", "0:1<-0", "0:0<-3"));
+  }
+}
+
+TEST(LowMoveSequenceTest, CompletedFanoutSourceCanBecomeCycleScratch) {
+  const loom_low_descriptor_set_t* descriptor_sets[] = {
+      IndependentDescriptorSet(), AliasDescriptorSet()};
+  for (const auto* descriptor_set : descriptor_sets) {
+    const loom_low_move_t moves[] = {Move(1, 2), Move(2, 1), Move(3, 0),
+                                     Move(4, 4), Move(5, 0)};
+    const loom_low_move_location_t temporary = Location(0);
+    // Both reads of source zero complete before the cycle. The resolver owns
+    // the separate proof that no value remains live in that register.
+    EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), &temporary, 1,
+                             descriptor_set),
+                ::testing::ElementsAre("0:3<-0", "0:5<-0", "0:0<-2", "0:2<-1",
+                                       "0:1<-0"));
+  }
+}
+
+TEST(LowMoveSequenceTest, CompletedReferenceCopiesKeepTheirOwnerOccupied) {
+  TestArena arena;
+  loom_low_move_sequence_scratch_t scratch = {};
+  IREE_ASSERT_OK(
+      loom_low_move_sequence_scratch_initialize(arena.arena(), 3, &scratch));
+  scratch.moves[0] = Transfer(1, 2);
+  scratch.moves[1] = Transfer(2, 1);
+  const loom_low_move_location_t temporary = Location(0);
+  TemporaryResolver resolver = {&temporary, 1};
+  const loom_low_move_sequence_options_t options = {
+      ReferenceDescriptorSet(), {ResolveTemporary, &resolver}};
+  for (bool transfer : {false, true}) {
+    scratch.moves[2] = transfer ? Transfer(3, 0) : Move(3, 0);
+    loom_low_move_t output[4] = {};
+    iree_host_size_t count = 0;
+    bool complete = false;
+    IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+        &scratch, 3, &options, IREE_ARRAYSIZE(output), output, &count,
+        /*out_input_flags=*/nullptr, &complete));
+    EXPECT_EQ(complete, transfer);
+    EXPECT_EQ(count, transfer ? 4u : 1u);
+    if (transfer) {
+      // Source zero is first emptied into result three, then carries and
+      // relinquishes the temporary owner. Every destination has one owner.
+      EXPECT_EQ(MoveString(output[0]), "0:3<-!0");
+      EXPECT_EQ(MoveString(output[1]), "0:0<-!2");
+      EXPECT_EQ(MoveString(output[2]), "0:2<-!1");
+      EXPECT_EQ(MoveString(output[3]), "0:1<-!0");
+    }
+  }
+}
+
+TEST(LowMoveSequenceTest, CompletedWideReadPreservesOverlappingDestination) {
+  TestArena arena;
+  loom_low_move_sequence_scratch_t scratch = {};
+  IREE_ASSERT_OK(
+      loom_low_move_sequence_scratch_initialize(arena.arena(), 3, &scratch));
+  scratch.moves[0] = Move(2, 3);
+  scratch.moves[1] = Move(3, 2);
+  // The completed read spans atomic units zero and one, while its narrow
+  // destination still owns zero. Only the source's upper unit becomes free.
+  scratch.moves[2] = Move(1, 0);
+  for (const auto& [view, occupied] :
+       {std::pair{0u, true}, std::pair{1u, true}, std::pair{4u, false}}) {
+    const auto probe = Location(view);
+    TemporaryResolver resolver = {.occupancy_probe = &probe};
+    const loom_low_move_sequence_options_t options = {
+        ExplicitDescriptorSet(), {ResolveTemporary, &resolver}};
+    loom_low_move_t output[4] = {};
+    iree_host_size_t count = 0;
+    bool complete = false;
+    IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+        &scratch, 3, &options, IREE_ARRAYSIZE(output), output, &count,
+        /*out_input_flags=*/nullptr, &complete));
+    EXPECT_EQ(resolver.occupancy_probe_result, occupied);
+    EXPECT_FALSE(complete);  // The observer supplies no temporary.
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(MoveString(output[0]), "0:1<-0");
   }
 }
 

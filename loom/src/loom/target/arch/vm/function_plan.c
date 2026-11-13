@@ -242,9 +242,10 @@ typedef struct loom_vm_return_state_t {
   uint16_t register_count;
 } loom_vm_return_state_t;
 
-// Cycle scratch excludes the complete result prefix and the move sources. The
-// solver's compacted move list omits identity results, which must survive too.
-// No temporary is reserved throughout the rest of the function.
+// Cycle scratch excludes the complete result prefix and preserved references.
+// Numeric sources outside that prefix are dead once their return moves finish.
+// Identity results survive too. No temporary is reserved throughout the rest
+// of the function.
 static iree_status_t loom_vm_return_temporary(
     void* user_data, const loom_low_move_location_t* storage_class,
     const loom_low_move_sequence_location_set_t* occupied_locations,

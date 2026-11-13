@@ -128,6 +128,24 @@ typedef struct loom_pipeline_transport_batch_t {
   uint64_t replays;
 } loom_pipeline_transport_batch_t;
 
+// One FIFO whose records are acquired and completely transferred in order.
+// Unlike retained replay, each source lifetime ends before the next begins.
+// Several individually uniform batches may interleave within one exact cycle.
+typedef struct loom_pipeline_transport_copy_stream_t {
+  // Common source identity of every independently reclaimed record.
+  const loom_channel_identity_t* source;
+  // Complete structural copy span, including all destination phases.
+  const loom_pipeline_transport_copy_t* copies;
+  // Number of structural copy sites, independent of dynamic visits.
+  iree_host_size_t copy_count;
+  // Source records consumed by one cycle of the complete copy span.
+  uint64_t records;
+  // Exact repetitions of that cycle within this invocation.
+  uint64_t repetitions;
+  // Enclosing loop excluded from per-cycle interpretation, or LOOP_NEST_NONE.
+  uint16_t scope;
+} loom_pipeline_transport_copy_stream_t;
+
 // An invocation-invariant contribution to a repeated input's byte address.
 typedef struct loom_pipeline_transport_input_capture_t {
   // Position in the source worker's original formal argument tuple.
@@ -206,6 +224,9 @@ typedef struct loom_pipeline_transport_t {
   const loom_pipeline_transport_batch_t* batches;
   // Number of independently owned source sequences.
   iree_host_size_t batch_count;
+  // Independently reclaimed records requiring ordered copies, or NULL.
+  // Fixed-destination one-pass streams use their existing batches directly.
+  const loom_pipeline_transport_copy_stream_t* copy_stream;
   // Exact cycles consisting of one record from each prefix batch followed by
   // a complete run of the final batch. Every copy consumes one blocking read
   // admission; zero when that ordered, non-retained shape is not established.
@@ -228,12 +249,12 @@ typedef struct loom_pipeline_transport_t {
   bool sources_stable;
 } loom_pipeline_transport_t;
 
-// Finite interpretation of one admitted batch's copy order. Iteration stops at
-// the ownership scope, so repeated admissions remain a separate lifetime axis.
+// Finite interpretation of one retained lifetime or independent-record cycle.
+// Iteration stops at the owning scope; outer repetitions remain separate.
 typedef struct loom_pipeline_transport_copy_cursor_t {
   // Next dynamic copy visit, or end when this source lifetime is complete.
   const loom_pipeline_transport_copy_t* next;
-  // One past this batch's structural copy span.
+  // One past this lifetime or cycle's structural copy span.
   const loom_pipeline_transport_copy_t* end;
   // Borrowed exact loop spans owned by the transport analysis.
   const loom_pipeline_transport_loop_t* loops;
@@ -248,6 +269,12 @@ typedef struct loom_pipeline_transport_copy_cursor_t {
 iree_status_t loom_pipeline_transport_copy_cursor_initialize(
     const loom_pipeline_transport_t* transport,
     const loom_pipeline_transport_batch_t* batch, iree_arena_allocator_t* arena,
+    loom_pipeline_transport_copy_cursor_t* out_cursor);
+
+// Initializes interpretation of one complete independent-record stream cycle.
+// The transport owns a copy_stream; its enclosing repetitions remain separate.
+iree_status_t loom_pipeline_transport_stream_cursor_initialize(
+    const loom_pipeline_transport_t* transport, iree_arena_allocator_t* arena,
     loom_pipeline_transport_copy_cursor_t* out_cursor);
 
 // Returns the next copy in exact execution order, or NULL after one lifetime.

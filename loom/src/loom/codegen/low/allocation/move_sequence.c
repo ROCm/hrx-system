@@ -224,9 +224,20 @@ bool loom_low_move_sequence_location_set_contains(
   };
   if (!loom_low_allocation_storage_assignment_uses_explicit_physical_register(
           descriptor_set, &assignment)) {
-    return loom_low_move_sequence_find_location(
-               scratch->location_entries, descriptor_set,
-               occupied_locations->location_entry_count, location) != NULL;
+    const loom_low_move_sequence_location_entry_t* entry =
+        loom_low_move_sequence_find_location(
+            scratch->location_entries, descriptor_set,
+            occupied_locations->location_entry_count, location);
+    return entry != NULL &&
+           (entry->destination_move_index !=
+                LOOM_LOW_MOVE_SEQUENCE_INDEX_NONE ||
+            (iree_any_bit_set(entry->flags,
+                              LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_PRESERVED) &&
+             iree_any_bit_set(
+                 descriptor_set
+                     ->reg_classes[entry->location.descriptor_reg_class_id]
+                     .flags,
+                 LOOM_LOW_REG_CLASS_FLAG_REFERENCE)));
   }
   if (scratch->explicit_atomic_unit_epochs == NULL) {
     return false;
@@ -480,9 +491,11 @@ static iree_status_t loom_low_move_sequence_prepare(
     scratch->explicit_atomic_unit_epoch = 1;
   }
 
-  // Identity destinations still own their contents throughout the parallel
-  // transfer. Keep them in the occupied set even though they emit no move,
-  // so a cycle cannot borrow their storage as a temporary.
+  // All acyclic transfers finish before cycle scratch is requested. Every
+  // remaining source therefore also has a destination in the group. Retain
+  // destinations, including identities, and copied reference ownership here;
+  // the resolver protects values live beyond the group. Retired numeric
+  // sources can then serve as cycle scratch without reserving another unit.
   for (iree_host_size_t i = 0; i < state->move_count; ++i) {
     loom_low_move_sequence_location_entry_t* destination_entry =
         loom_low_move_sequence_insert_location(state,
@@ -507,8 +520,15 @@ static iree_status_t loom_low_move_sequence_prepare(
     }
     IREE_RETURN_IF_ERROR(loom_low_move_sequence_mark_explicit_location(
         state, &scratch->moves[i].destination));
-    IREE_RETURN_IF_ERROR(loom_low_move_sequence_mark_explicit_location(
-        state, &scratch->moves[i].source));
+    if (scratch->moves[i].kind == LOOM_LOW_MOVE_KIND_COPY &&
+        iree_any_bit_set(
+            state->options->descriptor_set
+                ->reg_classes[scratch->moves[i].source.descriptor_reg_class_id]
+                .flags,
+            LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+      IREE_RETURN_IF_ERROR(loom_low_move_sequence_mark_explicit_location(
+          state, &scratch->moves[i].source));
+    }
   }
 
   for (iree_host_size_t i = 0; i < state->move_count; ++i) {
