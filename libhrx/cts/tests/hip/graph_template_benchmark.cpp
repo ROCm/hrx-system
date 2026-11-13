@@ -124,7 +124,16 @@ GraphApi& Api() {
 }
 
 enum class Topology { kIndependent, kChain, kFanIn, kFanOut };
-enum class Edges { kEmbedded, kBatch, kBatchReverse, kBatchShuffled, kSingle };
+enum class Edges {
+  kEmbedded,
+  kBatch,
+  kBatchReverse,
+  kBatchShuffled,
+  kSingle,
+  kSingleReverse,
+  kSingleShuffled,
+  kChunks,
+};
 enum class Operation { kConstruct, kClone, kRoots };
 
 class GraphInput {
@@ -140,9 +149,10 @@ class GraphInput {
         roots_(count),
         edge_order_(from_.size()) {
     std::iota(edge_order_.begin(), edge_order_.end(), size_t{0});
-    if (edges == Edges::kBatchReverse) {
+    if (edges == Edges::kBatchReverse || edges == Edges::kSingleReverse) {
       std::reverse(edge_order_.begin(), edge_order_.end());
-    } else if (edges == Edges::kBatchShuffled) {
+    } else if (edges == Edges::kBatchShuffled ||
+               edges == Edges::kSingleShuffled) {
       std::mt19937 random(0);
       std::shuffle(edge_order_.begin(), edge_order_.end(), random);
     }
@@ -186,12 +196,15 @@ class GraphInput {
         to_[i] = topology_ == Topology::kFanIn ? nodes_.back()
                                                : nodes_[edge_index + 1];
       }
-      if (edges_ != Edges::kSingle) {
+      if (edges_ == Edges::kBatch || edges_ == Edges::kBatchReverse ||
+          edges_ == Edges::kBatchShuffled) {
         Check(api.add_dependencies(graph, from_.data(), to_.data(),
                                    from_.size()));
       } else {
-        for (size_t i = 0; i < from_.size(); ++i) {
-          Check(api.add_dependencies(graph, &from_[i], &to_[i], 1));
+        const size_t batch_size = edges_ == Edges::kChunks ? 16 : 1;
+        for (size_t i = 0; i < from_.size(); i += batch_size) {
+          Check(api.add_dependencies(graph, &from_[i], &to_[i],
+                                     std::min(batch_size, from_.size() - i)));
         }
       }
     }
@@ -324,6 +337,15 @@ GRAPH_TEMPLATE_BATCH_ORDER(FanIn, BatchReverse);
 GRAPH_TEMPLATE_BATCH_ORDER(FanIn, BatchShuffled);
 GRAPH_TEMPLATE_BATCH_ORDER(FanOut, BatchReverse);
 GRAPH_TEMPLATE_BATCH_ORDER(FanOut, BatchShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(Chain, SingleReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(Chain, SingleShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(Chain, Chunks);
+GRAPH_TEMPLATE_BATCH_ORDER(FanIn, SingleReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(FanIn, SingleShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(FanIn, Chunks);
+GRAPH_TEMPLATE_BATCH_ORDER(FanOut, SingleReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(FanOut, SingleShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(FanOut, Chunks);
 
 #undef GRAPH_TEMPLATE_BATCH_ORDER
 

@@ -84,9 +84,11 @@ static iree_status_t iree_hal_streaming_graph_update_dependencies_match(
     iree_hal_streaming_graph_update_scratch_t* scratch, bool* out_match) {
   *out_match = false;
   iree_hal_streaming_graph_update_dependencies_t old_cursor = {
-      .node = old_node, .edge = old_node->additional_dependencies};
+      .node = old_node,
+      .edge = iree_hal_streaming_graph_additional_dependencies(old_node)};
   iree_hal_streaming_graph_update_dependencies_t new_cursor = {
-      .node = new_node, .edge = new_node->additional_dependencies};
+      .node = new_node,
+      .edge = iree_hal_streaming_graph_additional_dependencies(new_node)};
   const iree_hal_streaming_graph_node_t* old_dependency =
       iree_hal_streaming_graph_update_next_dependency(&old_cursor);
   const iree_hal_streaming_graph_node_t* new_dependency =

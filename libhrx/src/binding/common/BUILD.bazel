@@ -99,6 +99,7 @@ hrx_cc_library(
         "fat_binary.c",
         "graph.c",
         "graph_analysis.c",
+        "graph_dependencies.c",
         "graph_exec.c",
         "graph_memory.c",
         "graph_update.c",
@@ -495,6 +496,17 @@ hrx_cc_test(
 hrx_cc_test(
     name = "graph_test",
     srcs = ["graph_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "graph_dependencies_test",
+    srcs = ["graph_dependencies_test.cc"],
     deps = [
         ":common",
         "//runtime/src/iree/base",

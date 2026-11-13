@@ -1490,6 +1490,76 @@ TEST_F(HipGraphMemoryApiTest, StagedCopiesFollowPublicEnableAndDeletion) {
   }
 }
 
+TEST_F(HipGraphMemoryApiTest,
+       WideJoinReplaysAfterMutationCloneAndSourceRelease) {
+  destination_.fill(0);
+  std::vector<hipGraphNode_t> predecessors(destination_.size() - 1);
+  for (size_t i = 0; i < predecessors.size(); ++i) {
+    hipHostNodeParams host = {
+        .fn = +[](void* value) { ++*static_cast<uint8_t*>(value); },
+        .userData = &destination_[i],
+    };
+    ASSERT_EQ(hipSuccess,
+              api_.add_host(&predecessors[i], graph_, nullptr, 0, &host));
+  }
+  hipHostNodeParams host = {
+      .fn =
+          +[](void* value) {
+            auto& values = *static_cast<decltype(destination_)*>(value);
+            uint8_t sum = 0;
+            for (size_t i = 0; i + 1 < values.size(); ++i) {
+              sum += values[i];
+            }
+            values.back() = sum;
+          },
+      .userData = &destination_,
+  };
+  hipGraphNode_t join = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&join, graph_, nullptr, 0, &host));
+  for (size_t i = predecessors.size(); i > 0; --i) {
+    ASSERT_EQ(hipSuccess,
+              api_.add_dependencies(graph_, &predecessors[i - 1], &join, 1));
+  }
+  for (size_t i = 0; i < predecessors.size(); i += 3) {
+    ASSERT_EQ(hipSuccess,
+              api_.remove_dependencies(graph_, &predecessors[i], &join, 1));
+    ASSERT_EQ(hipSuccess,
+              api_.add_dependencies(graph_, &predecessors[i], &join, 1));
+  }
+  std::vector<hipGraphNode_t> observed(predecessors.size());
+  size_t count = observed.size();
+  ASSERT_EQ(hipSuccess, api_.get_dependencies(join, observed.data(), &count));
+  ASSERT_EQ(predecessors.size(), count);
+  EXPECT_TRUE(std::is_permutation(predecessors.begin(), predecessors.end(),
+                                  observed.begin(), observed.end()));
+  std::vector<hipGraphNode_t> destinations(predecessors.size(), join);
+  ASSERT_EQ(hipSuccess,
+            api_.remove_dependencies(graph_, predecessors.data(),
+                                     destinations.data(), predecessors.size()));
+  count = 0;
+  ASSERT_EQ(hipSuccess, api_.get_roots(graph_, nullptr, &count));
+  EXPECT_EQ(predecessors.size() + 1, count);
+  for (auto predecessor : predecessors) {
+    ASSERT_EQ(hipSuccess,
+              api_.add_dependencies(graph_, &predecessor, &join, 1));
+  }
+  ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+  graph_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, clone_, 0));
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(clone_));
+  clone_ = nullptr;
+  for (size_t replay = 1; replay <= 2; ++replay) {
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    for (size_t i = 0; i < predecessors.size(); ++i) {
+      EXPECT_EQ(replay, destination_[i]);
+    }
+    EXPECT_EQ(static_cast<uint8_t>(replay * predecessors.size()),
+              destination_.back());
+  }
+}
+
 TEST_F(HipGraphMemoryApiTest, DependencyQueriesFollowMutationAndCloning) {
   std::array<hipGraphNode_t, 5> nodes = {};
   for (size_t i = 0; i < nodes.size(); ++i) {
@@ -1552,6 +1622,16 @@ TEST_F(HipGraphMemoryApiTest, DependencyQueriesFollowMutationAndCloning) {
     for (size_t i = count; i < sources.size(); ++i) {
       EXPECT_EQ(nullptr, sources[i]);
     }
+    sources.fill(handles[4]);
+    count = 1;
+    ASSERT_EQ(hipSuccess, api_.get_roots(graph, sources.data(), &count));
+    EXPECT_EQ(1u, count);
+    EXPECT_TRUE(sources[0] == handles[0] || sources[0] == handles[1]);
+    EXPECT_EQ(handles[4], sources[1]);
+    count = 0;
+    ASSERT_EQ(hipSuccess, api_.get_roots(graph, sources.data() + 1, &count));
+    EXPECT_EQ(0u, count);
+    EXPECT_EQ(handles[4], sources[1]);
     count = sources.size();
     ASSERT_EQ(hipSuccess,
               api_.get_dependencies(handles[2], sources.data(), &count));

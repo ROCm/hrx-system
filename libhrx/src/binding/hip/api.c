@@ -21624,52 +21624,6 @@ HIPAPI hipError_t hipGraphAddDependencies(hipGraph_t graph,
 }
 
 // Removes dependencies between nodes in a graph.
-static bool iree_hip_graph_dependency_pair_exists(
-    iree_hal_streaming_graph_node_t* from_node,
-    iree_hal_streaming_graph_node_t* to_node) {
-  for (uint32_t i = 0; i < to_node->dependency_count; ++i) {
-    if (to_node->dependencies[i] == from_node) {
-      return true;
-    }
-  }
-  for (const iree_hal_streaming_graph_dependency_t* edge =
-           to_node->additional_dependencies;
-       edge; edge = edge->next) {
-    if (edge->from == from_node) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static void iree_hip_graph_remove_dependency_pair(
-    iree_hal_streaming_graph_t* graph,
-    iree_hal_streaming_graph_node_t* from_node,
-    iree_hal_streaming_graph_node_t* to_node) {
-  for (uint32_t i = 0; i < to_node->dependency_count; ++i) {
-    if (to_node->dependencies[i] != from_node) {
-      continue;
-    }
-    for (uint32_t j = i + 1; j < to_node->dependency_count; ++j) {
-      to_node->dependencies[j - 1] = to_node->dependencies[j];
-    }
-    --to_node->dependency_count;
-    return;
-  }
-
-  iree_hal_streaming_graph_dependency_t** next_edge =
-      &to_node->additional_dependencies;
-  while (*next_edge) {
-    iree_hal_streaming_graph_dependency_t* edge = *next_edge;
-    if (edge->from == from_node) {
-      *next_edge = edge->next;
-      --graph->additional_edge_count;
-      return;
-    }
-    next_edge = &edge->next;
-  }
-}
-
 HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
                                              const hipGraphNode_t* from,
                                              const hipGraphNode_t* to,
@@ -21678,32 +21632,11 @@ HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
   if (!graph) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (numDependencies == 0) {
-    HIP_RETURN_ERROR(hipSuccess);
-  }
-  if (!from || !to) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
-  iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
-  for (size_t i = 0; i < numDependencies; ++i) {
-    iree_hal_streaming_graph_node_t* from_node =
-        (iree_hal_streaming_graph_node_t*)from[i];
-    iree_hal_streaming_graph_node_t* to_node =
-        (iree_hal_streaming_graph_node_t*)to[i];
-    if (!from_node || !to_node || from_node->graph != stream_graph ||
-        to_node->graph != stream_graph ||
-        !iree_hip_graph_dependency_pair_exists(from_node, to_node)) {
-      HIP_RETURN_ERROR(hipErrorInvalidValue);
-    }
-  }
-
-  for (size_t i = 0; i < numDependencies; ++i) {
-    iree_hip_graph_remove_dependency_pair(
-        stream_graph, (iree_hal_streaming_graph_node_t*)from[i],
-        (iree_hal_streaming_graph_node_t*)to[i]);
-  }
-
+  HIP_RETURN_STATUS(iree_hal_streaming_graph_remove_dependencies(
+                        (iree_hal_streaming_graph_t*)graph,
+                        (iree_hal_streaming_graph_node_t**)from,
+                        (iree_hal_streaming_graph_node_t**)to, numDependencies),
+                    hipErrorInvalidValue);
   HIP_RETURN_ERROR(hipSuccess);
 }
 
@@ -21740,7 +21673,7 @@ HIPAPI hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
       }
 
       for (const iree_hal_streaming_graph_dependency_t* edge =
-               node->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(node);
            edge; edge = edge->next) {
         if (iree_hip_graph_edge_is_hidden(edge->from, node)) {
           continue;
@@ -21783,7 +21716,7 @@ static bool iree_hip_graph_node_is_root(
     }
   }
   for (const iree_hal_streaming_graph_dependency_t* dependency =
-           node->additional_dependencies;
+           iree_hal_streaming_graph_additional_dependencies(node);
        dependency; dependency = dependency->next) {
     if (!iree_hip_graph_node_is_hidden(dependency->from)) {
       return false;
@@ -21869,7 +21802,7 @@ HIPAPI hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node,
     ++dependency_count;
   }
   for (const iree_hal_streaming_graph_dependency_t* edge =
-           stream_node->additional_dependencies;
+           iree_hal_streaming_graph_additional_dependencies(stream_node);
        edge; edge = edge->next) {
     if (iree_hip_graph_edge_is_hidden(edge->from, stream_node)) {
       continue;
@@ -21934,7 +21867,7 @@ HIPAPI hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
       }
 
       for (const iree_hal_streaming_graph_dependency_t* edge =
-               candidate->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(candidate);
            edge; edge = edge->next) {
         if (edge->from != stream_node) {
           continue;
@@ -22201,7 +22134,7 @@ static int iree_hip_graph_debug_write_dot_graph(
       }
 
       for (const iree_hal_streaming_graph_dependency_t* edge =
-               node->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(node);
            edge; edge = edge->next) {
         if (iree_hip_graph_edge_is_hidden(edge->from, node)) {
           continue;

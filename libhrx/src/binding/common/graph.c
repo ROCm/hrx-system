@@ -22,8 +22,9 @@
 
 static void iree_hal_streaming_graph_destroy(iree_hal_streaming_graph_t* graph);
 
-static void iree_hal_streaming_graph_node_deinitialize_attrs(
+static void iree_hal_streaming_graph_node_deinitialize(
     iree_hal_streaming_graph_node_t* node) {
+  iree_hal_streaming_graph_release_dependency_index(node);
   switch (node->type) {
     case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL:
       iree_hal_streaming_module_release(node->attrs.kernel.module);
@@ -213,7 +214,7 @@ static void iree_hal_streaming_graph_destroy(
   for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
        block = block->next) {
     for (iree_host_size_t i = 0; i < block->count; ++i) {
-      iree_hal_streaming_graph_node_deinitialize_attrs(block->nodes[i]);
+      iree_hal_streaming_graph_node_deinitialize(block->nodes[i]);
     }
   }
 
@@ -318,7 +319,7 @@ void iree_hal_streaming_graph_rollback_copy(
         iree_hal_streaming_graph_node_t* node = block->nodes[i];
         IREE_ASSERT(node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY ||
                     node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL);
-        iree_hal_streaming_graph_node_deinitialize_attrs(node);
+        iree_hal_streaming_graph_node_deinitialize(node);
         node->graph = NULL;
         node->dependency_count = 0;
       }
@@ -380,76 +381,6 @@ static void iree_hal_streaming_graph_renumber_nodes(
       block->nodes[i]->node_index = node_index++;
     }
   }
-}
-
-static bool iree_hal_streaming_graph_node_is_active_in_graph(
-    const iree_hal_streaming_graph_t* graph,
-    const iree_hal_streaming_graph_node_t* node) {
-  // Publication assigns the owner; removal and copy rollback clear it while
-  // leaving the arena-owned handle storage alive until graph destruction.
-  return node && node->graph == graph;
-}
-
-static bool iree_hal_streaming_graph_dependency_exists(
-    const iree_hal_streaming_graph_node_t* from_node,
-    const iree_hal_streaming_graph_node_t* to_node) {
-  for (uint32_t i = 0; i < to_node->dependency_count; ++i) {
-    if (to_node->dependencies[i] == from_node) {
-      return true;
-    }
-  }
-  for (const iree_hal_streaming_graph_dependency_t* dependency =
-           to_node->additional_dependencies;
-       dependency; dependency = dependency->next) {
-    if (dependency->from == from_node) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static iree_status_t iree_hal_streaming_graph_validate_dependencies(
-    const iree_hal_streaming_graph_t* graph,
-    iree_hal_streaming_graph_node_t** dependencies,
-    iree_host_size_t dependency_count) {
-  if (dependency_count == 0) {
-    return iree_ok_status();
-  }
-  if (!dependencies) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "dependency array must be provided");
-  }
-  // Graph mutations are externally serialized. Borrow a flag in each supplied
-  // predecessor instead of allocating a set or searching the input prefix.
-  // The zero/one-dependency paths never need to write the predecessor.
-  const uint8_t mark =
-      dependency_count > 1
-          ? IREE_HAL_STREAMING_GRAPH_NODE_FLAG_VALIDATING_DEPENDENCY
-          : 0;
-  iree_status_t status = iree_ok_status();
-  iree_host_size_t marked_count = 0;
-  for (iree_host_size_t i = 0;
-       i < dependency_count && iree_status_is_ok(status); ++i) {
-    if (!iree_hal_streaming_graph_node_is_active_in_graph(graph,
-                                                          dependencies[i])) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dependency at index %" PRIhsz
-                                " does not belong to the target graph",
-                                i);
-    } else if (mark) {
-      if (dependencies[i]->flags & mark) {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "duplicate dependency at index %" PRIhsz, i);
-      } else {
-        dependencies[i]->flags |= mark;
-        ++marked_count;
-      }
-    }
-  }
-  for (iree_host_size_t i = 0; i < marked_count; ++i) {
-    dependencies[i]->flags &= ~mark;
-  }
-  return status;
 }
 
 static bool iree_hal_streaming_graph_list_contains(
@@ -576,39 +507,6 @@ static bool iree_hal_streaming_graph_remove_from_blocks(
     }
   }
   return false;
-}
-
-static void iree_hal_streaming_graph_remove_dependency_refs(
-    iree_hal_streaming_graph_t* graph, iree_hal_streaming_graph_node_t* node) {
-  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
-       block = block->next) {
-    for (iree_host_size_t i = 0; i < block->count; ++i) {
-      iree_hal_streaming_graph_node_t* existing_node = block->nodes[i];
-      uint32_t dependency_index = 0;
-      while (dependency_index < existing_node->dependency_count) {
-        if (existing_node->dependencies[dependency_index] != node) {
-          ++dependency_index;
-          continue;
-        }
-        for (uint32_t j = dependency_index + 1;
-             j < existing_node->dependency_count; ++j) {
-          existing_node->dependencies[j - 1] = existing_node->dependencies[j];
-        }
-        --existing_node->dependency_count;
-      }
-      iree_hal_streaming_graph_dependency_t** next_dependency =
-          &existing_node->additional_dependencies;
-      while (*next_dependency) {
-        iree_hal_streaming_graph_dependency_t* dependency = *next_dependency;
-        if (existing_node == node || dependency->from == node) {
-          *next_dependency = dependency->next;
-          --graph->additional_edge_count;
-        } else {
-          next_dependency = &dependency->next;
-        }
-      }
-    }
-  }
 }
 
 // Helper to allocate a graph node with trailing dependencies and extra data.
@@ -840,7 +738,9 @@ iree_status_t iree_hal_streaming_graph_clone(
       }
 
       clone_node->type = source_node->type;
-      clone_node->flags = source_node->flags;
+      clone_node->flags =
+          source_node->flags &
+          ~IREE_HAL_STREAMING_GRAPH_NODE_FLAG_INDEXED_DEPENDENCIES;
       clone_node->dependency_count = source_node->dependency_count;
       clone_node->attrs = source_node->attrs;
       if (source_node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL) {
@@ -910,7 +810,7 @@ iree_status_t iree_hal_streaming_graph_clone(
                                      source_node->attrs.host.user_data_size,
                                      (void**)&clone_data);
         if (!iree_status_is_ok(status)) {
-          iree_hal_streaming_graph_node_deinitialize_attrs(clone_node);
+          iree_hal_streaming_graph_node_deinitialize(clone_node);
           break;
         }
         memcpy(clone_data, source_node->attrs.host.user_data,
@@ -962,7 +862,7 @@ iree_status_t iree_hal_streaming_graph_clone(
 
       status = iree_hal_streaming_graph_add_node(clone_graph, clone_node);
       if (!iree_status_is_ok(status)) {
-        iree_hal_streaming_graph_node_deinitialize_attrs(clone_node);
+        iree_hal_streaming_graph_node_deinitialize(clone_node);
         break;
       }
       if (clone_node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH) {
@@ -992,9 +892,9 @@ iree_status_t iree_hal_streaming_graph_clone(
             node_map[source_node->dependencies[j]->node_index];
       }
       iree_hal_streaming_graph_dependency_t** tail =
-          &clone_node->additional_dependencies;
+          iree_hal_streaming_graph_additional_dependency_head(clone_node);
       for (const iree_hal_streaming_graph_dependency_t* dependency =
-               source_node->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(source_node);
            dependency && iree_status_is_ok(status);
            dependency = dependency->next) {
         if (dependency_capacity == 0) {
@@ -1877,7 +1777,7 @@ iree_status_t iree_hal_streaming_graph_add_event_node(
       *out_node = node;
     }
   } else {
-    iree_hal_streaming_graph_node_deinitialize_attrs(node);
+    iree_hal_streaming_graph_node_deinitialize(node);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1960,7 +1860,7 @@ iree_status_t iree_hal_streaming_graph_add_batch_mem_op_node(
   if (iree_status_is_ok(status)) {
     *out_node = node;
   } else {
-    iree_hal_streaming_graph_node_deinitialize_attrs(node);
+    iree_hal_streaming_graph_node_deinitialize(node);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -2003,7 +1903,7 @@ iree_status_t iree_hal_streaming_graph_add_child_graph_node(
       *out_node = node;
     }
   } else {
-    iree_hal_streaming_graph_node_deinitialize_attrs(node);
+    iree_hal_streaming_graph_node_deinitialize(node);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -2091,135 +1991,6 @@ iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
   return iree_ok_status();
 }
 
-// Returns the first repeated pair, or |count| if every pair is unique.
-// Endpoints have already passed membership validation. The unpublished edge
-// allocation supplies two pointer-sized slots per pair, leaving the table half
-// full on both 32- and 64-bit hosts. Slots hold request ordinals plus one, so
-// zero terminates a collision chain.
-static iree_host_size_t iree_hal_streaming_graph_find_duplicate_dependency(
-    iree_hal_streaming_graph_node_t* const* from_nodes,
-    iree_hal_streaming_graph_node_t* const* to_nodes, iree_host_size_t count,
-    iree_host_size_t storage_size, void* storage) {
-  static_assert(sizeof(iree_hal_streaming_graph_dependency_t) >=
-                    2 * sizeof(iree_host_size_t),
-                "edge storage must leave empty duplicate-index slots");
-  const iree_host_size_t slot_count = storage_size / sizeof(iree_host_size_t);
-  iree_host_size_t* slots = storage;
-  memset(slots, 0, slot_count * sizeof(*slots));
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    // Mix both dense node indices so chains and either fan direction distribute
-    // across the table independently of caller insertion order.
-    uint64_t hash =
-        ((uint64_t)from_nodes[i]->node_index << 32) | to_nodes[i]->node_index;
-    hash ^= hash >> 33;
-    hash *= 0xff51afd7ed558ccdull;
-    hash ^= hash >> 33;
-    hash *= 0xc4ceb9fe1a85ec53ull;
-    hash ^= hash >> 33;
-    iree_host_size_t slot = (iree_host_size_t)hash % slot_count;
-    while (slots[slot]) {
-      const iree_host_size_t previous = slots[slot] - 1;
-      if (from_nodes[previous] == from_nodes[i] &&
-          to_nodes[previous] == to_nodes[i]) {
-        return i;
-      }
-      if (++slot == slot_count) {
-        slot = 0;
-      }
-    }
-    slots[slot] = i + 1;
-  }
-  return count;
-}
-
-iree_status_t iree_hal_streaming_graph_add_dependencies(
-    iree_hal_streaming_graph_t* graph,
-    iree_hal_streaming_graph_node_t** from_nodes,
-    iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count) {
-  IREE_ASSERT_ARGUMENT(graph);
-  if (count == 0) {
-    return iree_ok_status();
-  }
-  if (!from_nodes || !to_nodes) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "dependency arrays must be provided");
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    iree_hal_streaming_graph_node_t* from_node = from_nodes[i];
-    iree_hal_streaming_graph_node_t* to_node = to_nodes[i];
-    if (!from_node || !to_node) {
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "null node in dependency list at index %" PRIhsz,
-                              i);
-    }
-    if (from_node == to_node) {
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "node cannot depend on itself at index %" PRIhsz,
-                              i);
-    }
-    if (!iree_hal_streaming_graph_node_is_active_in_graph(graph, from_node) ||
-        !iree_hal_streaming_graph_node_is_active_in_graph(graph, to_node)) {
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dependency node at index %" PRIhsz
-                              " does not belong to the target graph",
-                              i);
-    }
-    if (iree_hal_streaming_graph_dependency_exists(from_node, to_node)) {
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate dependency at index %" PRIhsz, i);
-    }
-  }
-
-  iree_host_size_t new_edge_count = 0;
-  iree_host_size_t allocation_size = 0;
-  if (!iree_host_size_checked_add(graph->additional_edge_count, count,
-                                  &new_edge_count) ||
-      !iree_host_size_checked_mul(count,
-                                  sizeof(iree_hal_streaming_graph_dependency_t),
-                                  &allocation_size)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "graph dependency batch size overflow");
-  }
-  // Validate the batch using its destination storage before publishing it. A
-  // rejected batch rewinds the arena, retaining neither edges nor scratch.
-  iree_arena_checkpoint_t checkpoint;
-  if (count > 1) {
-    checkpoint = iree_arena_checkpoint_save(&graph->arena);
-  }
-  iree_hal_streaming_graph_dependency_t* edges = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(&graph->arena, allocation_size, (void**)&edges));
-  if (count > 1) {
-    const iree_host_size_t duplicate_index =
-        iree_hal_streaming_graph_find_duplicate_dependency(
-            from_nodes, to_nodes, count, allocation_size, edges);
-    if (IREE_UNLIKELY(duplicate_index != count)) {
-      iree_arena_checkpoint_restore(&checkpoint);
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "duplicate dependency within request at index %" PRIhsz,
-          duplicate_index);
-    }
-  }
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    edges[i].from = from_nodes[i];
-    edges[i].next = to_nodes[i]->additional_dependencies;
-    to_nodes[i]->additional_dependencies = &edges[i];
-  }
-  graph->additional_edge_count = new_edge_count;
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
 // Removes one known-active node. Composite operations detach their helpers
 // before removing the public node so every dependency reference is retired.
 static void iree_hal_streaming_graph_erase_node(
@@ -2241,7 +2012,7 @@ static void iree_hal_streaming_graph_erase_node(
     }
     --graph->copy_helper_count;
   }
-  iree_hal_streaming_graph_node_deinitialize_attrs(node);
+  iree_hal_streaming_graph_node_deinitialize(node);
   node->graph = NULL;
   node->dependency_count = 0;
 }
@@ -3168,7 +2939,7 @@ static iree_status_t iree_hal_streaming_capture_mark_frontier_reachable(
           graph, node->dependencies[i], reachable_nodes, stack, &stack_count));
     }
     for (const iree_hal_streaming_graph_dependency_t* dependency =
-             node->additional_dependencies;
+             iree_hal_streaming_graph_additional_dependencies(node);
          dependency; dependency = dependency->next) {
       IREE_RETURN_IF_ERROR(iree_hal_streaming_capture_push_reachable_node(
           graph, dependency->from, reachable_nodes, stack, &stack_count));
