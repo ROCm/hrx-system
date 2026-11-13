@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <initializer_list>
+#include <vector>
 
 #include "benchmark/benchmark.h"
 #include "loom/runtime/device/device.h"
@@ -90,6 +91,9 @@ void BM_TransitionBacking(benchmark::State& state) {
   const auto weight_geometry = geometry;
   geometry.mapping_size = geometry.minimum_size * state.range(0);
   const uint64_t length = geometry.mapping_size * state.range(1);
+  const uint64_t last_offset =
+      (state.range(1) - 1) * state.range(2) * geometry.mapping_size;
+  const uint64_t reserved_length = last_offset + geometry.mapping_size;
   loom_runtime_memory_pool_t* pool = nullptr;
   IREE_CHECK_OK(loom_runtime_memory_pool_allocate(
       hal_group, scope, source, queue, weight_geometry, geometry,
@@ -97,10 +101,29 @@ void BM_TransitionBacking(benchmark::State& state) {
   loom_runtime_storage_statistics_t statistics = {};
   loom_runtime_virtual_buffer_t* buffer = nullptr;
   IREE_CHECK_OK(loom_runtime_virtual_buffer_allocate(
-      pool, geometry, length, geometry.granularity, &statistics, &buffer));
+      pool, geometry, reserved_length, geometry.granularity, &statistics,
+      &buffer));
+  std::vector<loom_runtime_memory_range_t> ranges;
+  if (state.range(2) == 1) {
+    ranges.push_back({buffer, 0, length});
+  } else {
+    ranges.reserve(state.range(1));
+    for (int64_t i = 0; i < state.range(1); ++i) {
+      ranges.push_back({buffer, i * state.range(2) * geometry.mapping_size,
+                        geometry.mapping_size});
+    }
+  }
+  const auto commit = [&] {
+    bool admitted = false;
+    IREE_CHECK_OK(loom_runtime_memory_pool_try_commit(
+        pool, ranges.size(), ranges.data(), &admitted));
+    IREE_CHECK_OK(admitted ? iree_ok_status()
+                           : iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                              "benchmark backing denied"));
+  };
   // Establish published backing for detach, or empty addresses with the chosen
   // physical retention policy for commit. Directory setup is outside timing.
-  IREE_CHECK_OK(loom_runtime_virtual_buffer_commit(buffer, 0, length));
+  commit();
   if constexpr (Mode != Transition::kDetachRetained) {
     loom_runtime_virtual_buffer_begin_trim(buffer);
     IREE_CHECK_OK(loom_runtime_virtual_buffer_trim(buffer));
@@ -120,7 +143,7 @@ void BM_TransitionBacking(benchmark::State& state) {
       loom_runtime_virtual_buffer_begin_trim(buffer);
       IREE_CHECK_OK(loom_runtime_virtual_buffer_trim(buffer));
     } else {
-      IREE_CHECK_OK(loom_runtime_virtual_buffer_commit(buffer, 0, length));
+      commit();
     }
     state.PauseTiming();
     if constexpr (ObserveAllocations) {
@@ -128,7 +151,7 @@ void BM_TransitionBacking(benchmark::State& state) {
       bytes += traffic.bytes.load(std::memory_order_relaxed) - bytes_before;
     }
     if constexpr (Mode == Transition::kDetachRetained) {
-      IREE_CHECK_OK(loom_runtime_virtual_buffer_commit(buffer, 0, length));
+      commit();
     } else {
       loom_runtime_virtual_buffer_begin_trim(buffer);
       IREE_CHECK_OK(loom_runtime_virtual_buffer_trim(buffer));
@@ -142,6 +165,7 @@ void BM_TransitionBacking(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * state.range(1));
   state.counters["page_bytes"] = geometry.mapping_size;
   state.counters["mapped_bytes"] = length;
+  state.counters["reserved_bytes"] = reserved_length;
   if (ObserveAllocations) {
     state.counters["host_allocations"] =
         benchmark::Counter(calls, benchmark::Counter::kAvgIterations);
@@ -150,7 +174,7 @@ void BM_TransitionBacking(benchmark::State& state) {
   }
 
   // Validate real first/last page data outside the measured transition.
-  IREE_CHECK_OK(loom_runtime_virtual_buffer_commit(buffer, 0, length));
+  commit();
   state.counters["native_bytes"] =
       loom_runtime_memory_pool_statistics(pool).committed_bytes;
   auto* handle = loom_runtime_virtual_buffer_handle(buffer);
@@ -159,7 +183,7 @@ void BM_TransitionBacking(benchmark::State& state) {
       loom_runtime_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready));
   uint64_t value = 0;
-  for (uint64_t offset : {uint64_t{0}, length - geometry.mapping_size}) {
+  for (uint64_t offset : {uint64_t{0}, last_offset}) {
     const uint32_t expected = 0x12345678u ^ static_cast<uint32_t>(offset);
     ++value;
     IREE_CHECK_OK(iree_hal_queue_fill(queue, {}, {1, &ready, &value}, handle,
@@ -200,11 +224,13 @@ void BM_TransitionBacking(benchmark::State& state) {
 // Small first instances bound the ordinary benchmark smoke. Larger cases are
 // explicitly selected for scaling studies with fixed iteration counts.
 void Cases(benchmark::Benchmark* benchmark) {
-  benchmark->ArgNames({"mapping_granules", "pages"})
-      ->Args({1, 1})
-      ->Args({1, 64})
-      ->Args({1, 8192})
-      ->Args({16, 512})
+  benchmark->ArgNames({"mapping_granules", "pages", "page_stride"})
+      ->Args({1, 1, 1})
+      ->Args({1, 64, 1})
+      ->Args({1, 8192, 1})
+      ->Args({16, 512, 1})
+      ->Args({1, 64, 2})
+      ->Args({1, 8192, 2})
       ->UseRealTime();
 }
 BENCHMARK_TEMPLATE(BM_TransitionBacking, Transition::kCommitCold, false)
