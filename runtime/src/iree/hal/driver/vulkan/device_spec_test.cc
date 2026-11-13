@@ -636,6 +636,19 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
   EXPECT_TRUE(iree_string_view_equal(queues->families[0].name,
                                      IREE_SV("queue-family-2")));
   EXPECT_EQ(queues->families[0].provisioned_queue_count, 2);
+  EXPECT_EQ(queues->families[0].execution_unit_count, 7u);
+  ASSERT_EQ(queues->families[0].execution_resource_group_count, 1u);
+  EXPECT_EQ(queues->families[0]
+                .execution_resource_groups[0]
+                .minimum_selected_resource_count,
+            1u);
+  ASSERT_EQ(queues->families[0].execution_resource_count, 1u);
+  EXPECT_EQ(queues->families[0].execution_resources[0].group_ordinal, 0u);
+  EXPECT_EQ(
+      queues->families[0].execution_resources[0].first_execution_unit_ordinal,
+      0u);
+  EXPECT_EQ(queues->families[0].execution_resources[0].execution_unit_count,
+            7u);
   EXPECT_EQ(queues->families[0].timestamp_valid_bits, 64u);
   EXPECT_EQ(queues->families[0].timestamp_frequency_hz, 1000000000ull);
   EXPECT_EQ(queues->families[0].role_flags,
@@ -658,6 +671,9 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
   EXPECT_TRUE(iree_string_view_equal(queues->families[1].name,
                                      IREE_SV("queue-family-5")));
   EXPECT_EQ(queues->families[1].provisioned_queue_count, 1);
+  EXPECT_EQ(queues->families[1].execution_unit_count, 0u);
+  EXPECT_EQ(queues->families[1].execution_resource_count, 0u);
+  EXPECT_EQ(queues->families[1].execution_resource_group_count, 0u);
   EXPECT_EQ(queues->families[1].timestamp_valid_bits, 48u);
   EXPECT_EQ(queues->families[1].role_flags,
             IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
@@ -765,6 +781,10 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
   EXPECT_EQ(dispatch->subgroup.minimum_size, 32);
   EXPECT_EQ(dispatch->subgroup.maximum_size, 64);
   EXPECT_EQ(dispatch->execution.unit_count, 0u);
+  queues = iree_hal_device_spec_queues(device_spec);
+  EXPECT_EQ(queues->families[0].execution_unit_count, 0u);
+  EXPECT_EQ(queues->families[0].execution_resource_count, 0u);
+  EXPECT_EQ(queues->families[0].execution_resource_group_count, 0u);
   iree_hal_device_spec_release(device_spec);
 
   device_plan.enabled_features.general &=
