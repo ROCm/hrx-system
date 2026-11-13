@@ -6,6 +6,8 @@
 
 #include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
 
+#include <utility>
+
 #include "gtest/gtest.h"
 #include "libamdf/src/gpu/umd/kfd/topology.h"
 
@@ -175,9 +177,21 @@ TEST(KfdTargetUserQueueTest, KeepsSupportedPlansDense) {
 }
 
 TEST(KfdTargetUserQueueTest, ExposesBothComputeLanguagesOnRdna) {
-  for (uint32_t target :
-       {110000u, 110001u, 110002u, 110003u, 110500u, 110501u, 110502u, 110503u,
-        110700u, 110701u, 110702u, 120000u, 120001u, 120500u, 120501u}) {
+  for (const auto [target, fresh_kernargs] : {std::pair{110000u, true},
+                                              {110001u, true},
+                                              {110002u, true},
+                                              {110003u, true},
+                                              {110500u, true},
+                                              {110501u, true},
+                                              {110502u, true},
+                                              {110503u, true},
+                                              {110700u, false},
+                                              {110701u, false},
+                                              {110702u, false},
+                                              {120000u, false},
+                                              {120001u, false},
+                                              {120500u, false},
+                                              {120501u, false}}) {
     SCOPED_TRACE(target);
     auto topology = MakeTopology();
     topology.properties.gfx_ip = {target / 10000, (target / 100) % 100,
@@ -193,9 +207,12 @@ TEST(KfdTargetUserQueueTest, ExposesBothComputeLanguagesOnRdna) {
               AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
     EXPECT_EQ(plans.values[1].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
-    EXPECT_EQ(plans.values[1].family.format_features,
-              AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
-                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
+    EXPECT_EQ(
+        plans.values[1].family.format_features,
+        AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
+            AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE |
+            (fresh_kernargs ? AMDF_GPU_AQL_FORMAT_FEATURE_FRESH_KERNARG_ACQUIRE
+                            : 0));
     EXPECT_NE(plans.values[1].family.roles & AMDF_QUEUE_ROLE_TRANSFER, 0u);
     EXPECT_EQ(plans.values[2].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
@@ -229,6 +246,7 @@ TEST(KfdTargetUserQueueTest, CdnaDoesNotAdvertisePm4) {
         plans.values[0].family.format_features,
         AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
             AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE |
+            AMDF_GPU_AQL_FORMAT_FEATURE_FRESH_KERNARG_ACQUIRE |
             (target == 90010u ? 0 : AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE));
     EXPECT_NE(plans.values[0].family.roles & AMDF_QUEUE_ROLE_TRANSFER, 0u);
     EXPECT_EQ(plans.values[1].family.command_type,
@@ -345,7 +363,8 @@ TEST(KfdTargetUserQueueTest, Pm4TrapRequirementsFollowNativeGcIdentity) {
                   AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH | test.features);
     EXPECT_EQ(plans.values[1].family.command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
-    EXPECT_EQ(plans.values[1].family.format_features,
+    EXPECT_EQ(plans.values[1].family.format_features &
+                  ~AMDF_GPU_AQL_FORMAT_FEATURE_FRESH_KERNARG_ACQUIRE,
               AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
                   AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
   }
@@ -623,7 +642,8 @@ TEST(KfdTargetUserQueueTest, Cdna2SaveLayoutMatchesReportedNativeGeometry) {
     EXPECT_EQ(plan.family.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
     EXPECT_EQ(plan.family.format_features,
               AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
-                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
+                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE |
+                  AMDF_GPU_AQL_FORMAT_FEATURE_FRESH_KERNARG_ACQUIRE);
     EXPECT_EQ(plan.compute.context_count, 1u);
     EXPECT_EQ(plan.compute.control_stack_byte_length, 36864u);
     EXPECT_EQ(plan.compute.context_save_restore_byte_length, 63508480u);
@@ -667,7 +687,8 @@ TEST(KfdTargetUserQueueTest, MultiXccAqlFamiliesRetainTransferRole) {
     EXPECT_EQ(family.format_features,
               AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE |
                   AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
-                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE);
+                  AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE |
+                  AMDF_GPU_AQL_FORMAT_FEATURE_FRESH_KERNARG_ACQUIRE);
     const amdf_queue_roles_t expected_roles =
         AMDF_QUEUE_ROLE_COMPUTE | AMDF_QUEUE_ROLE_CACHE_CONTROL |
         AMDF_QUEUE_ROLE_TRANSFER | AMDF_QUEUE_ROLE_ATOMIC;

@@ -1755,6 +1755,12 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
     queue->producer.argument_streaming =
         (queue->storage.capabilities &
          AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0;
+    // Cooperative user kernels can mutate their grid ABI state. Its reuse
+    // retains ordinary SYSTEM acquisition independently of private kernargs.
+    queue->producer.argument_cache_isolated =
+        (native_family->format_features &
+         AMDF_GPU_AQL_FORMAT_FEATURE_FRESH_KERNARG_ACQUIRE) != 0 &&
+        !(params->features & IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH);
     if (queue->producer.argument_streaming) {
       status = iree_hal_amd_gpu_input_memory_initialize_local(
           context, AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,

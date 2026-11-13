@@ -40,6 +40,13 @@ bool amdf_gpu_kfd_aql_queue_plan(const amdf_gpu_kfd_topology_t* topology,
     return false;
   }
   const bool rdna = properties->gfx_ip.major >= 11;
+  // These native caches isolate independent argument records in 128-byte
+  // extents. GC12.0 retains SYSTEM acquisition; later cache geometries require
+  // a separately qualified ownership granule.
+  const bool fresh_kernargs =
+      properties->gfx_ip.major == 9 ||
+      (properties->gfx_ip.major == 11 &&
+       (properties->gfx_ip.minor == 0 || properties->gfx_ip.minor == 5));
   // CLR's native BARRIER_VALUE path selects CDNA firmware independently of
   // ordinary AQL dispatch and standard AND/OR barriers.
   const bool barrier_value = properties->gfx_ip.major == 9 &&
@@ -91,6 +98,9 @@ bool amdf_gpu_kfd_aql_queue_plan(const amdf_gpu_kfd_topology_t* topology,
                   AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS |
                   AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE |
                   topology->aql_scalar_register_features |
+                  (fresh_kernargs
+                       ? AMDF_GPU_AQL_FORMAT_FEATURE_FRESH_KERNARG_ACQUIRE
+                       : 0) |
                   (barrier_value ? AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE
                                  : 0),
               .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER,

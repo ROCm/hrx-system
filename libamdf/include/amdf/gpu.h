@@ -486,9 +486,10 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 ///
 /// Prepare all payloads and packet bodies in a finite run while its first
 /// header remains INVALID. Execute SFENCE before publishing that header with
-/// SYSTEM acquire, and retain the header-to-doorbell SFENCE above. Later data
-/// consumers are ordered after that acquisition. This sequence supplies the
-/// host release and device acquisition for the prepared payloads without a
+/// SYSTEM acquire, or the fresh-kernarg acquisition specifically admitted by
+/// FRESH_KERNARG_ACQUIRE, and retain the header-to-doorbell SFENCE above. Later
+/// data consumers are ordered after that acquisition. This sequence supplies
+/// the host release and device acquisition for the prepared payloads without a
 /// host cache-control call or device posting read. It does not publish code or
 /// data to independently executing queues. Coherent signals retain their own
 /// protocol. This capability requires DEVICE_LOCAL ring placement; HOST_LOCAL
@@ -571,6 +572,20 @@ enum amdf_gpu_aql_format_feature_bits_e {
   /// The native dispatch context has no per-wave trap SGPR reservation.
   /// Absence of SGPR_TRAP_RESERVE_16 alone does not imply this fact.
   AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0 = UINT64_C(1) << 8,
+  /// AGENT acquisition admits fresh CPU-authored kernargs within exclusively
+  /// owned 128-byte-aligned extents. Since the queue's preceding SYSTEM
+  /// acquisition, no GPU may have read or written any overlapping 128-byte
+  /// granule. A SYSTEM-acquiring dispatch establishes a new traversal before
+  /// first use or reuse; every later record occupies distinct granules.
+  /// Previous readers retire before host overwrite. Previous GPU writers also
+  /// release their writes to SYSTEM before the completion used for reclamation.
+  /// The allocation and consumers belong to this queue; imported, registered,
+  /// and externally shared payloads do not inherit this protocol.
+  /// Owned coherent SYSTEM backing retains its host-release requirements.
+  /// LOCAL backing additionally requires HOST_NON_TEMPORAL_PUBLICATION and its
+  /// store and ring ordering protocol. AGENT replaces only the fresh kernarg
+  /// acquisition, not code publication or requested user-data cache scopes.
+  AMDF_GPU_AQL_FORMAT_FEATURE_FRESH_KERNARG_ACQUIRE = UINT64_C(1) << 9,
 };
 
 /// Scratch backing borrowed by one directly published compute queue.

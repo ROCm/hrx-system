@@ -7,6 +7,7 @@
 #include "iree/hal/driver/amd/gpu/queue/aql/retirement.h"
 
 #include <array>
+#include <cstring>
 #include <vector>
 
 #include "iree/async/event.h"
@@ -344,6 +345,54 @@ TEST_F(AqlRetirementTest, SharedRunReleasesPayloadsBeforePublicCallbacks) {
                                         frontier.data());
   EXPECT_EQ(frontier[0], 3u);
   EXPECT_EQ(*readers_[2]->host_value, 0u);
+}
+
+TEST_F(AqlRetirementTest, FreshArgumentsAcquireEveryReusedTraversal) {
+  queue_.producer.argument_cache_isolated = true;
+  // A newly installed backing has its own relative origin. Neither its first
+  // use nor wrap depends on the low bits of the monotonic completion prefix.
+  arguments_.begin = 73;
+  arguments_.end = arguments_.begin;
+  auto* semaphore = Semaphore();
+  std::array<uint8_t, 2048> replacement_bytes = {};
+  for (uint64_t traversal = 0; traversal < 3; ++traversal) {
+    if (traversal == 2) {
+      // The previous backing has retired. Installing a distinct generation
+      // resets only its relative origin; logical queue progress continues.
+      arguments_.begin = arguments_.end;
+      arguments_.address += 4096;
+      arguments_.memory.contents = iree_make_byte_span(
+          replacement_bytes.data(), replacement_bytes.size());
+    }
+    const uint64_t first = queue_.producer.ring.reserved;
+    for (uint64_t i = 0; i < 16; ++i) {
+      const uint64_t value = traversal * 16 + i + 1;
+      ASSERT_NO_FATAL_FAILURE(Publish(
+          semaphore, value, value > 1 ? semaphore : nullptr, value - 1));
+    }
+    ASSERT_EQ(iree_hal_amd_gpu_aql_publish_run(&queue_), AMDF_STATUS_OK);
+    for (uint64_t i = 0; i < 16; ++i) {
+      const auto& packet = packets_[(first + i) & (packets_.size() - 1)];
+      EXPECT_EQ(packet.words[0],
+                (1u << 16) | IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+                    IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                    (i ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT
+                       : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM));
+      const uint64_t address =
+          packet.words[10] | (uint64_t{packet.words[11]} << 32);
+      const size_t offset = i * IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT;
+      EXPECT_EQ(address, arguments_.address + offset);
+      uint32_t value;
+      std::memcpy(&value, arguments_.memory.contents.data + offset,
+                  sizeof(value));
+      EXPECT_EQ(value, traversal * 16 + i + 1);
+    }
+    CompleteAll();
+    ASSERT_TRUE(Poll());
+    EXPECT_EQ(queue_.completed.arguments, arguments_.end);
+    EXPECT_EQ(queue_.completed.count, (traversal + 1) * 16);
+    ExpectRetired(traversal * 16, IREE_STATUS_OK);
+  }
 }
 
 TEST_F(AqlRetirementTest, DifferentTimelinesSplitOnePhysicalRun) {

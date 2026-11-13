@@ -145,6 +145,9 @@ struct iree_hal_amd_gpu_aql_queue_t {
     // Every ABI byte uses non-temporal stores under the achieved native
     // contract.
     bool argument_streaming;
+    // The native format admits AGENT acquisition for fresh, isolated ABI
+    // records. These queues publish each packet; others use bounded groups.
+    bool argument_cache_isolated;
   } producer;
   // A finite physical completion run published in bounded groups. Its final
   // group stays behind an INVALID header until sealing. Only the current

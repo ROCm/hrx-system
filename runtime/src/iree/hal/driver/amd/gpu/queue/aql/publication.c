@@ -9,10 +9,14 @@
 #include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/state.h"
 
-// Release completed groups while retaining a private terminal packet for the
-// run's completion and final payload release. Grouping amortizes the native
-// SYSTEM acquisition without holding the entire physical completion run.
-enum { IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK = 7 };
+// Fresh isolated arguments need only the native near-cache acquisition and can
+// publish packet by packet. Other routes amortize SYSTEM acquisition across
+// eight prepared packets. Both retain a private tail for completion and
+// release.
+static uint32_t iree_hal_amd_gpu_aql_publication_group_mask(
+    const iree_hal_amd_gpu_aql_queue_t* queue) {
+  return queue->producer.argument_cache_isolated ? 0 : 7;
+}
 
 static amdf_status_t iree_hal_amd_gpu_aql_write_packet(
     iree_hal_amd_gpu_aql_ring_t* ring,
@@ -52,7 +56,7 @@ amdf_status_t iree_hal_amd_gpu_aql_publish_run(
       ring, &queue->storage,
       queue->run.first +
           ((queue->run.last - queue->run.first) &
-           ~(uint64_t)IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK),
+           ~(uint64_t)iree_hal_amd_gpu_aql_publication_group_mask(queue)),
       queue->run.group_header);
   iree_hal_amd_gpu_aql_publish_notify(queue, status, queue->run.last);
   iree_hal_amd_gpu_signal_release(completion);
@@ -394,7 +398,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
         iree_max(queue->run.last_header & (3u << 11), release);
     queue->run.last_header = header;
     if (((queue->run.last - queue->run.first) &
-         IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK) == 0) {
+         iree_hal_amd_gpu_aql_publication_group_mask(queue)) == 0) {
       queue->run.group_header = header;
     } else {
       iree_memcpy_write_only(
@@ -481,9 +485,10 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   const bool grouped =
       run_eligible && (queue->run.completion || position != completed);
   const bool first_in_run = grouped && !queue->run.completion;
+  const uint32_t group_mask =
+      iree_hal_amd_gpu_aql_publication_group_mask(queue);
   const bool first_in_group =
-      first_in_run || ((ring->reserved - queue->run.first) &
-                       IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK) == 0;
+      first_in_run || ((ring->reserved - queue->run.first) & group_mask) == 0;
   if (grouped) {
     if (first_in_run) {
       queue->run.completion = signal;
@@ -492,13 +497,19 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   }
   // Prepare the terminal packet before a retirement slot can be consumed.
   // A ready request may borrow the same capture which native retirement frees.
-  // Every host-authored input in a group precedes its first valid header.
-  // Its SYSTEM acquisition covers that publication on every memory route;
-  // later dispatches retain their requested payload scopes. Standalone work
-  // has the same host-to-device boundary, even without invocation arguments.
-  const uint32_t acquire = grouped && !first_in_group
-                               ? before & (3u << 9)
-                               : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
+  // The first record of every backing/traversal invalidates old argument
+  // contents. Later isolated records have no overlapping consumer until this
+  // dispatch. Native AGENT acquisition clears near caches; explicit payload
+  // scopes remain stronger when requested. Other input producers acquire their
+  // entire prepared group at SYSTEM scope before its first consumer.
+  const uint32_t acquire =
+      queue->producer.argument_cache_isolated && run_eligible
+          ? iree_max(before & (3u << 9),
+                     argument_length && argument_offset == 0
+                         ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM
+                         : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT)
+      : grouped && !first_in_group ? before & (3u << 9)
+                                   : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
   const uint32_t dispatch_header =
       IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | acquire | (after & (3u << 11));
   iree_hal_amd_gpu_aql_packet_t payload =
@@ -557,8 +568,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     if (!first_in_run) {
       if (first_in_group) {
         const amdf_status_t status = iree_hal_amd_gpu_aql_ring_publish_header(
-            ring, &queue->storage,
-            queue->run.last - IREE_HAL_AMD_GPU_AQL_PUBLICATION_GROUP_MASK,
+            ring, &queue->storage, queue->run.last - group_mask,
             queue->run.group_header);
         iree_hal_amd_gpu_aql_publish_notify(queue, status, queue->run.last);
         queue->run.group_header = payload.words[0];
