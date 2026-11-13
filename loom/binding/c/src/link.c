@@ -298,14 +298,6 @@ static loomc_status_t loomc_link_validate_request_options(
   return loomc_config_validate_text_options(&options->config);
 }
 
-static loomc_status_t loomc_link_result_fail_iree_status(
-    loomc_result_t* result, const loomc_source_t* source,
-    loomc_string_view_t code, iree_status_t status) {
-  return loomc_result_fail_status_diagnostic_consume(
-      result, source, LOOMC_DIAGNOSTIC_SEVERITY_ERROR, code,
-      loomc_status_from_iree(status));
-}
-
 static iree_string_view_t loomc_link_module_name(
     const loomc_linker_t* linker, const loomc_link_options_t* options) {
   if (!loomc_string_view_is_empty(options->module_name)) {
@@ -347,44 +339,15 @@ static iree_status_t loomc_link_request_make_source_identifier(
   return iree_ok_status();
 }
 
-static loomc_status_t loomc_link_request_map_target_roots(
+static void loomc_link_request_map_target_roots(
     const loom_link_plan_materialization_t* materialization,
     const iree_host_size_t* source_symbol_ordinals, iree_host_size_t root_count,
     loom_symbol_id_t* out_module_symbol_ids) {
   for (iree_host_size_t i = 0; i < root_count; ++i) {
-    const iree_host_size_t source_symbol_ordinal = source_symbol_ordinals[i];
-    if (source_symbol_ordinal >= materialization->target_symbols.count) {
-      return loomc_make_status(
-          LOOMC_STATUS_INTERNAL,
-          "linked request root is absent from the target projection");
-    }
-    const loom_symbol_ref_t target_symbol =
-        materialization->target_symbols.values[source_symbol_ordinal];
-    if (!loom_symbol_ref_is_valid(target_symbol) ||
-        target_symbol.module_id != 0) {
-      return loomc_make_status(
-          LOOMC_STATUS_INTERNAL,
-          "linked request root did not materialize as a local symbol");
-    }
-    out_module_symbol_ids[i] = target_symbol.symbol_id;
+    out_module_symbol_ids[i] =
+        materialization->target_symbols.values[source_symbol_ordinals[i]]
+            .symbol_id;
   }
-  return loomc_ok_status();
-}
-
-static loomc_status_t loomc_link_translate_operation_status(
-    loomc_result_t* result, loomc_host_size_t before_diagnostics,
-    loomc_string_view_t code, iree_status_t status) {
-  if (iree_status_is_ok(status)) {
-    return loomc_ok_status();
-  }
-  if (loomc_result_diagnostic_count(result) == before_diagnostics) {
-    return loomc_link_result_fail_iree_status(result, /*source=*/NULL, code,
-                                              status);
-  }
-  loomc_result_set_status_code(result,
-                               (loomc_status_code_t)iree_status_code(status));
-  iree_status_free(status);
-  return loomc_ok_status();
 }
 
 static loomc_status_t loomc_link_module_overlay_initialize(
@@ -750,14 +713,10 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
       options->module_provider_count;
   const loom_link_plan_materialization_environment_t environment =
       loomc_link_materialization_state_environment(&materialization_state);
-  loomc_host_size_t before_diagnostics = loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    iree_status_t operation_status = loom_link_index_materialize(
+    status = loomc_status_from_iree(loom_link_index_materialize(
         overlay.module_index, &plan_options, &environment,
-        loomc_link_module_name(linker, options), &index_materialization);
-    status = loomc_link_translate_operation_status(
-        result, before_diagnostics, loomc_make_cstring_view("LINK/MATERIALIZE"),
-        operation_status);
+        loomc_link_module_name(linker, options), &index_materialization));
     if (loomc_status_is_ok(status) &&
         index_materialization.product.module == NULL) {
       loomc_result_set_status_code(result, LOOMC_STATUS_INVALID_ARGUMENT);
@@ -888,25 +847,20 @@ loomc_status_t loomc_link_request(loomc_linker_t* linker,
         target_specialization, result, &scratch_arena, allocator,
         &materialization_state);
   }
-  const loomc_host_size_t before_diagnostics =
-      loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     const loom_link_plan_materialization_environment_t environment =
         loomc_link_materialization_state_environment(&materialization_state);
-    const iree_status_t operation_status = loom_link_index_materialize(
+    status = loomc_status_from_iree(loom_link_index_materialize(
         request_overlay.module_index, &plan_options, &environment,
-        loomc_link_request_module_name(linker, options), &materialization);
-    status = loomc_link_translate_operation_status(
-        result, before_diagnostics, loomc_make_cstring_view("LINK/REQUEST"),
-        operation_status);
+        loomc_link_request_module_name(linker, options), &materialization));
     if (loomc_status_is_ok(status) && materialization.product.module == NULL) {
       loomc_result_set_status_code(result, LOOMC_STATUS_INVALID_ARGUMENT);
     }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    status = loomc_link_request_map_target_roots(
-        &materialization.product, request_overlay.root_symbol_ordinals,
-        root_count, target_root_symbol_ids);
+    loomc_link_request_map_target_roots(&materialization.product,
+                                        request_overlay.root_symbol_ordinals,
+                                        root_count, target_root_symbol_ids);
   }
 
   loomc_string_view_t output_identifier = loomc_string_view_empty();
