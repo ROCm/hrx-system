@@ -173,6 +173,7 @@ loom_corpus_test(
             "memory/buffer/positions.loom",
             "memory/buffer/packing.loom",
             "memory/buffer/selection.loom",
+            "memory/packed/transport.loom",
             "memory/view/bitcast.loom",
             "memory/view/offset_recurrence.loom",
             "numeric/float/activations.loom",

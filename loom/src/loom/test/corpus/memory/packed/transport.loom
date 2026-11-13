@@ -335,3 +335,76 @@ check.scenario @strided_byte_packet_values {
   }
   check.return
 }
+
+// The captured value spans several native packets. Overwriting any source
+// element before its consumer must preserve the entire original payload.
+func.def @wide_capture_before_write(%input: buffer, %output: buffer, %control: buffer) {
+  %base = index.constant 0 : offset
+  %parameters = buffer.view %control[%base] : buffer -> view<4xi32>
+  %position_input = view.load %parameters[0] : view<4xi32> -> i32
+  %position_index = index.cast %position_input : i32 to index
+  %first = index.constant 0 : index
+  %last = index.constant 131 : index
+  %nonnegative = index.max %position_index, %first : index
+  %position = index.min %nonnegative, %last : index
+  %replacement = scalar.constant -1234.5 : f32
+  %source_buffer, %destination_buffer = buffer.assume.noalias %input, %output : buffer, buffer
+  %source = buffer.view %source_buffer[%base] : buffer -> view<132xf32>
+  %destination = buffer.view %destination_buffer[%base] : buffer -> view<132xf32>
+  %old = vector.load %source[0] : view<132xf32> -> vector<132xf32>
+  view.store %replacement, %source[%position] : f32, view<132xf32>
+  vector.store %old, %destination[0] : vector<132xf32>, view<132xf32>
+  func.return
+}
+
+// Copy before writing the replacement, without a captured vector. The scenario
+// compares raw words so signed zero and NaN payloads are observable too.
+func.def @wide_capture_before_write_oracle(%input: buffer, %output: buffer, %control: buffer) {
+  %base = index.constant 0 : offset
+  %parameters = buffer.view %control[%base] : buffer -> view<4xi32>
+  %position_input = view.load %parameters[0] : view<4xi32> -> i32
+  %position_index = index.cast %position_input : i32 to index
+  %first = index.constant 0 : index
+  %last = index.constant 131 : index
+  %nonnegative = index.max %position_index, %first : index
+  %position = index.min %nonnegative, %last : index
+  %replacement = scalar.constant -1234.5 : f32
+  %begin = index.constant 0 : index
+  %end = index.constant 132 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<132xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<132xi32>
+  scf.for %element = [%begin to %end step %step] {
+    %value = view.load %source[%element] : view<132xi32> -> i32
+    view.store %value, %destination[%element] : i32, view<132xi32>
+  }
+  %bits = scalar.bitcast %replacement : f32 to i32
+  view.store %bits, %source[%position] : i32, view<132xi32>
+  func.return
+}
+
+func.def @wide_capture_position(%position: index, %control: buffer) {
+  %base = index.constant 0 : offset
+  %value = index.cast %position : index to i32
+  %parameters = buffer.view %control[%base] : buffer -> view<4xi32>
+  view.store %value, %parameters[0] : i32, view<4xi32>
+  func.return
+}
+
+check.scenario @wide_capture_before_write_values {
+  check.trial[132](%position: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%position] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<140xi32>
+    %input = check.tensor.view %input_storage offset(16) : tensor<140xi32> -> tensor<132xi32>
+    %output_storage = check.generate.fill value(-91) : tensor<140xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<140xi32> -> tensor<132xi32>
+    %control = check.generate.fill value(0) : tensor<4xi32>
+    check.generate<@wide_capture_position>(%position, %control) : (index, tensor<4xi32>) -> ()
+    check.compare<@wide_capture_before_write, @wide_capture_before_write_oracle>(%input, %output, %control) : (tensor<132xi32>, tensor<132xi32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%control) expected(%control) : tensor<4xi32>
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<140xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<140xi32>
+    }
+  }
+  check.return
+}
