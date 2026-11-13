@@ -1,0 +1,61 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+// Raising preserves the selected owner and writebacks even though a source
+// pointer borrow becomes ordinary SSA arguments and results.
+struct Box {
+  int lower[2];
+  int upper[2];
+  int* data(bool upper) { if (upper) return this->upper; return lower; }
+};
+struct State { int* output; Box box; };
+int update(int* output, int value, bool upper) {
+  State state{output, {{value, 2}, {3, 4}}};
+  int* pointer = state.box.data(upper);
+  pointer[0] += 7;
+  return state.box.lower[0] * 3 + state.box.upper[0] * 5;
+}
+// ----
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+
+[[loom::symbol("update")]]
+unsigned update(loom::type::buffer<unsigned char> output, loom::type::offset output_byte_offset, unsigned value, bool upper);
+
+[[loom::symbol("Box__data_value")]]
+static unsigned Box__data_value(unsigned this_lower_0, unsigned this_lower_1, unsigned this_upper_0, unsigned this_upper_1, bool upper);
+
+[[loom::symbol("update")]]
+unsigned update(loom::type::buffer<unsigned char> output, loom::type::offset output_byte_offset, unsigned value, bool upper) {
+  unsigned v8 = Box__data_value(value, 2u, 3u, 4u, upper);
+  unsigned v13{};
+  if (v8 == 0u) {
+    v13 = 3u;
+  } else {
+    v13 = value;
+  }
+  unsigned v14 = v13 + 7u;
+  unsigned state_box_upper_0_1{};
+  if (v8 == 0u) {
+    state_box_upper_0_1 = v14;
+  } else {
+    state_box_upper_0_1 = 3u;
+  }
+  unsigned state_box_lower_0{};
+  if (v8 == 0u) {
+    state_box_lower_0 = value;
+  } else {
+    state_box_lower_0 = v14;
+  }
+  return ((state_box_lower_0 * 3u) + (state_box_upper_0_1 * 5u));
+}
+
+[[loom::symbol("Box__data_value")]]
+static unsigned Box__data_value(unsigned this_lower_0, unsigned this_lower_1, unsigned this_upper_0, unsigned this_upper_1, bool upper) {
+  unsigned v34{};
+  if (upper) {
+    v34 = 0u;
+  } else {
+    v34 = 1u;
+  }
+  return v34;
+}

@@ -1130,8 +1130,7 @@ class Translator final : private Initialization::Evaluation {
             current_function_.implicit_object
                 ? current_function_.implicit_object->abi
                 : ImplicitObjectABI::None);
-    const bool returns_projected_reference =
-        returns_reference && !projected_origins.empty();
+    const bool returns_projected_reference = !projected_origins.empty();
     const bool returns_receiver_alias =
         current_function_.implicit_object && current_function_.control &&
         current_function_.implicit_object->abi == ImplicitObjectABI::Value &&
@@ -1322,30 +1321,38 @@ class Translator final : private Initialization::Evaluation {
       fail(statement, "void return cannot carry a value");
     }
     Returned returned = {{}, statement};
-    if (unit_.typeTraits().is_reference(current_function_.return_type)) {
+    const bool returns_reference =
+        unit_.typeTraits().is_reference(current_function_.return_type);
+    std::span<const ReferenceResultOrigin> projected_origins;
+    if (returns_reference ||
+        unit_.typeTraits().is_pointer(current_function_.return_type)) {
+      projected_origins = functions_.projected_reference_return_origins(
+          current_function_.source->symbol,
+          current_function_.implicit_object
+              ? current_function_.implicit_object->abi
+              : ImplicitObjectABI::None);
+    }
+    if (returns_reference || !projected_origins.empty()) {
       const bool returns_parameter_alias =
           current_function_.control &&
           current_function_.control->reference_return_parameter().has_value();
-      const auto projected_origins =
-          functions_.projected_reference_return_origins(
-              current_function_.source->symbol,
-              current_function_.implicit_object
-                  ? current_function_.implicit_object->abi
-                  : ImplicitObjectABI::None);
       const bool returns_projected_reference = !projected_origins.empty();
       const bool returns_receiver_alias =
           current_function_.implicit_object && current_function_.control &&
           current_function_.implicit_object->abi == ImplicitObjectABI::Value &&
           current_function_.control->returns_current_receiver_reference();
+      auto* source =
+          unit_.typeTraits().is_pointer(current_function_.return_type)
+              ? unwrap_expression(statement->expression)
+              : statement->expression;
       if (returns_receiver_alias) {
-        IREE_ASSERT(is_current_object(unit_, statement->expression));
+        IREE_ASSERT(is_current_object(unit_, source));
       } else if (returns_projected_reference && projected_origins.size() > 1) {
-        returned.values.push_back(
-            selected_reference_return(statement->expression, statement));
+        returned.values.push_back(selected_reference_return(source, statement));
       } else if (returns_parameter_alias || returns_projected_reference) {
         // The alias needs no runtime payload, but selecting it can still
         // evaluate a condition or call an effectful forwarding helper.
-        effect(statement->expression);
+        effect(source);
       } else {
         reference_value(statement->expression, statement)
             .append_to(returned.values);
@@ -1799,8 +1806,12 @@ class Translator final : private Initialization::Evaluation {
                            ConstexprContract constexpr_contract,
                            cxx::AST* owner) {
     if (auto* referent = control_->pointer_alias(variable)) {
-      pointer_aliases_.emplace(
-          variable, reference_lvalue(referent, owner, LvalueAccess::Read));
+      if (auto* alias = pointer_alias_lvalue(referent)) {
+        pointer_aliases_.emplace(variable, *alias);
+      } else {
+        pointer_aliases_.emplace(
+            variable, reference_lvalue(referent, owner, LvalueAccess::Read));
+      }
       return;
     }
     if (unit_.typeTraits().is_reference(variable->type())) {
@@ -2162,6 +2173,16 @@ class Translator final : private Initialization::Evaluation {
     return found == pointer_aliases_.end() ? nullptr : &found->second;
   }
 
+  Lvalue pointer_alias_pointee(const Lvalue& alias, cxx::AST* owner) {
+    auto* type =
+        alias.selection() ? alias.selection()->type : alias.object().type;
+    if (auto* array = types_.array(type, owner)) {
+      return project_array_element(alias, *array, 0,
+                                   array->source->elementType(), owner);
+    }
+    return alias;
+  }
+
   StorageProjection pointer_expression(cxx::ExpressionAST* ast) {
     auto* source = strip_implicit_casts(ast);
     auto* source_type = unit_.typeTraits().remove_reference(source->type);
@@ -2509,9 +2530,10 @@ class Translator final : private Initialization::Evaluation {
     if (access == LvalueAccess::Write) {
       types_.require_mutable(member->type, owner);
     }
-    return alias->project(
-        types_.selection(member->symbol, member->subobjectPath, member),
-        member->type, storage_, owner);
+    return pointer_alias_pointee(*alias, owner)
+        .project(
+            types_.selection(member->symbol, member->subobjectPath, member),
+            member->type, storage_, owner);
   }
 
   ObjectLvalue object_destination(
@@ -2687,12 +2709,18 @@ class Translator final : private Initialization::Evaluation {
 
     std::optional<Lvalue> array_target;
     std::optional<Value> index_value;
+    auto evaluate_array = [&]() {
+      if (auto* alias = pointer_alias_lvalue(operands->array)) {
+        return *alias;
+      }
+      return reference_lvalue(operands->array, owner, access);
+    };
     if (operands->array_first) {
-      array_target = reference_lvalue(operands->array, owner, access);
+      array_target = evaluate_array();
       index_value = expression(operands->index);
     } else {
       index_value = expression(operands->index);
-      array_target = reference_lvalue(operands->array, owner, access);
+      array_target = evaluate_array();
     }
 
     const auto* element_type = subscript->type;
@@ -2706,18 +2734,18 @@ class Translator final : private Initialization::Evaluation {
         if (!preserve_identity && !traits.is_class(element_type) &&
             !traits.is_array(element_type)) {
           return Lvalue{ObjectLvalue{
-              element_type, storage_.subscript(*storage, index_value->ssa(),
-                                               operands->array->type,
-                                               operands->index->type, owner)}};
+              element_type,
+              storage_.subscript(*storage, index_value->ssa(), operands->type,
+                                 operands->index->type, owner)}};
         }
-        return Lvalue{ObjectLvalue{
-            element_type,
-            storage_.advance(*storage, index_value->ssa(),
-                             operands->array->type, operands->index->type,
-                             cxx::TokenKind::T_PLUS, owner)}};
+        return Lvalue{
+            ObjectLvalue{element_type,
+                         storage_.advance(*storage, index_value->ssa(),
+                                          operands->type, operands->index->type,
+                                          cxx::TokenKind::T_PLUS, owner)}};
       }
     }
-    auto* array = types_.array(operands->array->type, owner);
+    auto* array = types_.array(operands->type, owner);
     if (!array || !array->source->size()) {
       fail(owner, "value subscript requires a nonempty bounded array");
     }
@@ -2940,7 +2968,7 @@ class Translator final : private Initialization::Evaluation {
         if (access == LvalueAccess::Write) {
           types_.require_mutable(projected->type, owner);
         }
-        return *alias;
+        return pointer_alias_pointee(*alias, owner);
       }
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected)) {
@@ -3784,7 +3812,8 @@ class Translator final : private Initialization::Evaluation {
       auto* signature =
           cxx::type_cast<cxx::FunctionType>(call->function->type());
       if (signature &&
-          unit_.typeTraits().is_reference(signature->returnType())) {
+          (unit_.typeTraits().is_reference(signature->returnType()) ||
+           control_->borrowed_array_type(expression))) {
         return ordinary_operator_call(expression, *call);
       }
       return std::nullopt;
@@ -3795,7 +3824,8 @@ class Translator final : private Initialization::Evaluation {
       auto* signature =
           cxx::type_cast<cxx::FunctionType>(subscript->symbol->type());
       if (signature &&
-          unit_.typeTraits().is_reference(signature->returnType())) {
+          (unit_.typeTraits().is_reference(signature->returnType()) ||
+           control_->borrowed_array_type(expression))) {
         return overloaded_subscript_call(subscript);
       }
       return std::nullopt;
@@ -3806,7 +3836,8 @@ class Translator final : private Initialization::Evaluation {
                           ? cxx::type_cast<cxx::FunctionType>(function->type())
                           : nullptr;
     if (!signature ||
-        !unit_.typeTraits().is_reference(signature->returnType())) {
+        !(unit_.typeTraits().is_reference(signature->returnType()) ||
+          control_->borrowed_array_type(expression))) {
       return std::nullopt;
     }
     if (intrinsics_.check_binding(function, expression) ||
@@ -4721,8 +4752,7 @@ class Translator final : private Initialization::Evaluation {
     const bool returns_reference =
         unit_.typeTraits().is_reference(signature->returnType());
     const bool returns_parameter_alias = reference_result_alias.has_value();
-    const bool returns_projected_reference =
-        returns_reference && !projected_origins.empty();
+    const bool returns_projected_reference = !projected_origins.empty();
     const bool returns_exact_projected_reference =
         returns_projected_reference && projected_origins.size() == 1;
     const bool returns_selected_projected_reference =
@@ -4927,7 +4957,9 @@ class Translator final : private Initialization::Evaluation {
       IREE_ASSERT_EQ(ordinary_result_count, 1u);
       auto selector = loom_op_results(op)[0];
       auto* result_type =
-          unit_.typeTraits().remove_reference(signature->returnType());
+          returns_reference
+              ? unit_.typeTraits().remove_reference(signature->returnType())
+              : projected_origins.front().projection.type;
       const bool has_complete_targets =
           std::ranges::all_of(selected_reference_candidates,
                               [](const SelectedReferenceCandidate& candidate) {
@@ -6257,7 +6289,7 @@ class Translator final : private Initialization::Evaluation {
       }
       if (unary->op == cxx::TokenKind::T_STAR) {
         if (auto* alias = pointer_alias_lvalue(unary->expression)) {
-          return read(*alias, ast);
+          return read(pointer_alias_pointee(*alias, ast), ast);
         }
         if (is_current_object(unit_, unary)) {
           return read(destination(ast, ast, LvalueAccess::Read), ast);

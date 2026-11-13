@@ -43,6 +43,9 @@ struct ArraySubscript {
   cxx::ExpressionAST* array;
   // Integral selector evaluated once at its written source position.
   cxx::ExpressionAST* index;
+  // Complete array type. Accessor borrows resolve this during call analysis;
+  // translation sees only resolved selections.
+  const cxx::Type* type;
   // Whether the array precedes the selector in source evaluation order.
   bool array_first;
   // Known in-range element ordinal, absent for a runtime selection.
@@ -160,6 +163,9 @@ struct DirectCall {
   bool current_receiver;
   // Whether source syntax already reaches the object through a pointer.
   bool storage_receiver;
+  // Whether source use observes a pointer result instead of borrowing its
+  // elements. Ordinary pointer calls need no entry in an identity-demand set.
+  bool pointer_result_observed = false;
 };
 
 // Monotone facts grown while propagating one retained call edge.
@@ -298,6 +304,11 @@ class ControlFlow final : private cxx::ASTVisitor {
   // pointer without observing its pointer value. The translator can retain
   // the already evaluated source lvalue instead of inventing object storage.
   cxx::ExpressionAST* pointer_alias(cxx::Symbol* binding) const;
+  // Complete fixed array borrowed by decay, a local alias, or an indexed call
+  // result. Null denotes ordinary pointer transport or an unresolved origin.
+  const cxx::Type* borrowed_array_type(cxx::ExpressionAST* expression) const;
+  // Public function results retain their declared pointer transport.
+  void require_pointer_result_storage();
   // Null retains ordinary while semantics; a result permits scf.for lowering.
   const CountedLoop* counted(cxx::ForStatementAST* loop) const;
   // Retained lexical clauses for a supported runtime switch. Construction
@@ -600,12 +611,16 @@ class ControlFlow final : private cxx::ASTVisitor {
   CallArgument retain_call_argument(
       cxx::ExpressionAST* expression,
       const cxx::Type* borrowed_object_type = nullptr);
+  // Array borrows retain their complete owner even before the callee's
+  // fixed-point summary supplies its extent.
+  cxx::ExpressionAST* array_borrow_origin(cxx::ExpressionAST* expression) const;
+  CallArgument retain_array_identity(cxx::ExpressionAST* expression);
   CallArgument retain_member_receiver(cxx::ExpressionAST* expression,
                                       cxx::List<cxx::Symbol*>* path,
                                       cxx::AST* owner);
   // Reference operands retain their source destinations and write effects
   // regardless of whether call syntax is ordinary, operator, or constructor.
-  void retain_reference_arguments(const DirectCall& call);
+  void retain_reference_arguments(DirectCall& call);
   void collect_identity(cxx::ExpressionAST* expression, CallArgument& argument,
                         ReferenceProjection projection = {});
   void append_identity(const CallArgument& source, CallArgument& argument,
@@ -744,12 +759,16 @@ class ControlFlow final : private cxx::ASTVisitor {
     CallArgument identity;
     // False once any use needs an actual pointer representation.
     bool transparent = true;
+    // Canonical array or accessor call supplying a first-element borrow.
+    // Copies retain this origin directly instead of forming alias chains.
+    cxx::ExpressionAST* array_origin = nullptr;
   };
-  // Local address initializers remain aliases only while every pointer use is
-  // a direct dereference or data-member selection.
+  // Local pointers remain aliases while every use selects their referent
+  // instead of observing or modifying the pointer value.
   std::unordered_map<cxx::Symbol*, PointerAlias> pointer_aliases_;
-  // Address expression deferred while its declarator candidate is visited.
-  cxx::UnaryExpressionAST* pointer_alias_initializer_ = nullptr;
+  // Exact expression whose pointer representation is provisionally elided
+  // by a declaration, subscript, or returned array borrow.
+  cxx::ExpressionAST* borrowed_pointer_expression_ = nullptr;
   // Address expression provisionally transported as a semantic call operand.
   // Call propagation restores ordinary identity when the callee needs storage.
   cxx::UnaryExpressionAST* borrowed_call_address_ = nullptr;
