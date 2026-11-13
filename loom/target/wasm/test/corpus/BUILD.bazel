@@ -255,7 +255,6 @@ loom_corpus_build(
     all_roots_xfail = {
         "//loom/target/wasm:simd128": [
             "control/branch/structured.loom",
-            "control/loop/vector_recurrence.loom",
             "function/buffer/arguments.loom",
             "function/buffer/call_overflow.loom",
             "function/buffer/calls.loom",

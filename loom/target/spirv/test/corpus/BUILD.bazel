@@ -291,7 +291,6 @@ _ALL_PROFILE_XFAILS = {
     "memory/atomic/workgroup/observations.loom:@lds_publication_i32": "TARGET/032",
     "memory/atomic/workgroup/observations.loom:@lds_publication_i64": "TARGET/032",
     "memory/atomic/workgroup/panel_stream.loom:@panel_stream": "TARGET/032",
-    "memory/storage/byte_banks.loom:@raw_byte_spaces": "TARGET/001",
     "memory/storage/private.loom:@private_selected_addresses": "TARGET/003",
     "memory/storage/private.loom:@private_vector_lookup": "TARGET/003",
     "memory/storage/workgroup.loom:@initialized_workgroup_buffers": "TARGET/001",
@@ -306,6 +305,8 @@ _EXTENDED_TYPES_XFAILS = {
     "control/branch/guards.loom:@mixed_carriers": "TARGET/031,TARGET/002",
     # Fragment memory descriptors require matching register and storage types.
     "control/branch/guards.loom:@selected_fragment_scale": "TARGET/002",
+    "control/loop/condition.loom:@condition_broadcast": "TARGET/003",
+    "control/loop/condition.loom:@condition_nested_broadcast": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_divergent": "SUBRANGE/024",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_helpers_and_loop": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_masks": "SUBRANGE/024",
@@ -318,6 +319,7 @@ _EXTENDED_TYPES_XFAILS = {
     "memory/atomic/add_f32_subnormals.loom:@global_atomic_add_f32_subnormal": "TARGET/003",
     "memory/atomic/workgroup/observations.loom:@lds_observations_i64": "TARGET/032",
     "memory/packed/tails.loom:@stage_private_i8_3": "TARGET/003",
+    "memory/storage/byte_banks.loom:@raw_byte_spaces": "TARGET/001",
     "memory/storage/workgroup.loom:@workgroup_packet_exchange": "TARGET/003",
     "memory/view/strided_vectors.loom:@strided_vector_address_spaces": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@float8_dequantization": "TARGET/002",
@@ -382,6 +384,7 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "memory/packed/tails.loom:@stage_i8_7": "TARGET/003",
     "memory/storage/byte_banks.loom:@aligned_byte_increment": "TARGET/003",
     "memory/storage/byte_banks.loom:@byte_selected_storage": "TARGET/003",
+    "memory/storage/byte_banks.loom:@raw_byte_spaces": "TARGET/003",
     "memory/storage/load_snapshot.loom:@capture_partial_byte_vectors": "TARGET/003",
     "memory/storage/workgroup.loom:@workgroup_bfloat_payload_exchange": "TARGET/003",
     "memory/storage/workgroup.loom:@workgroup_packet_exchange": "TARGET/003",
@@ -431,6 +434,8 @@ _BDA_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
     # Fragment memory descriptors require matching register and storage types.
     "control/branch/guards.loom:@selected_fragment_scale": "TARGET/002",
     "control/loop/carried_lane_liveness.loom:@loop_carried_lane_liveness": "TARGET/003",
+    "control/loop/condition.loom:@condition_broadcast": "TARGET/003",
+    "control/loop/condition.loom:@condition_nested_broadcast": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_divergent": "SUBRANGE/024",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_helpers_and_loop": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_masks": "SUBRANGE/024",
@@ -474,7 +479,6 @@ _ALL_ROOTS_XFAIL = [
     "memory/atomic/workgroup/global.loom",
     "memory/atomic/workgroup/observations.loom",
     "memory/atomic/workgroup/panel_stream.loom",
-    "memory/storage/byte_banks.loom",
     "memory/storage/private.loom",
 ]
 
