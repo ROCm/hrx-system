@@ -44,6 +44,11 @@ constraint_value(
 )
 
 constraint_value(
+    name = "wine_server_unavailable",
+    constraint_setting = ":wine_server_lifecycle",
+)
+
+constraint_value(
     name = "wine_server_persistent",
     constraint_setting = ":wine_server_lifecycle",
 )
