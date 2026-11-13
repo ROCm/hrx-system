@@ -481,6 +481,10 @@ iree_runtime_cc_library(
     name = "byte_storage_pool",
     srcs = ["byte_storage_pool.c"],
     hdrs = ["byte_storage_pool.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":backing",
         "//runtime/src/iree/base",
@@ -493,6 +497,10 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "byte_storage_pool_test",
     srcs = ["byte_storage_pool_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":byte_storage_pool",
         "//runtime/src/iree/testing:gtest",
