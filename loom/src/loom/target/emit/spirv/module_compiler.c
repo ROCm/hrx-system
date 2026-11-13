@@ -20,8 +20,8 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/error_catalog.h"
-#include "loom/target/arch/spirv/module_contract.h"
 #include "loom/target/arch/spirv/registers.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/spirv/module_emitter.h"
 #include "loom/target/emit/spirv/program.h"
 #include "loom/target/function_version.h"
@@ -65,10 +65,6 @@ typedef struct loom_spirv_program_build_t {
   iree_host_size_t entry_count;
   // First planned exported entry index.
   uint32_t first_entry_index;
-  // Module contract established by the first planned function.
-  loom_spirv_module_contract_t contract;
-  // Whether |contract| has been initialized.
-  bool has_contract;
 } loom_spirv_program_build_t;
 
 typedef struct loom_spirv_call_graph_t {
@@ -101,24 +97,9 @@ static iree_status_t loom_spirv_call_graph_visit_successors(
   return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_program_validate_target(
-    const loom_low_resolved_target_t* target) {
-  if (target->descriptor_set->stable_id !=
-      SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID) {
-    const iree_string_view_t descriptor_set_key =
-        loom_low_descriptor_set_string(target->descriptor_set,
-                                       target->descriptor_set->key_string_ref);
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "verified SPIR-V Low function selected descriptor set '%.*s'; "
-        "expected 'spirv.logical.core'",
-        (int)descriptor_set_key.size, descriptor_set_key.data);
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_spirv_program_reject_missing_target(
-    loom_spirv_program_build_t* build, loom_op_t* function_op) {
+    loom_spirv_program_build_t* build, loom_op_t* function_op,
+    iree_diagnostic_emitter_t emitter) {
   const loom_diagnostic_param_t params[] = {
       loom_param_string(IREE_SV("SPIR-V")),
       loom_param_string(
@@ -130,29 +111,7 @@ static iree_status_t loom_spirv_program_reject_missing_target(
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
   };
-  return iree_diagnostic_emit(build->diagnostic_emitter, &emission);
-}
-
-static iree_status_t loom_spirv_program_validate_contract(
-    loom_spirv_program_build_t* build,
-    const loom_low_resolved_target_t* target) {
-  const loom_spirv_module_contract_t contract = loom_spirv_module_contract_make(
-      target->target_name, loom_low_resolved_target_bundle(target),
-      target->descriptor_set->stable_id, target->feature_bits);
-  if (!build->has_contract) {
-    build->contract = contract;
-    build->has_contract = true;
-    return iree_ok_status();
-  }
-  if (!loom_spirv_module_contract_merge(&build->contract, &contract)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "verified SPIR-V Low module mixes target contract '%.*s' with "
-        "target contract '%.*s'",
-        (int)build->contract.target_name.size, build->contract.target_name.data,
-        (int)contract.target_name.size, contract.target_name.data);
-  }
-  return iree_ok_status();
+  return iree_diagnostic_emit(emitter, &emission);
 }
 
 static const loom_target_facts_t* loom_spirv_program_function_target_facts(
@@ -208,13 +167,9 @@ static iree_status_t loom_spirv_program_build_value_types(
       arena, value_count, sizeof(*types), (void**)&types));
   for (uint16_t i = 0; i < value_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, value_ids[i]);
-    if (!loom_spirv_value_type_from_low_register_type(type, &types[i])) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "verified SPIR-V internal function boundary value %u has no "
-          "physical SPIR-V value type",
-          (unsigned)value_ids[i]);
-    }
+    const bool decoded =
+        loom_spirv_value_type_from_low_register_type(type, &types[i]);
+    IREE_ASSERT(decoded, "Low verification admits SPIR-V boundary types");
   }
   *out_types = types;
   return iree_ok_status();
@@ -244,9 +199,9 @@ static iree_status_t loom_spirv_program_build_function(
     loom_spirv_program_function_disposition_t* out_disposition) {
   *out_disposition = LOOM_SPIRV_PROGRAM_FUNCTION_SKIPPED;
   if (!loom_low_function_def_isa(function_op)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "SPIR-V program planning requires a Low function "
-                            "definition");
+    // Reached declarations are diagnosed at their callsites once definition
+    // collection has established the complete emitted function set.
+    return iree_ok_status();
   }
 
   const loom_target_facts_t* function_target_facts =
@@ -272,14 +227,15 @@ static iree_status_t loom_spirv_program_build_function(
                                    LOOM_TARGET_CODEGEN_FORMAT_SPIRV) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_spirv_program_validate_target(&target));
   if (target_bundle == NULL) {
-    IREE_RETURN_IF_ERROR(
-        loom_spirv_program_reject_missing_target(build, function_op));
+    IREE_RETURN_IF_ERROR(loom_spirv_program_reject_missing_target(
+        build, function_op,
+        loom_diagnostic_export_scope_emitter(&diagnostic_scope)));
     *out_disposition = LOOM_SPIRV_PROGRAM_FUNCTION_REJECTED;
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_spirv_program_validate_contract(build, &target));
+  diagnostic_scope.export_name =
+      loom_target_facts_export_name(target.target_facts);
 
   const loom_func_type_data_t* logical_signature = NULL;
   if (target_bundle->export_plan->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL) {
@@ -292,6 +248,15 @@ static iree_status_t loom_spirv_program_build_function(
   IREE_ASSERT(loom_symbol_ref_is_valid(function_ref) &&
               function_ref.module_id == 0 &&
               function_ref.symbol_id < build->module->symbols.count);
+  if (build->entry_symbols[function_ref.symbol_id] &&
+      target_bundle->export_plan->abi_kind !=
+          LOOM_TARGET_ABI_SHADER_ENTRY_POINT &&
+      target_bundle->export_plan->abi_kind != LOOM_TARGET_ABI_HAL_KERNEL) {
+    *out_disposition = LOOM_SPIRV_PROGRAM_FUNCTION_REJECTED;
+    return loom_target_artifact_emit_requirement(
+        loom_diagnostic_export_scope_emitter(&diagnostic_scope), function_op,
+        IREE_SV("SPIR-V"), IREE_SV("a shader entry point or HAL kernel ABI"));
+  }
   loom_spirv_function_plan_t* function =
       &build->functions[build->function_count];
   *function = (loom_spirv_function_plan_t){
@@ -306,10 +271,6 @@ static iree_status_t loom_spirv_program_build_function(
     IREE_RETURN_IF_ERROR(loom_spirv_program_build_internal_signature(
         build, function_op, function));
   }
-  if (build->function_count >= LOOM_SPIRV_PROGRAM_FUNCTION_INDEX_NONE) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "SPIR-V function index exceeds u32");
-  }
   const uint32_t function_index = (uint32_t)build->function_count++;
   build->function_indices_by_symbol[function_ref.symbol_id] = function_index;
   if (function->is_entry) {
@@ -321,22 +282,11 @@ static iree_status_t loom_spirv_program_build_function(
   return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_program_add_root(
+static void loom_spirv_program_add_root(
     loom_spirv_program_build_t* build, loom_op_t* function_op,
     const loom_target_facts_t* selected_target_facts,
     iree_host_size_t* root_symbols, iree_host_size_t* root_count) {
-  if (!loom_low_function_def_isa(function_op)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "SPIR-V program root must be a Low function "
-                            "definition");
-  }
   const loom_symbol_ref_t function_ref = loom_low_function_callee(function_op);
-  if (!loom_symbol_ref_is_valid(function_ref) || function_ref.module_id != 0 ||
-      function_ref.symbol_id >= build->module->symbols.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "SPIR-V program root must name a module-local "
-                            "function symbol");
-  }
   if (!build->entry_symbols[function_ref.symbol_id]) {
     build->entry_symbols[function_ref.symbol_id] = true;
     root_symbols[(*root_count)++] = function_ref.symbol_id;
@@ -345,21 +295,20 @@ static iree_status_t loom_spirv_program_add_root(
     build->selected_target_facts_by_symbol[function_ref.symbol_id] =
         selected_target_facts;
   }
-  return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_program_select_roots(
+static void loom_spirv_program_select_roots(
     loom_spirv_program_build_t* build,
     const loom_spirv_compile_options_t* options, iree_host_size_t* root_symbols,
     iree_host_size_t* out_root_count) {
   *out_root_count = 0;
   if (options != NULL && options->entry_count != 0) {
     for (iree_host_size_t i = 0; i < options->entry_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_spirv_program_add_root(
-          build, options->entries[i].function_op,
-          options->entries[i].target_facts, root_symbols, out_root_count));
+      loom_spirv_program_add_root(build, options->entries[i].function_op,
+                                  options->entries[i].target_facts,
+                                  root_symbols, out_root_count);
     }
-    return iree_ok_status();
+    return;
   }
 
   bool has_retained_root = false;
@@ -374,14 +323,14 @@ static iree_status_t loom_spirv_program_select_roots(
             &build->function_versions, symbol_id);
     if (version != NULL &&
         iree_any_bit_set(version->flags, LOOM_FUNCTION_VERSION_FLAG_RETAIN)) {
-      IREE_RETURN_IF_ERROR(loom_spirv_program_add_root(
-          build, symbol->defining_op, /*selected_target_facts=*/NULL,
-          root_symbols, out_root_count));
+      loom_spirv_program_add_root(build, symbol->defining_op,
+                                  /*selected_target_facts=*/NULL, root_symbols,
+                                  out_root_count);
       has_retained_root = true;
     }
   }
   if (has_retained_root) {
-    return iree_ok_status();
+    return;
   }
 
   // Direct compiler API users without retained version identities preserve the
@@ -391,18 +340,21 @@ static iree_status_t loom_spirv_program_select_roots(
     loom_op_t* function_op =
         build->module->symbols.entries[symbol_id].defining_op;
     if (loom_low_function_def_isa(function_op)) {
-      IREE_RETURN_IF_ERROR(loom_spirv_program_add_root(
-          build, function_op, /*selected_target_facts=*/NULL, root_symbols,
-          out_root_count));
+      loom_spirv_program_add_root(build, function_op,
+                                  /*selected_target_facts=*/NULL, root_symbols,
+                                  out_root_count);
     }
   }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_spirv_program_reject_recursion(
-    loom_spirv_program_build_t* build, loom_symbol_id_t symbol_id) {
-  loom_op_t* function_op =
-      build->module->symbols.entries[symbol_id].defining_op;
+    loom_spirv_program_build_t* build,
+    const loom_spirv_function_plan_t* function) {
+  const loom_op_t* function_op = function->function_op;
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(function->target_facts),
+      .target = build->diagnostic_emitter,
+  };
   const loom_diagnostic_param_t params[] = {
       loom_param_string(
           loom_low_diagnostic_function_name(build->module, function_op)),
@@ -413,13 +365,16 @@ static iree_status_t loom_spirv_program_reject_recursion(
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
   };
-  return iree_diagnostic_emit(build->diagnostic_emitter, &emission);
+  return iree_diagnostic_emit(
+      loom_diagnostic_export_scope_emitter(&diagnostic_scope), &emission);
 }
 
 static iree_status_t loom_spirv_program_validate_call_closure(
-    const loom_spirv_program_build_t* build) {
+    const loom_spirv_program_build_t* build, bool* out_accepted) {
+  *out_accepted = false;
   for (iree_host_size_t i = 0; i < build->function_count; ++i) {
-    const loom_symbol_id_t symbol_id = build->functions[i].symbol_ref.symbol_id;
+    const loom_spirv_function_plan_t* function = &build->functions[i];
+    const loom_symbol_id_t symbol_id = function->symbol_ref.symbol_id;
     loom_symbol_reference_occurrence_id_t occurrence_id =
         loom_symbol_reference_table_symbol(&build->references, symbol_id)
             .first_outgoing_occurrence_id;
@@ -430,17 +385,35 @@ static iree_status_t loom_spirv_program_validate_call_closure(
       if (occurrence->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL &&
           occurrence->user_op != NULL &&
           loom_low_func_call_isa(occurrence->user_op) &&
-          (occurrence->target_symbol_id >= build->module->symbols.count ||
-           build->function_indices_by_symbol[occurrence->target_symbol_id] ==
-               LOOM_SPIRV_PROGRAM_FUNCTION_INDEX_NONE)) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "verified SPIR-V function calls a function outside its emitted "
-            "target program");
+          build->function_indices_by_symbol[occurrence->target_symbol_id] ==
+              LOOM_SPIRV_PROGRAM_FUNCTION_INDEX_NONE) {
+        loom_diagnostic_export_scope_t diagnostic_scope = {
+            .export_name =
+                loom_target_facts_export_name(function->target_facts),
+            .target = build->diagnostic_emitter,
+        };
+        const loom_diagnostic_param_t params[] = {
+            loom_param_string(loom_low_diagnostic_function_name(
+                build->module, function->function_op)),
+            loom_param_with_field_ref(
+                loom_param_string(loom_low_diagnostic_symbol_name(
+                    build->module,
+                    loom_low_func_call_callee(occurrence->user_op))),
+                loom_low_func_call_callee_diagnostic_ref()),
+            loom_param_string(IREE_SV("spirv.logical.core")),
+        };
+        return iree_diagnostic_emit(
+            loom_diagnostic_export_scope_emitter(&diagnostic_scope),
+            &(loom_diagnostic_emission_t){
+                .op = occurrence->user_op,
+                .error = LOOM_ERR_BACKEND_059,
+                .params = params,
+                .param_count = IREE_ARRAYSIZE(params)});
       }
       occurrence_id = occurrence->next_outgoing_occurrence_id;
     }
   }
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -459,10 +432,9 @@ static iree_status_t loom_spirv_program_plan_build(
   *out_plan = (loom_spirv_program_plan_t){0};
 
   if (module->symbols.count == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "SPIR-V program planning requires at least one Low function "
-        "definition");
+    return loom_target_artifact_emit_requirement(
+        diagnostic_emitter, NULL, IREE_SV("SPIR-V"),
+        IREE_SV("at least one Low function definition"));
   }
   loom_spirv_function_plan_t* functions = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -508,12 +480,11 @@ static iree_status_t loom_spirv_program_plan_build(
       loom_symbol_reference_table_build(module, arena, &build.references));
 
   iree_host_size_t root_count = 0;
-  IREE_RETURN_IF_ERROR(loom_spirv_program_select_roots(
-      &build, options, root_symbols, &root_count));
+  loom_spirv_program_select_roots(&build, options, root_symbols, &root_count);
   if (root_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "SPIR-V program planning requires at least one Low function root");
+    return loom_target_artifact_emit_requirement(
+        diagnostic_emitter, NULL, IREE_SV("SPIR-V"),
+        IREE_SV("at least one Low function root"));
   }
 
   const loom_spirv_call_graph_t call_graph = {
@@ -532,7 +503,7 @@ static iree_status_t loom_spirv_program_plan_build(
   IREE_RETURN_IF_ERROR(loom_scc_compute(&graph, &scc_options, arena, &sccs));
   for (iree_host_size_t i = 0; i < sccs.count; ++i) {
     const loom_scc_t* scc = &sccs.values[i];
-    bool component_emitted = false;
+    const loom_spirv_function_plan_t* component_function = NULL;
     for (iree_host_size_t j = 0; j < scc->node_count; ++j) {
       const loom_symbol_id_t symbol_id = (loom_symbol_id_t)scc->nodes[j];
       loom_op_t* function_op = module->symbols.entries[symbol_id].defining_op;
@@ -544,21 +515,27 @@ static iree_status_t loom_spirv_program_plan_build(
       if (disposition == LOOM_SPIRV_PROGRAM_FUNCTION_REJECTED) {
         return iree_ok_status();
       }
-      component_emitted |= disposition == LOOM_SPIRV_PROGRAM_FUNCTION_APPENDED;
+      if (disposition == LOOM_SPIRV_PROGRAM_FUNCTION_APPENDED) {
+        component_function = &build.functions[build.function_count - 1];
+      }
     }
-    if (scc->is_cycle && component_emitted) {
-      IREE_RETURN_IF_ERROR(loom_spirv_program_reject_recursion(
-          &build, (loom_symbol_id_t)scc->nodes[0]));
+    if (scc->is_cycle && component_function != NULL) {
+      IREE_RETURN_IF_ERROR(
+          loom_spirv_program_reject_recursion(&build, component_function));
       return iree_ok_status();
     }
   }
 
   if (build.entry_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "SPIR-V program planning found no compatible Low function roots");
+    return loom_target_artifact_emit_requirement(
+        diagnostic_emitter, NULL, IREE_SV("SPIR-V"),
+        IREE_SV("at least one compatible Low function root"));
   }
-  IREE_RETURN_IF_ERROR(loom_spirv_program_validate_call_closure(&build));
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_program_validate_call_closure(&build, out_accepted));
+  if (!*out_accepted) {
+    return iree_ok_status();
+  }
   *out_plan = (loom_spirv_program_plan_t){
       .module = module,
       .functions = build.functions,
@@ -617,11 +594,6 @@ static iree_status_t loom_spirv_program_collect_manifest_entries(
     const loom_spirv_program_plan_t* program, iree_arena_allocator_t* arena,
     loom_target_entry_list_t* out_entries) {
   *out_entries = (loom_target_entry_list_t){0};
-  if (program->entry_count > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "SPIR-V artifact manifest has too many functions");
-  }
-
   loom_target_entry_t* entries = NULL;
   if (program->entry_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

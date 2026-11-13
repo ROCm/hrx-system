@@ -20,6 +20,7 @@
 #include "loom/ops/op_registry.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/features.h"
+#include "loom/target/arch/spirv/provider.h"
 #include "loom/target/arch/spirv/records/target_records.h"
 #include "loom/target/facts_builder.h"
 #include "loom/target/function_version.h"
@@ -72,6 +73,7 @@ class SpirvModuleCompilerTest : public ::testing::Test {
     iree_arena_initialize(&block_pool_, &arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
+    IREE_ASSERT_OK(loom_spirv_target_provider.register_context(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     static const loom_low_descriptor_set_provider_t kDescriptorSetProviders[] =
         {
@@ -132,6 +134,26 @@ class SpirvModuleCompilerTest : public ::testing::Test {
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t low_registry_ = {};
 };
+
+TEST_F(SpirvModuleCompilerTest, UnboundCallRejectsWithoutDiagnosticSink) {
+  ModulePtr module = ParseModule(IREE_SV(R"(
+spirv.target<vulkan1_3> @target
+low.func.decl target<spirv.logical.core>(@target) @external()
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @caller() asm {
+  low.func.call @external() : ()
+  return
+}
+)"));
+  loom_spirv_module_binary_t binary = {};
+  bool emitted = true;
+  IREE_ASSERT_OK(loom_spirv_compile_module_binary(
+      module.get(), &low_registry_.registry, iree_diagnostic_emitter_t{},
+      &arena_, nullptr, iree_allocator_system(), &emitted, &binary));
+  EXPECT_FALSE(emitted);
+  EXPECT_EQ(binary.words, nullptr);
+  EXPECT_EQ(binary.word_count, 0u);
+  loom_spirv_module_binary_deinitialize(&binary, iree_allocator_system());
+}
 
 TEST_F(SpirvModuleCompilerTest,
        FunctionTargetFactsSelectCapabilitiesWithoutMutatingIR) {
