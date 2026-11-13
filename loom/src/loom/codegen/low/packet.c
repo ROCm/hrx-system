@@ -66,6 +66,13 @@ loom_attribute_t loom_low_packet_immediate_attr(
                                        immediate);
 }
 
+int64_t loom_low_packet_immediate_i64(const loom_low_packet_view_t* packet,
+                                      const loom_low_immediate_t* immediate) {
+  const loom_attribute_t attr =
+      loom_low_packet_immediate_attr(packet, immediate);
+  return attr.kind == LOOM_ATTR_ABSENT ? immediate->default_value : attr.i64;
+}
+
 uint32_t loom_low_packet_block_index(const loom_low_schedule_table_t* schedule,
                                      const loom_block_t* block) {
   if (!schedule || !block) {

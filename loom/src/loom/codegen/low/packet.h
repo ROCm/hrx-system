@@ -200,6 +200,11 @@ loom_attribute_t loom_low_packet_immediate_attr(
     const loom_low_packet_view_t* packet,
     const loom_low_immediate_t* immediate);
 
+// Reads a verified numeric immediate, applying its descriptor default when
+// omitted. Enum tokens have been resolved before constructing the schedule.
+int64_t loom_low_packet_immediate_i64(const loom_low_packet_view_t* packet,
+                                      const loom_low_immediate_t* immediate);
+
 // Returns the region-block index for |block|, or LOOM_LOW_PACKET_INDEX_NONE
 // when |block| does not belong to |schedule|.
 uint32_t loom_low_packet_block_index(const loom_low_schedule_table_t* schedule,

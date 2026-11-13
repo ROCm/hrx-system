@@ -844,6 +844,29 @@ def _materialize_descriptor_ref_tables(
     return descriptor_set_tables
 
 
+def _native_immediate_slots(descriptor_sets: Sequence[DescriptorSet]) -> dict[str, int]:
+    fields = {
+        "amdgpu.s_waitcnt": ("WAITCNT", ("vmcnt", "lgkmcnt")),
+        "amdgpu.s_mov_b64.symbol": ("SYMBOL_ADDRESS", ("symbol", "byte_offset")),
+    }
+    slots: dict[str, int] = {}
+    for descriptor_set in descriptor_sets:
+        for descriptor in descriptor_set.descriptors:
+            if descriptor.key not in fields:
+                continue
+            prefix, names = fields[descriptor.key]
+            ordinals = {immediate.field_name: index for index, immediate in enumerate(descriptor.immediates)}
+            for name in names:
+                if name not in ordinals:
+                    raise ValueError(f"AMDGPU native assembly descriptor '{descriptor.key}' is missing immediate '{name}'")
+                constant = f"LOOM_AMDGPU_{prefix}_{name.upper()}_IMMEDIATE_SLOT"
+                ordinal = ordinals[name]
+                if constant in slots and slots[constant] != ordinal:
+                    raise ValueError(f"AMDGPU native assembly immediate '{descriptor.key}.{name}' has inconsistent descriptor slots across targets")
+                slots[constant] = ordinal
+    return slots
+
+
 def _emit_tables_header(descriptor_sets: Sequence[DescriptorSet]) -> str:
     descriptor_ref_keys = amdgpu_descriptor_ref_keys()
     lines = [
@@ -870,6 +893,8 @@ def _emit_tables_header(descriptor_sets: Sequence[DescriptorSet]) -> str:
         f"#define LOOM_AMDGPU_REL32_BYTE_OFFSET_IMMEDIATE_SLOT {_u16_literal(_REL32_BYTE_OFFSET_IMMEDIATE_SLOT)}",
         "",
     ]
+    lines.extend(f"#define {name} {_u16_literal(index)}" for name, index in _native_immediate_slots(descriptor_sets).items())
+    lines.append("")
     lines.extend(f"#define {_descriptor_ref_constant_name(key)} {_u16_literal(index)}" for index, key in enumerate(descriptor_ref_keys))
     lines.append("")
     descriptor_ref_key_set = frozenset(descriptor_ref_keys)

@@ -38,6 +38,7 @@ TEST(LowPacketTest, ReadsSparseImmediateValuesAndPreservesOmission) {
       .attribute_mask = 1u << 1,
   };
   EXPECT_EQ(loom_low_packet_immediate_attr(&packet, &field).i64, 17);
+  EXPECT_EQ(loom_low_packet_immediate_i64(&packet, &field), 17);
   field.attribute_mask = 1u << 31;
   const loom_attribute_t symbol =
       loom_low_packet_immediate_attr(&packet, &field);
@@ -47,6 +48,7 @@ TEST(LowPacketTest, ReadsSparseImmediateValuesAndPreservesOmission) {
   field.default_value = 42;
   EXPECT_EQ(loom_low_packet_immediate_attr(&packet, &field).kind,
             LOOM_ATTR_ABSENT);
+  EXPECT_EQ(loom_low_packet_immediate_i64(&packet, &field), 42);
 }
 
 TEST(LowPacketTest, GetsDescriptorPacketOpAttrs) {

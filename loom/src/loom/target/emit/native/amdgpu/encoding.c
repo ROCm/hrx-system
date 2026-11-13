@@ -536,92 +536,13 @@ static const loom_low_immediate_t* loom_amdgpu_descriptor_immediate(
       descriptor_set, descriptor, descriptor_immediate_index)];
 }
 
-static iree_status_t loom_amdgpu_read_immediate_field_value(
-    const loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
-    int64_t* out_value) {
-  *out_value = 0;
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->inputs.schedule->target.descriptor_set;
-  const uint32_t immediate_row = loom_amdgpu_descriptor_immediate_row(
-      descriptor_set, packet->descriptor, descriptor_immediate_index);
-  const loom_low_immediate_t* immediate =
-      &descriptor_set->immediates[immediate_row];
-  const loom_attribute_t attr =
-      loom_low_packet_immediate_attr(packet, immediate);
-  if (attr.kind == LOOM_ATTR_I64) {
-    *out_value = attr.i64;
-    return iree_ok_status();
-  }
-
-  const iree_string_view_t field_name = loom_amdgpu_descriptor_string(
-      descriptor_set, immediate->field_name_string_ref);
-  if (attr.kind == LOOM_ATTR_ABSENT) {
-    if (iree_any_bit_set(immediate->flags,
-                         LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE)) {
-      *out_value = immediate->default_value;
-      return iree_ok_status();
-    }
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU native encoding immediate '%.*s' is "
-                            "required",
-                            (int)field_name.size, field_name.data);
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "AMDGPU native encoding immediate '%.*s' must be an "
-                          "i64",
-                          (int)field_name.size, field_name.data);
-}
-
-static iree_string_view_t loom_amdgpu_read_immediate_field_name(
+static int64_t loom_amdgpu_read_immediate_i64(
     const loom_amdgpu_encode_state_t* state,
     const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index) {
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->inputs.schedule->target.descriptor_set;
   const loom_low_immediate_t* immediate = loom_amdgpu_descriptor_immediate(
-      descriptor_set, packet->descriptor, descriptor_immediate_index);
-  return loom_amdgpu_descriptor_string(descriptor_set,
-                                       immediate->field_name_string_ref);
-}
-
-static iree_status_t loom_amdgpu_read_immediate_u32(
-    const loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
-    uint32_t* out_value) {
-  *out_value = 0;
-  int64_t value = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_field_value(
-      state, packet, descriptor_immediate_index, &value));
-  if (value < 0 || value > UINT32_MAX) {
-    const iree_string_view_t field_name = loom_amdgpu_read_immediate_field_name(
-        state, packet, descriptor_immediate_index);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding immediate '%.*s' value "
-                            "%" PRId64 " is not a u32",
-                            (int)field_name.size, field_name.data, value);
-  }
-  *out_value = (uint32_t)value;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_read_immediate_u16(
-    const loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
-    uint16_t* out_value) {
-  *out_value = 0;
-  int64_t value = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_field_value(
-      state, packet, descriptor_immediate_index, &value));
-  if (value < 0 || value > UINT16_MAX) {
-    const iree_string_view_t field_name = loom_amdgpu_read_immediate_field_name(
-        state, packet, descriptor_immediate_index);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding immediate '%.*s' value "
-                            "%" PRId64 " is not a u16",
-                            (int)field_name.size, field_name.data, value);
-  }
-  *out_value = (uint16_t)value;
-  return iree_ok_status();
+      state->inputs.schedule->target.descriptor_set, packet->descriptor,
+      descriptor_immediate_index);
+  return loom_low_packet_immediate_i64(packet, immediate);
 }
 
 static bool loom_amdgpu_descriptor_semantic_tag_is(
@@ -639,71 +560,13 @@ static bool loom_amdgpu_descriptor_semantic_tag_is(
   return iree_string_view_equal(semantic_tag, expected_tag);
 }
 
-static iree_status_t loom_amdgpu_symbol_ref_from_attr(
-    const loom_amdgpu_encode_state_t* state, loom_attribute_t attr,
-    iree_string_view_t field_name, loom_symbol_ref_t* out_symbol_ref) {
-  *out_symbol_ref = loom_symbol_ref_null();
-  if (attr.kind == LOOM_ATTR_ABSENT) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU native encoding immediate '%.*s' is "
-                            "required",
-                            (int)field_name.size, field_name.data);
-  }
-  if (attr.kind != LOOM_ATTR_SYMBOL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU native encoding immediate '%.*s' must be "
-                            "a symbol reference",
-                            (int)field_name.size, field_name.data);
-  }
-  const loom_symbol_ref_t symbol_ref = attr.symbol;
-  if (!loom_symbol_ref_is_valid(symbol_ref) || symbol_ref.module_id != 0 ||
-      symbol_ref.symbol_id >= state->inputs.schedule->module->symbols.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU native encoding immediate '%.*s' references an invalid symbol",
-        (int)field_name.size, field_name.data);
-  }
-  *out_symbol_ref = symbol_ref;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_read_immediate_symbol(
+static loom_symbol_ref_t loom_amdgpu_read_immediate_symbol(
     const loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
-    loom_symbol_ref_t* out_symbol_ref) {
-  *out_symbol_ref = loom_symbol_ref_null();
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->inputs.schedule->target.descriptor_set;
-  const uint32_t immediate_row = loom_amdgpu_descriptor_immediate_row(
-      descriptor_set, packet->descriptor, descriptor_immediate_index);
-  const loom_low_immediate_t* immediate =
-      &descriptor_set->immediates[immediate_row];
-  const iree_string_view_t field_name = loom_amdgpu_descriptor_string(
-      descriptor_set, immediate->field_name_string_ref);
-  const loom_attribute_t attr =
-      loom_low_packet_immediate_attr(packet, immediate);
-  return loom_amdgpu_symbol_ref_from_attr(state, attr, field_name,
-                                          out_symbol_ref);
-}
-
-static iree_status_t loom_amdgpu_read_immediate_u64(
-    const loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
-    uint64_t* out_value) {
-  *out_value = 0;
-  int64_t value = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_field_value(
-      state, packet, descriptor_immediate_index, &value));
-  if (value < 0) {
-    const iree_string_view_t field_name = loom_amdgpu_read_immediate_field_name(
-        state, packet, descriptor_immediate_index);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding immediate '%.*s' value "
-                            "%" PRId64 " is negative",
-                            (int)field_name.size, field_name.data, value);
-  }
-  *out_value = (uint64_t)value;
-  return iree_ok_status();
+    const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index) {
+  const loom_low_immediate_t* immediate = loom_amdgpu_descriptor_immediate(
+      state->inputs.schedule->target.descriptor_set, packet->descriptor,
+      descriptor_immediate_index);
+  return loom_low_packet_immediate_attr(packet, immediate).symbol;
 }
 
 typedef struct loom_amdgpu_rel32_text_fixup_info_t {
@@ -784,70 +647,33 @@ static iree_status_t loom_amdgpu_packet_lhs_pc_base(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_read_immediate_encoding_field_value(
+static uint64_t loom_amdgpu_read_immediate_encoding_field_value(
     const loom_amdgpu_encode_state_t* state,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
-    uint64_t* out_value) {
-  *out_value = 0;
-  int64_t value = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_field_value(
-      state, packet, descriptor_immediate_index, &value));
-  uint64_t unsigned_value = (uint64_t)value;
-  const loom_low_descriptor_set_t* descriptor_set =
-      state->inputs.schedule->target.descriptor_set;
+    const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index) {
   const loom_low_immediate_t* immediate = loom_amdgpu_descriptor_immediate(
-      descriptor_set, packet->descriptor, descriptor_immediate_index);
+      state->inputs.schedule->target.descriptor_set, packet->descriptor,
+      descriptor_immediate_index);
+  uint64_t value = (uint64_t)loom_low_packet_immediate_i64(packet, immediate);
   if (immediate->kind == LOOM_LOW_IMMEDIATE_KIND_SIGNED) {
-    const int64_t maximum = immediate->unsigned_max > INT64_MAX
-                                ? INT64_MAX
-                                : (int64_t)immediate->unsigned_max;
-    if (value < immediate->signed_min || value > maximum) {
-      const iree_string_view_t field_name = loom_amdgpu_descriptor_string(
-          descriptor_set, immediate->field_name_string_ref);
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU native encoding signed immediate '%.*s' "
-                              "value %" PRId64 " is out of range",
-                              (int)field_name.size, field_name.data, value);
-    }
-    if (immediate->bit_width == 0 || immediate->bit_width > 64) {
-      const iree_string_view_t field_name = loom_amdgpu_descriptor_string(
-          descriptor_set, immediate->field_name_string_ref);
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU native encoding signed immediate '%.*s' has invalid bit "
-          "width %" PRIu16,
-          (int)field_name.size, field_name.data, immediate->bit_width);
-    }
-    unsigned_value =
-        (uint64_t)value & loom_amdgpu_low_bit_mask(immediate->bit_width);
-  } else if (value < 0) {
-    const iree_string_view_t field_name = loom_amdgpu_descriptor_string(
-        descriptor_set, immediate->field_name_string_ref);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU native encoding immediate '%.*s' value "
-                            "%" PRId64 " is negative",
-                            (int)field_name.size, field_name.data, value);
+    value &= loom_amdgpu_low_bit_mask(immediate->bit_width);
   }
   switch (immediate->encoding_id) {
     case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_SOURCE_INLINE_U32: {
       uint16_t source = 0;
       const bool encoded = loom_amdgpu_encoding_inline_u32_source(
-          state->inputs.encoding_table, (uint32_t)unsigned_value, &source);
+          state->inputs.encoding_table, (uint32_t)value, &source);
       IREE_ASSERT(encoded);
-      *out_value = source;
-      return iree_ok_status();
+      return source;
     }
     case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_SOURCE_INLINE_F32: {
       uint16_t source = 0;
       const bool encoded = loom_amdgpu_encoding_inline_f32_source(
-          state->inputs.encoding_table, (uint32_t)unsigned_value, &source);
+          state->inputs.encoding_table, (uint32_t)value, &source);
       IREE_ASSERT(encoded);
-      *out_value = source;
-      return iree_ok_status();
+      return source;
     }
     default:
-      *out_value = unsigned_value;
-      return iree_ok_status();
+      return value;
   }
 }
 
@@ -860,9 +686,8 @@ static iree_status_t loom_amdgpu_encode_sop1_s_mov_b32(
     sdst = loom_amdgpu_descriptor_single_fixed_encoding_field_u16(
         state, packet->descriptor);
   }
-  uint32_t imm32 = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_read_immediate_u32(state, packet, 0, &imm32));
+  const uint32_t imm32 =
+      (uint32_t)loom_amdgpu_read_immediate_i64(state, packet, 0);
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_mov_b32_u32(
       state->inputs.encoding_table, sdst, imm32, &encoded_packet));
@@ -875,9 +700,8 @@ static iree_status_t loom_amdgpu_encode_vop1_v_mov_b32(
   IREE_ASSERT(packet->descriptor == state->inputs.descriptors.v_mov_b32);
   const uint16_t vdst =
       loom_amdgpu_packet_descriptor_operand_vgpr_low_register(state, packet, 0);
-  uint32_t imm32 = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_read_immediate_u32(state, packet, 0, &imm32));
+  const uint32_t imm32 =
+      (uint32_t)loom_amdgpu_read_immediate_i64(state, packet, 0);
   loom_amdgpu_encoding_packet_t encoded_packet;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_v_mov_b32_u32(
       state->inputs.encoding_table, vdst, imm32, &encoded_packet));
@@ -1358,29 +1182,25 @@ static void loom_amdgpu_push_immediate_encoding_field_values(
   }
 }
 
-static iree_status_t loom_amdgpu_descriptor_literal_immediate_u32(
+static bool loom_amdgpu_descriptor_literal_immediate_u32(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet,
-    uint32_t* out_value, bool* out_found) {
+    uint32_t* out_value) {
   *out_value = 0;
-  *out_found = false;
   const loom_low_descriptor_set_t* descriptor_set =
       state->inputs.schedule->target.descriptor_set;
-  for (uint16_t i = 0;
-       i < loom_low_descriptor_layout(descriptor_set, packet->descriptor)
-               ->immediate_count;
-       ++i) {
-    const loom_low_immediate_t* immediate =
-        loom_amdgpu_descriptor_immediate(descriptor_set, packet->descriptor, i);
-    if (!loom_amdgpu_encoding_field_is_literal(immediate->encoding_field_id) ||
-        immediate->encoding_slice_count != 0) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_read_immediate_u32(state, packet, i, out_value));
-    *out_found = true;
-    return iree_ok_status();
+  const loom_amdgpu_descriptor_immediate_slots_t slots =
+      loom_amdgpu_descriptor_immediate_slots(descriptor_set,
+                                             packet->descriptor);
+  if (slots.literal == LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE) {
+    return false;
   }
-  return iree_ok_status();
+  const loom_low_immediate_t* immediate = loom_amdgpu_descriptor_immediate(
+      descriptor_set, packet->descriptor, slots.literal);
+  if (immediate->encoding_slice_count != 0) {
+    return false;
+  }
+  *out_value = (uint32_t)loom_low_packet_immediate_i64(packet, immediate);
+  return true;
 }
 
 static iree_status_t loom_amdgpu_try_encode_vop2_u32_vgpr_packet(
@@ -1394,10 +1214,7 @@ static iree_status_t loom_amdgpu_try_encode_vop2_u32_vgpr_packet(
   }
 
   uint32_t literal = 0;
-  bool has_literal = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_literal_immediate_u32(
-      state, packet, &literal, &has_literal));
-  if (!has_literal) {
+  if (!loom_amdgpu_descriptor_literal_immediate_u32(state, packet, &literal)) {
     return iree_ok_status();
   }
   bool replaced_src0_literal = false;
@@ -1493,12 +1310,10 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
   uint64_t rel32_target_symbol_byte_offset = 0;
   uint64_t rel32_base_pc_byte_offset = 0;
   if (has_rel32_text_fixup) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_symbol(
-        state, packet, LOOM_AMDGPU_REL32_SYMBOL_IMMEDIATE_SLOT,
-        &rel32_target_symbol));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_u64(
-        state, packet, LOOM_AMDGPU_REL32_BYTE_OFFSET_IMMEDIATE_SLOT,
-        &rel32_target_symbol_byte_offset));
+    rel32_target_symbol = loom_amdgpu_read_immediate_symbol(
+        state, packet, LOOM_AMDGPU_REL32_SYMBOL_IMMEDIATE_SLOT);
+    rel32_target_symbol_byte_offset = (uint64_t)loom_amdgpu_read_immediate_i64(
+        state, packet, LOOM_AMDGPU_REL32_BYTE_OFFSET_IMMEDIATE_SLOT);
     IREE_RETURN_IF_ERROR(loom_amdgpu_packet_lhs_pc_base(
         state, packet, rel32_fixup.pc_component, &rel32_base_pc_byte_offset));
   }
@@ -1556,8 +1371,7 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
     if (has_rel32_text_fixup && i == LOOM_AMDGPU_REL32_SYMBOL_IMMEDIATE_SLOT) {
       value = 0;
     } else {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_encoding_field_value(
-          state, packet, i, &value));
+      value = loom_amdgpu_read_immediate_encoding_field_value(state, packet, i);
     }
     loom_amdgpu_push_immediate_encoding_field_values(
         state, immediate, value, field_values, &field_value_count);
@@ -1664,10 +1478,10 @@ static iree_status_t loom_amdgpu_encode_symbol_address(
       loom_amdgpu_packet_descriptor_operand_sgpr(state, packet, 0);
   loom_symbol_ref_t symbol = loom_symbol_ref_null();
   uint64_t symbol_byte_offset = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_read_immediate_symbol(state, packet, 0, &symbol));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_read_immediate_u64(state, packet, 1, &symbol_byte_offset));
+  symbol = loom_amdgpu_read_immediate_symbol(
+      state, packet, LOOM_AMDGPU_SYMBOL_ADDRESS_SYMBOL_IMMEDIATE_SLOT);
+  symbol_byte_offset = (uint64_t)loom_amdgpu_read_immediate_i64(
+      state, packet, LOOM_AMDGPU_SYMBOL_ADDRESS_BYTE_OFFSET_IMMEDIATE_SLOT);
   loom_amdgpu_encoding_packet_t encoded;
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_getpc_b64(
       state->inputs.encoding_table, base, &encoded));
@@ -1754,8 +1568,8 @@ static iree_status_t loom_amdgpu_update_vgpr_msb_mode_after_descriptor(
       packet->descriptor != state->inputs.descriptors.set_vgpr_msb) {
     return iree_ok_status();
   }
-  uint16_t mode = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_read_immediate_u16(state, packet, 0, &mode));
+  const uint16_t mode =
+      (uint16_t)loom_amdgpu_read_immediate_i64(state, packet, 0);
   state->traversal.current_vgpr_msb_mode = (uint8_t)(mode & 0xFFu);
   return iree_ok_status();
 }

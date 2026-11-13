@@ -258,3 +258,25 @@ low.func.def schedule(locked) target<amdgpu.rdna4.gfx125x.core>(@target) @flat_a
 0x04100006
 0x00000004
 0xBFB00000
+
+// ====
+
+// Native assembly consumes the same sparse bindings as binary encoding.
+// RUN: emit amdgpu-assembly @sparse_immediates
+amdgpu.target<gfx1100> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @sparse_immediates(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  global_store_b32_saddr %address, %value, %base
+  global_store_b32_saddr %address, %value, %base {offset = -16}
+  global_store_b32_saddr %address, %value, %base {slc = 1}
+  global_store_b32_saddr %address, %value, %base {offset = 12, slc = 1}
+  return
+}
+
+// ----
+  global_store_b32 v0, v1, s[0:1] offset:0
+  global_store_b32 v0, v1, s[0:1] offset:-16
+  global_store_b32 v0, v1, s[0:1] offset:0 slc
+  global_store_b32 v0, v1, s[0:1] offset:12 slc
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
