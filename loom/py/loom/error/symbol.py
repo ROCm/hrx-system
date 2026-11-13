@@ -86,6 +86,23 @@ ERR_SYMBOL_006 = ErrorDef(
     ),
 )
 
+# ERR_SYMBOL_007: Final compilation requires exact configuration definitions.
+ERR_SYMBOL_007 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=7,
+    severity=Severity.ERROR,
+    summary="Configuration declaration remains unresolved.",
+    message=(
+        "config '@{symbol_name}' requires an exact definition for final "
+        "compilation (unresolved count: {unresolved_count})"
+    ),
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("unresolved_count", ParamKind.U64),
+    ),
+    fix_hint="Supply an exact config value before final compilation",
+)
+
 ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_001,
     ERR_SYMBOL_002,
@@ -93,4 +110,5 @@ ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_004,
     ERR_SYMBOL_005,
     ERR_SYMBOL_006,
+    ERR_SYMBOL_007,
 )

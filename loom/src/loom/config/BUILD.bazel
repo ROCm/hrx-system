@@ -18,6 +18,9 @@ loom_cc_library(
     hdrs = ["application.h"],
     deps = [
         "//loom/src/loom/analysis:symbol_value_constraints",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/rewrite:remap",

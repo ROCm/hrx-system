@@ -118,7 +118,8 @@ loomc_status_t loomc_config_apply_text_to_module(
       loomc_status_from_iree(loom_config_text_materialize_module(
           options->module, &materialize_options, options->block_pool,
           &materialize_result));
-  if (loomc_status_is_ok(status) &&
+  status = loomc_config_report_text_status(options->result, status);
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(options->result) &&
       materialize_result.materialized_count != 0) {
     status = loomc_result_verify_loom_module(options->context, options->module,
                                              options->source_resolver,
@@ -127,8 +128,8 @@ loomc_status_t loomc_config_apply_text_to_module(
   if (loomc_status_is_ok(status) && loomc_result_succeeded(options->result) &&
       iree_any_bit_set(options->policy_flags,
                        LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED)) {
-    status = loomc_status_from_iree(
-        loom_config_require_resolved_module(options->module, NULL));
+    status = loomc_config_require_resolved_module(
+        options->module, options->source_resolver, options->result);
   }
-  return loomc_config_report_text_status(options->result, status);
+  return status;
 }

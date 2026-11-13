@@ -841,7 +841,7 @@ TEST(CompileTest, CompileModuleReportsUnresolvedConfigAsResultDiagnostic) {
       &options, loomc_allocator_system(), &result);
   LOOMC_EXPECT_OK(status);
   ResultPtr result_ptr(result);
-  ExpectFailedResultCode(result_ptr.get(), "CONFIG/INVALID");
+  ExpectFailedResultCode(result_ptr.get(), "SYMBOL/007");
 }
 
 TEST(CompileTest, CompileModuleReportsNonConfigProviderAsDiagnostic) {

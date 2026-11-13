@@ -6,10 +6,11 @@
 
 #include "loom/config/application.h"
 
-#include <inttypes.h>
-
 #include "iree/base/api.h"
 #include "loom/analysis/symbol_value_constraints.h"
+#include "loom/error/emitter.h"
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/config/ops.h"
 #include "loom/rewrite/remap.h"
 
@@ -210,32 +211,32 @@ iree_status_t loom_config_overlay_module(
 }
 
 iree_status_t loom_config_require_resolved_module(
-    const loom_module_t* module, loom_config_resolution_result_t* out_result) {
-  IREE_ASSERT_ARGUMENT(module);
-  loom_config_resolution_result_t result = {0};
-  iree_string_view_t first_unresolved_name = iree_string_view_empty();
-
+    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
+    loom_config_resolution_result_t* out_result) {
+  *out_result = (loom_config_resolution_result_t){0};
+  const loom_symbol_t* first_unresolved = NULL;
   const loom_symbol_t* symbol = NULL;
   loom_module_for_each_symbol(module, symbol) {
     if (!symbol->defining_op || !loom_config_decl_isa(symbol->defining_op)) {
       continue;
     }
-    if (result.unresolved_count == 0) {
-      first_unresolved_name = loom_config_symbol_name(module, symbol);
+    if (out_result->unresolved_count == 0) {
+      first_unresolved = symbol;
     }
-    ++result.unresolved_count;
+    ++out_result->unresolved_count;
   }
-
-  if (out_result) {
-    *out_result = result;
-  }
-  if (result.unresolved_count == 0) {
+  if (!first_unresolved) {
     return iree_ok_status();
   }
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "unresolved config '@%.*s' remains for final compilation (%" PRIhsz
-      " unresolved config%s total)",
-      (int)first_unresolved_name.size, first_unresolved_name.data,
-      result.unresolved_count, result.unresolved_count == 1 ? "" : "s");
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_config_symbol_name(module, first_unresolved)),
+      loom_param_u64(out_result->unresolved_count),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = first_unresolved->defining_op,
+      .error = LOOM_ERR_SYMBOL_007,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
 }

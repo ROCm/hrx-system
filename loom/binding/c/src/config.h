@@ -114,6 +114,11 @@ typedef struct loomc_config_apply_text_to_module_options_t {
   iree_arena_block_pool_t* block_pool;
 } loomc_config_apply_text_to_module_options_t;
 
+// Checks final configuration resolution and records source-backed diagnostics.
+LOOMC_API_PRIVATE loomc_status_t loomc_config_require_resolved_module(
+    const loom_module_t* module, loom_source_resolver_t source_resolver,
+    loomc_result_t* result);
+
 // Validates config policy flags shared by all input representations.
 LOOMC_API_PRIVATE loomc_status_t
 loomc_config_validate_policy_flags(loomc_config_policy_flags_t flags);

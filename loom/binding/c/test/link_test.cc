@@ -2314,7 +2314,7 @@ func.def public @entry() -> (index) {
                                &options, &result);
 
   EXPECT_EQ(module.get(), nullptr);
-  ExpectFailedResultCode(result.get(), "CONFIG/INVALID");
+  ExpectFailedResultCode(result.get(), "SYMBOL/007");
 }
 
 }  // namespace

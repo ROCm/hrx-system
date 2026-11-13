@@ -112,8 +112,12 @@ iree_status_t loom_config_overlay_module(
 // valid IR and keep config sensitivity visible to symbol dependency/index
 // consumers. Final compilation drivers should call this after config
 // application and any pruning passes that remove unused declarations.
+// Unresolved declarations emit a source-backed diagnostic and are counted in
+// |out_result| independently of callback presence. Status carries diagnostic
+// delivery failure only.
 iree_status_t loom_config_require_resolved_module(
-    const loom_module_t* module, loom_config_resolution_result_t* out_result);
+    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
+    loom_config_resolution_result_t* out_result);
 
 #ifdef __cplusplus
 }  // extern "C"

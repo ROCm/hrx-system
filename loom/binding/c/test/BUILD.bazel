@@ -51,6 +51,7 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/config:application",
         "//loom/src/loom/config:schema",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

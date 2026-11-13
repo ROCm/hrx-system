@@ -1059,12 +1059,9 @@ loomc_status_t loomc_compile_artifact(
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       require_resolved_config) {
-    status = loomc_status_from_iree(loom_config_require_resolved_module(
-        loomc_module_loom_module(module), NULL));
-    if (!loomc_status_is_ok(status)) {
-      status = loomc_compile_fail_result_from_status(
-          result, loomc_make_cstring_view("CONFIG/INVALID"), status);
-    }
+    status = loomc_config_require_resolved_module(
+        loomc_module_loom_module(module), loomc_module_source_resolver(module),
+        result);
   }
 
   loomc_pass_program_t* default_pass_program = NULL;

@@ -10,8 +10,10 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
+#include "loom/config/application.h"
 #include "loom/config/schema.h"
 #include "loom/util/stream.h"
+#include "loomc/iree.h"
 #include "loomc/pass.h"
 #include "module.h"
 #include "test/util.h"
@@ -193,6 +195,50 @@ TEST_F(ModuleConfigTest, SchemaMatchesNativeAndOutlivesCompiler) {
   workspace_.reset();
   context_.reset();
   EXPECT_EQ(ReadSchema(schema.get()), expected);
+}
+
+TEST_F(ModuleConfigTest, ResolutionRetainsLocationWithoutSourceContents) {
+  for (loomc_source_retention_t retention : {
+           LOOMC_SOURCE_RETENTION_EXACT,
+           LOOMC_SOURCE_RETENTION_METADATA_ONLY,
+       }) {
+    SCOPED_TRACE(retention);
+    const loomc_context_options_t context_options = {
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+        .structure_size = sizeof(context_options),
+        .source_retention = retention,
+    };
+    loomc_context_t* context = nullptr;
+    LOOMC_ASSERT_OK(loomc_context_create(&context_options,
+                                         loomc_allocator_system(), &context));
+    context_.reset(context);
+    auto module = CreateModule();
+
+    loom_config_resolution_result_t resolution = {};
+    LOOMC_ASSERT_OK(loomc_status_from_iree(loom_config_require_resolved_module(
+        loomc_module_loom_module(module.get()), /*emitter=*/{}, &resolution)));
+    EXPECT_EQ(resolution.unresolved_count, 2u);
+
+    const loomc_module_config_options_t options = {
+        .config = {.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED},
+    };
+    auto result = Apply(module.get(), &options);
+    EXPECT_FALSE(loomc_result_succeeded(result.get()));
+    ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+    const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+    EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/007");
+    ASSERT_NE(diagnostic->range.source, nullptr);
+    EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+              "configuration.loom");
+    EXPECT_EQ(diagnostic->range.start_line, 2u);
+    EXPECT_EQ(diagnostic->range.start_column, 1u);
+    EXPECT_EQ(diagnostic->range.end_line, 2u);
+    EXPECT_GT(diagnostic->range.end_column, diagnostic->range.start_column);
+    EXPECT_EQ(loomc_source_contents(diagnostic->range.source).data_length != 0,
+              retention == LOOMC_SOURCE_RETENTION_EXACT);
+    EXPECT_NE(ToString(diagnostic->message).find("unresolved count: 2"),
+              std::string::npos);
+  }
 }
 
 TEST_F(ModuleConfigTest, FailedResolutionPreservesAppliedValues) {

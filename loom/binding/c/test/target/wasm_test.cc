@@ -520,7 +520,7 @@ TEST(TargetWasmTest, CompilesArtifactWithEmitterDefaultPipeline) {
   ASSERT_FALSE(loomc_result_succeeded(result.get()));
   ASSERT_NE(loomc_result_diagnostic_count(result.get()), 0u);
   EXPECT_EQ(ToString(loomc_result_diagnostic_at(result.get(), 0)->code),
-            "CONFIG/INVALID");
+            "SYMBOL/007");
   ASSERT_EQ(loomc_result_artifact_count(result.get()), 1u);
   const loomc_artifact_t* failed_report =
       loomc_result_artifact_at(result.get(), 0);
