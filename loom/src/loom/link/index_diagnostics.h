@@ -33,6 +33,15 @@ typedef struct loom_link_diagnostic_environment_t {
   void* user_data;
 } loom_link_diagnostic_environment_t;
 
+// Resolves an indexed definition to borrowed source identity and coordinates,
+// enriching it with an exact snapshot when available. Returns false when the
+// symbol has no file origin. This never materializes a bytecode body.
+bool loom_link_index_resolve_source(
+    const loom_link_module_index_t* index,
+    loom_link_diagnostic_environment_t environment,
+    const loom_link_module_index_symbol_t* symbol,
+    loom_source_range_t* out_range);
+
 // Emits at |symbol|'s definition with optional |related| definition provenance.
 // NULL symbols represent an invocation-wide error with no authored location.
 iree_status_t loom_link_index_emit_diagnostic(

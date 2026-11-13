@@ -36,7 +36,7 @@ static bool loom_link_index_resolve_exact_source(
   return loom_source_resolve_snapshot(&snapshot, entry, out_range);
 }
 
-static bool loom_link_index_symbol_source(
+bool loom_link_index_resolve_source(
     const loom_link_module_index_t* index,
     loom_link_diagnostic_environment_t environment,
     const loom_link_module_index_symbol_t* symbol,
@@ -80,8 +80,8 @@ iree_status_t loom_link_index_emit_diagnostic(
   loom_source_range_t origin;
   loom_source_range_t related_origin;
   const bool has_origin =
-      loom_link_index_symbol_source(index, environment, symbol, &origin);
-  const bool has_related = loom_link_index_symbol_source(
+      loom_link_index_resolve_source(index, environment, symbol, &origin);
+  const bool has_related = loom_link_index_resolve_source(
       index, environment, related, &related_origin);
   const loom_diagnostic_related_op_t related_location = {
       .label = IREE_SV("conflicting declaration or definition"),

@@ -106,12 +106,17 @@ static iree_status_t loom_link_index_query_candidates(
     loom_link_template_candidate_loader_t* candidate_loader,
     const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
+    loom_link_diagnostic_environment_t diagnostics,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,
-    loom_template_selection_query_result_t* out_result) {
+    loom_template_selection_query_result_t* out_result, bool* out_accepted) {
   loom_template_provider_slice_t external_candidates =
       loom_template_provider_slice_empty();
   IREE_RETURN_IF_ERROR(loom_link_template_candidate_loader_load(
-      candidate_loader, plan, materialization, arena, &external_candidates));
+      candidate_loader, plan, materialization, diagnostics, arena,
+      &external_candidates, out_accepted));
+  if (!*out_accepted) {
+    return iree_ok_status();
+  }
 
   loom_symbol_fact_table_t fact_table;
   loom_symbol_fact_table_initialize(&fact_table, arena);
@@ -235,8 +240,8 @@ static iree_status_t loom_link_index_materialize_link(
     loom_template_selection_query_result_t query = {0};
     if (iree_status_is_ok(status) && accepted) {
       status = loom_link_index_query_candidates(
-          index, candidate_loader, plan, &analysis, environment->block_pool,
-          &query_arena, &query);
+          index, candidate_loader, plan, &analysis, environment->diagnostics,
+          environment->block_pool, &query_arena, &query, &accepted);
     }
     const bool changed =
         iree_status_is_ok(status) && accepted &&

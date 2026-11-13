@@ -593,10 +593,23 @@ TEST_F(LinkRequestTest, RejectsProviderArityMismatchAcrossLibraryForms) {
       ASSERT_NE(result, nullptr);
       EXPECT_FALSE(loomc_result_succeeded(result.get()));
       ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
-      EXPECT_THAT(
-          ToString(loomc_result_diagnostic_at(result.get(), 0)->message),
-          ::testing::HasSubstr(
-              "provider signature does not match its bound template family"));
+      const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+      EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/014");
+      EXPECT_EQ(
+          ToString(diagnostic->message),
+          std::string("declaration for '@candidate' has 1 ") +
+              (strcmp(filename, "arity_arguments.loom") == 0 ? "arguments"
+                                                             : "results") +
+              ", but the selected symbol has 2");
+      ASSERT_NE(diagnostic->range.source, nullptr);
+      EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+                "arity_input.loom");
+      EXPECT_EQ(diagnostic->range.start_line, 1u);
+      ASSERT_EQ(diagnostic->related_location_count, 1u);
+      const auto& provider = diagnostic->related_locations[0].range;
+      ASSERT_NE(provider.source, nullptr);
+      EXPECT_EQ(ToString(loomc_source_identifier(provider.source)), filename);
+      EXPECT_EQ(provider.start_line, 3u);
     }
   }
 }

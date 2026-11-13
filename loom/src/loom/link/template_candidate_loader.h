@@ -48,11 +48,15 @@ void loom_link_template_candidate_loader_free(
 // or operations to the materialized module. The returned summaries belong to
 // |arena| and are suitable as the external catalog overlay for one selection
 // query.
+// Signature rejection leaves |out_accepted| false and |out_candidates| empty,
+// independently of the optional diagnostic callback. Only infrastructure
+// failures return a non-OK status. Invocation diagnostics are never cached.
 iree_status_t loom_link_template_candidate_loader_load(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
+    loom_link_diagnostic_environment_t diagnostics,
     iree_arena_allocator_t* arena,
-    loom_template_provider_slice_t* out_candidates);
+    loom_template_provider_slice_t* out_candidates, bool* out_accepted);
 
 #ifdef __cplusplus
 }  // extern "C"

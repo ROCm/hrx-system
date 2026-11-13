@@ -444,11 +444,15 @@ loom_cc_library(
     ],
     deps = [
         ":bytecode_template_contract",
+        ":index_diagnostics",
         ":module_index",
         ":plan_materializer",
         ":planner",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/error:source",
         "//loom/src/loom/format/bytecode:function_projection_reader",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
@@ -476,6 +480,30 @@ loom_cc_library(
         "//loom/src/loom/transforms/symbol:template_selection",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "template_candidate_loader_test",
+    srcs = ["template_candidate_loader_test.cc"],
+    deps = [
+        ":index_materializer",
+        ":module_index",
+        ":plan_materializer",
+        ":planner",
+        ":template_candidate_loader",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link/testdata/link_index",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
