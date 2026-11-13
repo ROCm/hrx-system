@@ -17,11 +17,13 @@
 // Edge collection
 //===----------------------------------------------------------------------===//
 
-// Temporary edge list during construction. Arena-allocated with
-// growth support.
+// One caller's construction state. Only its callee array survives the walk.
 typedef struct loom_edge_list_t {
+  // First-seen callee symbols, retained by the completed graph node.
   loom_symbol_id_t* callees;
+  // Number of distinct callees already appended.
   uint16_t count;
+  // Allocated entries in callees.
   uint16_t capacity;
 } loom_edge_list_t;
 
@@ -55,12 +57,6 @@ static iree_status_t loom_call_graph_grow_u16_bounded_array(
 static iree_status_t loom_edge_list_add(loom_edge_list_t* list,
                                         iree_arena_allocator_t* arena,
                                         loom_symbol_id_t callee) {
-  // Dedup: check if already present.
-  for (uint16_t i = 0; i < list->count; ++i) {
-    if (list->callees[i] == callee) {
-      return iree_ok_status();
-    }
-  }
   if (list->count >= list->capacity) {
     if (list->count == UINT16_MAX) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -81,11 +77,20 @@ static iree_status_t loom_edge_list_add(loom_edge_list_t* list,
 //===----------------------------------------------------------------------===//
 
 typedef struct loom_call_collector_t {
+  // Current caller's construction state, reset between function walks.
   loom_edge_list_t* edges;
+  // Owns graph output and temporary membership storage.
   iree_arena_allocator_t* arena;
+  // Immutable source module providing the symbol domain and callable
+  // interfaces.
   const loom_module_t* module;
+  // Symbol-indexed membership for the current caller, allocated on its first
+  // edge and reused by clearing only symbols in each completed callee list.
+  uint64_t* callee_membership;
   // Function currently supplying call edges.
   loom_symbol_id_t caller;
+  // Tracked call kinds observed across all function walks.
+  uint8_t call_kinds;
   // Optional owner retaining the discovered callsites.
   loom_call_graph_call_visitor_t visitor;
 } loom_call_collector_t;
@@ -106,9 +111,11 @@ static iree_status_t loom_call_collector_visit(
   if (!loom_call_like_isa(call)) {
     return iree_ok_status();
   }
-  if (!loom_call_graph_tracks_call_kind(loom_call_like_kind(call))) {
+  const loom_call_like_kind_t kind = loom_call_like_kind(call);
+  if (!loom_call_graph_tracks_call_kind(kind)) {
     return iree_ok_status();
   }
+  collector->call_kinds |= (uint8_t)(1u << kind);
   loom_symbol_ref_t callee_ref = loom_call_like_callee(call);
   if (!loom_symbol_ref_is_valid(callee_ref) || callee_ref.module_id != 0 ||
       callee_ref.symbol_id >= collector->module->symbols.count) {
@@ -117,8 +124,22 @@ static iree_status_t loom_call_collector_visit(
         "call-like op target symbol ref {module=%u, symbol=%u} is invalid",
         (unsigned)callee_ref.module_id, (unsigned)callee_ref.symbol_id);
   }
-  IREE_RETURN_IF_ERROR(loom_edge_list_add(collector->edges, collector->arena,
-                                          callee_ref.symbol_id));
+  if (!collector->callee_membership) {
+    const iree_host_size_t word_count =
+        (collector->module->symbols.count + 63) / 64;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        collector->arena, word_count, sizeof(*collector->callee_membership),
+        (void**)&collector->callee_membership));
+    memset(collector->callee_membership, 0,
+           word_count * sizeof(*collector->callee_membership));
+  }
+  uint64_t* word = &collector->callee_membership[callee_ref.symbol_id / 64];
+  const uint64_t bit = UINT64_C(1) << (callee_ref.symbol_id % 64);
+  if ((*word & bit) == 0) {
+    IREE_RETURN_IF_ERROR(loom_edge_list_add(collector->edges, collector->arena,
+                                            callee_ref.symbol_id));
+    *word |= bit;
+  }
   return collector->visitor.fn
              ? collector->visitor.fn(collector->visitor.user_data,
                                      collector->caller, call)
@@ -335,13 +356,12 @@ iree_status_t loom_call_graph_build_with_calls(
   memset(out_graph->symbol_to_node, 0xFF,
          module->symbols.count * sizeof(uint16_t));
 
-  // Allocate per-node edge lists.
-  loom_edge_list_t* edge_lists = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, func_count, sizeof(loom_edge_list_t), (void**)&edge_lists));
-  memset(edge_lists, 0, func_count * sizeof(loom_edge_list_t));
-
   // Walk every function root region to find call ops.
+  loom_call_collector_t collector = {
+      .arena = arena,
+      .module = module,
+      .visitor = visitor,
+  };
   uint16_t node_index = 0;
   loom_module_for_each_symbol(module, sym) {
     if (!loom_symbol_implements(sym, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
@@ -359,23 +379,26 @@ iree_status_t loom_call_graph_build_with_calls(
     out_graph->nodes[node_index].scc_id = UINT16_MAX;
     out_graph->symbol_to_node[sym_id] = node_index;
 
-    loom_call_collector_t collector = {
-        .edges = &edge_lists[node_index],
-        .arena = arena,
-        .module = module,
-        .caller = sym_id,
-        .visitor = visitor,
-    };
+    loom_edge_list_t edges = {0};
+    collector.edges = &edges;
+    collector.caller = sym_id;
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     IREE_RETURN_IF_ERROR(loom_walk_function(
         module, func, LOOM_WALK_PRE_ORDER,
         (loom_walk_callback_t){loom_call_collector_visit, &collector},
         &walk_result));
 
-    out_graph->nodes[node_index].callee_count = edge_lists[node_index].count;
-    out_graph->nodes[node_index].callees = edge_lists[node_index].callees;
+    out_graph->nodes[node_index].callee_count = edges.count;
+    out_graph->nodes[node_index].callees = edges.callees;
+    for (uint16_t i = 0; i < edges.count; ++i) {
+      const loom_symbol_id_t callee = edges.callees[i];
+      collector.callee_membership[callee / 64] &=
+          ~(UINT64_C(1) << (callee % 64));
+    }
     ++node_index;
   }
+
+  out_graph->call_kinds = collector.call_kinds;
 
   // Compute SCCs.
   return loom_call_graph_compute_sccs(out_graph, arena);

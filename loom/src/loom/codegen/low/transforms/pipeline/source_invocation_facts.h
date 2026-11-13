@@ -31,7 +31,8 @@ typedef struct loom_low_source_invocation_facts_t {
   // Complete source call graph retained for dependent module planning.
   loom_call_graph_t call_graph;
   // One when the corresponding module symbol has a retained direct semantic
-  // caller after source inlining. NULL when the module has no source calls.
+  // caller after source inlining. NULL when there are no retained semantic
+  // edges, including native-only modules.
   const uint8_t* direct_call_targets;
   // Number of entries in |direct_call_targets|.
   iree_host_size_t direct_call_target_count;

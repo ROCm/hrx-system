@@ -6,6 +6,7 @@
 
 #include "loom/codegen/low/transforms/pipeline/source_to_low.h"
 
+#include <cstring>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -443,6 +444,10 @@ class LowLowerPassTest : public ::testing::Test {
     EXPECT_EQ(loom_low_source_invocation_facts_has_direct_callers(
                   &invocation_facts, helper),
               expect_direct_callers);
+    EXPECT_EQ(invocation_facts.direct_call_targets != nullptr,
+              expect_direct_callers);
+    EXPECT_EQ(invocation_facts.direct_call_target_count,
+              expect_direct_callers ? module->symbols.count : 0u);
 
     // The caller has no entry or result seeds. Preserve the ordinary cache
     // scope instead of introducing a distinct empty boundary-fact scope.
@@ -530,6 +535,100 @@ TEST_F(LowLowerPassTest, InvocationFactsDescribeRetainedDirectCalls) {
               "  func.return\n"
               "}\n"),
       loom_target_select_call_policy_direct, true, false);
+}
+
+TEST_F(LowLowerPassTest,
+       InvocationFactsReleasePartialGraphOnAllocationFailure) {
+  loom_module_t* raw_module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("allocation_failure"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &raw_module));
+  ModulePtr module(raw_module);
+  loom_builder_t builder;
+  loom_builder_initialize(module.get(), &module->arena,
+                          loom_module_block(module.get()), &builder);
+  loom_op_t* functions[2] = {};
+  loom_symbol_ref_t symbols[2] = {};
+  const char* names[] = {"caller", "callee"};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    loom_string_id_t name = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_intern_string(
+        &builder, iree_make_cstring_view(names[i]), &name));
+    IREE_ASSERT_OK(
+        loom_module_add_symbol(module.get(), name, &symbols[i].symbol_id));
+    IREE_ASSERT_OK(loom_test_func_build(&builder, 0, 0, 0, symbols[i], nullptr,
+                                        0, nullptr, 0, nullptr, 0, nullptr, 0,
+                                        LOOM_LOCATION_UNKNOWN, &functions[i]));
+  }
+  for (size_t i = 0; i < IREE_ARRAYSIZE(functions); ++i) {
+    const auto function = loom_func_like_cast(module.get(), functions[i]);
+    loom_builder_t body_builder;
+    loom_builder_initialize(
+        module.get(), &module->arena,
+        loom_region_entry_block(loom_func_like_body(function)), &body_builder);
+    body_builder.ip.parent_op = functions[i];
+    loom_op_t* op = nullptr;
+    if (i == 0) {
+      IREE_ASSERT_OK(loom_test_invoke_build(&body_builder, symbols[1], nullptr,
+                                            0, nullptr, 0, nullptr, 0,
+                                            LOOM_LOCATION_UNKNOWN, &op));
+    }
+    IREE_ASSERT_OK(loom_test_yield_build(&body_builder, nullptr, 0,
+                                         LOOM_LOCATION_UNKNOWN, &op));
+  }
+  IREE_ASSERT_OK(loom_module_compute_uses(module.get()));
+
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(&block_pool_, &value_facts);
+  loom_pass_t pass = {.value_facts = &value_facts};
+  const loom_low_source_selection_list_t selections = {};
+  // Small blocks expose intermediate graph allocations. Sweep every failure
+  // point in the output arena until construction succeeds, without a fixed
+  // count.
+  bool succeeded = false;
+  for (size_t budget = 0; !succeeded; ++budget) {
+    size_t remaining = budget;
+    const iree_allocator_t allocator = {
+        &remaining,
+        [](void* self, iree_allocator_command_t command, const void* params,
+           void** inout_ptr) -> iree_status_t {
+          if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+              command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+              command == IREE_ALLOCATOR_COMMAND_REALLOC) {
+            auto* remaining = static_cast<size_t*>(self);
+            if (*remaining == 0) {
+              return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+            }
+            --*remaining;
+          }
+          const iree_allocator_t system = iree_allocator_system();
+          iree_status_t status =
+              system.ctl(system.self, command, params, inout_ptr);
+          if (iree_status_is_ok(status) &&
+              command == IREE_ALLOCATOR_COMMAND_MALLOC) {
+            // Incomplete nodes must never be interpreted as initialized ones.
+            std::memset(
+                *inout_ptr, 0xFF,
+                static_cast<const iree_allocator_alloc_params_t*>(params)
+                    ->byte_length);
+          }
+          return status;
+        }};
+    iree_arena_block_pool_t pool;
+    iree_arena_block_pool_initialize(64, allocator, &pool);
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(&pool, &arena);
+    loom_low_source_invocation_facts_t facts = {};
+    iree_status_t status = loom_low_source_invocation_facts_compute(
+        &pass, module.get(), &selections, &arena, &facts);
+    succeeded = iree_status_is_ok(status);
+    if (!succeeded) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    }
+    iree_arena_deinitialize(&arena);
+    iree_arena_block_pool_deinitialize(&pool);
+  }
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
 }
 
 TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionTargetFacts) {

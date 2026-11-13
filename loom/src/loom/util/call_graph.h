@@ -14,8 +14,9 @@
 //
 // Construction: walks every root region of each function-like symbol looking
 // for direct semantic, target-low-internal, explicit low-invoke, and command
-// program call-like ops, then records (caller, callee) edges. Total cost: O(N)
-// where N is the total number of ops across all function root regions.
+// program call-like ops, then records (caller, callee) edges. Total cost:
+// O(S+N), where S is the symbol domain and N is the total number of ops across
+// all function root regions. Callee membership is constant-time per callsite.
 //
 // SCC: Tarjan's iterative algorithm, O(V+E) where V = functions and
 // E = call edges. Typically trivial (< 100 nodes for ML models).
@@ -44,7 +45,7 @@ typedef struct loom_call_graph_node_t {
   loom_symbol_id_t symbol_id;
   // Number of distinct callees.
   uint16_t callee_count;
-  // Arena-allocated array of callee symbol IDs. Deduplicated.
+  // Arena-allocated callee symbol IDs, deduplicated in first-callsite order.
   loom_symbol_id_t* callees;
   // SCC ID after loom_call_graph_build completes. Functions in the
   // same SCC share the same scc_id. UINT16_MAX before SCC analysis.
@@ -55,9 +56,14 @@ typedef struct loom_call_graph_node_t {
 
 // Call graph for all functions in a module.
 typedef struct loom_call_graph_t {
+  // Immutable source module supplying symbol identities.
   const loom_module_t* module;
-  // One node per function-like symbol with a body.
+  // Number of function-like symbols with bodies.
   uint16_t node_count;
+  // Bit (1 << loom_call_like_kind_t) for each observed tracked call kind,
+  // including calls to declarations and duplicate edges of different kinds.
+  uint8_t call_kinds;
+  // One node per definition, in module symbol order.
   loom_call_graph_node_t* nodes;
   // SCC count after analysis. SCCs are numbered 0..scc_count-1.
   uint16_t scc_count;
@@ -66,6 +72,7 @@ typedef struct loom_call_graph_t {
   // Maps symbol_id → node index (UINT16_MAX if not in the graph).
   // Enables O(1) lookup from symbol ID.
   uint16_t* symbol_to_node;
+  // Symbol domain covered by symbol_to_node.
   uint16_t symbol_to_node_count;
 } loom_call_graph_t;
 
@@ -90,7 +97,7 @@ iree_status_t loom_call_graph_build(const loom_module_t* module,
 typedef struct loom_call_graph_call_visitor_t {
   // Owner of the retained callsite information.
   void* user_data;
-  // Receives every tracked call before edges are deduplicated.
+  // Receives every tracked call in walk order, including repeated edges.
   iree_status_t (*fn)(void* user_data, loom_symbol_id_t caller,
                       loom_call_like_t call);
 } loom_call_graph_call_visitor_t;
@@ -102,6 +109,13 @@ iree_status_t loom_call_graph_build_with_calls(
 //===----------------------------------------------------------------------===//
 // Queries
 //===----------------------------------------------------------------------===//
+
+// Returns whether construction observed a tracked call of |kind|. This summary
+// includes declaration targets, which have no graph node or caller count.
+static inline bool loom_call_graph_has_call_kind(const loom_call_graph_t* graph,
+                                                 loom_call_like_kind_t kind) {
+  return (graph->call_kinds & (1u << kind)) != 0;
+}
 
 // Returns true if the function at |symbol_id| is (mutually) recursive.
 // A function is recursive if its SCC has more than one member or if

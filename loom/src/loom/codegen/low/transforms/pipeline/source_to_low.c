@@ -71,7 +71,7 @@ typedef struct loom_low_source_function_plan_order_t {
   // Function plans retained in source selection order for emission.
   loom_low_source_function_plan_t* plans;
   // Pointers into plans ordered with callees before callers for planning, or
-  // NULL when source order already satisfies the call-free module.
+  // NULL when calls have no dependencies on source function plans.
   loom_low_source_function_plan_t** planning_order;
   // Number of entries in plans and planning_order.
   iree_host_size_t count;
@@ -111,7 +111,13 @@ static iree_status_t loom_low_source_function_plan_order_build(
   }
   IREE_ASSERT_EQ(out_order->count, function_count);
 
-  if (call_graph->node_count == 0) {
+  // Native callees already have physical signatures; they need no source
+  // planning order. Semantic and command-program dependencies retain their
+  // callee-first order, including mixed modules with native invocations.
+  if (!loom_call_graph_has_call_kind(call_graph,
+                                     LOOM_CALL_LIKE_KIND_SEMANTIC) &&
+      !loom_call_graph_has_call_kind(call_graph,
+                                     LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM)) {
     return iree_ok_status();
   }
 
@@ -640,7 +646,8 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   loom_low_lower_call_interface_index_t call_interfaces = {0};
   const loom_low_lower_call_interface_index_t* call_interface_index = NULL;
   if (iree_status_is_ok(status) && !emitted_error_diagnostics &&
-      loom_module_has_source_calls(module)) {
+      loom_call_graph_has_call_kind(&invocation_facts.call_graph,
+                                    LOOM_CALL_LIKE_KIND_SEMANTIC)) {
     status = loom_low_lower_call_interface_index_initialize(
         &selection_arena, module->symbols.count, &call_interfaces);
     call_interface_index = &call_interfaces;
