@@ -1122,6 +1122,139 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
   EXPECT_EQ(output, 31);
 }
 
+TEST_F(GraphExecTest, QueuedReplaysPreserveEveryHostPartition) {
+  constexpr uint32_t kNodeCount = 96;
+  constexpr uint32_t kLaunchCount = 4;
+  struct Sequence {
+    // Holds the first invocation while all replays are submitted.
+    std::binary_semaphore entered{0};
+    // Releases the first invocation without imposing sleeps on worker timing.
+    std::binary_semaphore release{0};
+    // Next expected callback ordinal across all invocations.
+    uint32_t next = 0;
+    // Records any node running before its own predecessor.
+    bool ordered = true;
+  } sequence;
+  struct Call {
+    // Caller-owned state, live until stream completion.
+    Sequence* sequence;
+    // Position of this callback in each graph invocation.
+    uint32_t index;
+  };
+  std::array<Call, kNodeCount> calls;
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  bool released = false;
+  ScopeExit release_handles([&] {
+    if (!released) {
+      sequence.release.release();
+    }
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(graph);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_graph_node_t* tail = nullptr;
+  for (uint32_t i = 0; i < kNodeCount; ++i) {
+    calls[i] = {&sequence, i};
+    iree_hal_streaming_graph_node_t* node = nullptr;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+        graph, tail ? &tail : nullptr, tail ? 1 : 0,
+        +[](void* user_data) {
+          const auto& call = *static_cast<Call*>(user_data);
+          auto& sequence = *call.sequence;
+          if (sequence.next == 0) {
+            sequence.entered.release();
+            sequence.release.acquire();
+          }
+          sequence.ordered &= call.index == sequence.next % kNodeCount;
+          ++sequence.next;
+        },
+        &calls[i], &node));
+    tail = node;
+  }
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  for (uint32_t i = 0; i < kLaunchCount; ++i) {
+    iree_hal_streaming_graph_exec_launch_result_t result;
+    IREE_ASSERT_OK(
+        iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+    if (i == 0) {
+      sequence.entered.acquire();
+    }
+  }
+  sequence.release.release();
+  released = true;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_TRUE(sequence.ordered);
+  EXPECT_EQ(sequence.next, kNodeCount * kLaunchCount);
+}
+
+TEST_F(GraphExecTest, ChildEventWaitInheritsParallelPredecessors) {
+  constexpr size_t kFillCount = 64;
+  iree_hal_streaming_buffer_t* storage = nullptr;
+  iree_hal_streaming_event_t* event = nullptr;
+  iree_hal_streaming_graph_t* parent = nullptr;
+  iree_hal_streaming_graph_t* child = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  ScopeExit release_handles([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(parent);
+    iree_hal_streaming_graph_release(child);
+    iree_hal_streaming_event_release(event);
+    iree_hal_streaming_memory_release_wrapped_buffer(storage);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host_staging(
+      context_, kFillCount, &storage));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &parent));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &child));
+  iree_hal_streaming_graph_node_t* record = nullptr;
+  AppendEventRecordChain(parent, &event, 1, &record);
+  ASSERT_FALSE(HasFatalFailure());
+  std::array<iree_hal_streaming_graph_node_t*, kFillCount> fills;
+  for (size_t i = 0; i < kFillCount; ++i) {
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_fill_ptr_node(
+        parent, &record, 1, storage->device_ptr + i,
+        static_cast<uint32_t>(i + 1), 1, 1, &fills[i]));
+  }
+  iree_hal_streaming_graph_node_t* wait = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_event_node(
+      child, nullptr, 0, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT, event,
+      &wait));
+  iree_hal_streaming_graph_node_t* callback = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      child, &wait, 1,
+      +[](void* user_data) {
+        const auto* bytes = static_cast<const uint8_t*>(user_data);
+        for (size_t i = 0; i < kFillCount; ++i) {
+          EXPECT_EQ(bytes[i], i + 1);
+        }
+      },
+      storage->host_ptr, &callback));
+  iree_hal_streaming_graph_node_t* child_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
+      parent, fills.data(), fills.size(), child, &child_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      parent, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  for (int replay = 0; replay < 3; ++replay) {
+    memset(storage->host_ptr, 0, kFillCount);
+    iree_hal_streaming_graph_exec_launch_result_t result;
+    IREE_ASSERT_OK(
+        iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+    IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  }
+}
+
 TEST_F(GraphExecTest, FailedUpdatePreservesThePreviousExecutable) {
   struct AllocationControl {
     // Number of graph-owned host allocations attempted during this update.
@@ -1997,8 +2130,15 @@ TEST_F(GraphExecTest,
     }
   }
 
-  // Accepted work is terminal at return, so immediate executable teardown is
-  // safe even though no stream-tail point was published for the failed launch.
+  // The rejected suffix did not run. A retry must advance past the accepted
+  // child's internal point without leaving any wait on the rejected tail.
+  iree_hal_streaming_graph_exec_launch_result_t retry_result;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_graph_exec_launch(exec, stream_, &retry_result));
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, retry_result);
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_TRUE(stream_marker_ran_.load(std::memory_order_acquire));
+
   iree_hal_streaming_graph_exec_release(exec);
   exec = nullptr;
 }
