@@ -26,6 +26,83 @@ def _service(document):
     return document["variants"]["fixture"]["services"]["chat"]
 
 
+@pytest.mark.parametrize(
+    "storage_format,filename",
+    [("safetensors", "scales.safetensors"), ("raw", "colscale_gu.f32")],
+)
+def test_i8_panel_transform_retains_local_derivation_contract(storage_format, filename):
+    document = _document()
+    document["schema_version"] = 2
+    transform = dict(
+        kind="i8-panel",
+        version=1,
+        source="parameter/model.gguf",
+        layout="v2",
+        cache="parameter/cache",
+        output="colscale",
+        kernel_version="resident-v1",
+    )
+    _service(document)["parameters"]["npu"] = dict(
+        files=[
+            dict(
+                path=f"parameter/cache/key/{filename}",
+                format=storage_format,
+                transform=transform,
+            )
+        ]
+    )
+    selected = ModelCard(document).select("check")
+    assert selected.files[f"parameter/cache/key/{filename}"].transform == transform
+    assert (
+        ModelCard(selected.document)
+        .select()
+        .files[f"parameter/cache/key/{filename}"]
+        .transform
+        == transform
+    )
+    document["schema_version"] = 1
+    with pytest.raises(ManifestError, match="i8-panel requires model-card version 2"):
+        ModelCard(document)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        dict(version=True),
+        dict(layout="v1"),
+        dict(output="other"),
+        dict(source="../model.gguf"),
+        dict(cache="/tmp/cache"),
+        dict(kernel_version=""),
+        dict(command="convert"),
+    ],
+)
+def test_i8_panel_transform_rejects_unsupported_contracts(change):
+    document = _document()
+    document["schema_version"] = 2
+    transform = dict(
+        kind="i8-panel",
+        version=1,
+        source="parameter/model.gguf",
+        layout="v2",
+        cache="parameter/cache",
+        output="colscale",
+        kernel_version="resident-v1",
+    )
+    transform.update(change)
+    _service(document)["parameters"]["npu"] = dict(
+        files=[
+            dict(
+                path="parameter/cache/key/scales.safetensors",
+                format="safetensors",
+                transform=transform,
+            )
+        ]
+    )
+    with pytest.raises(ManifestError):
+        ModelCard(document)
+
+
 def test_components_share_files_and_retain_independent_contracts():
     document = _document()
     document["services"]["chat"]["components"] = {

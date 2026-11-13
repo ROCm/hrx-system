@@ -16,10 +16,11 @@ import tempfile
 from collections.abc import Iterable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin
 
+from .derived import DerivedFile, derived_files
 from .fetch_filesystem import SharingUnavailable, copy_file, publish_file, share_file
 from .fetch_hf import AccessRequired
 from .fetch_progress import ByteProgress
@@ -37,7 +38,14 @@ from .fetch_storage import (
     atomic_write,
     installation_lock,
 )
-from .lock import FileIdentity, ModelLock, file_digest, file_key, lock_files
+from .lock import (
+    DerivedIdentity,
+    FileIdentity,
+    ModelLock,
+    file_digest,
+    file_key,
+    lock_files,
+)
 from .manifest import ManifestError, ModelCard, Selection, parse_json
 
 _RESERVED_PATHS = frozenset(
@@ -69,6 +77,35 @@ class FetchPlan:
     provenance: dict | None = None
     # Parameter-only paths whose publisher byte expectations are explicitly skipped.
     unverified_parameters: frozenset[str] = frozenset()
+    # Outputs the native loader derives at load; never acquired or created here.
+    derived: dict[str, DerivedFile] = field(default_factory=dict)
+    # Their locked records, including any publisher-observed payload bytes.
+    derived_identities: dict[str, DerivedIdentity] = field(default_factory=dict)
+
+    def _file_summary(self, path: str) -> dict:
+        file = self.selection.files[path]
+        if path in self.derived:
+            identity = self.derived_identities.get(path)
+            return {
+                "path": path,
+                "origin": file.origin,
+                "transport": None,
+                "roles": sorted(file.roles),
+                "transform": file.transform,
+                "derived": self.derived[path].summary(),
+                "size": identity.size if identity else None,
+                "sha256": identity.sha256 if identity else None,
+            }
+        identity = self.identities.get(path)
+        return {
+            "path": path,
+            "origin": self.sources[path].origin,
+            "transport": self.sources[path].transport,
+            "roles": sorted(file.roles),
+            "transform": file.transform,
+            "size": identity.size if identity else None,
+            "sha256": identity.sha256 if identity else None,
+        }
 
     def summary(self) -> dict:
         """Machine-readable acquisition facts; unknown sizes remain null."""
@@ -88,22 +125,7 @@ class FetchPlan:
                 if "memory" in self.selection.settings
                 else {}
             ),
-            "files": [
-                {
-                    "path": path,
-                    "origin": source.origin,
-                    "transport": source.transport,
-                    "roles": sorted(self.selection.files[path].roles),
-                    "transform": self.selection.files[path].transform,
-                    "size": self.identities[path].size
-                    if path in self.identities
-                    else None,
-                    "sha256": self.identities[path].sha256
-                    if path in self.identities
-                    else None,
-                }
-                for path, source in self.sources.items()
-            ],
+            "files": [self._file_summary(path) for path in self.selection.files],
         }
 
 
@@ -136,6 +158,7 @@ def plan_fetch(
     for path in selection.files:
         if PurePosixPath(path).parts[0] in _RESERVED_PATHS:
             raise ManifestError(f"reserved installation path {path!r}")
+    derived = derived_files(selection)
     location = (
         document_location(lock_location)
         if lock_location
@@ -169,6 +192,7 @@ def plan_fetch(
     sources = {
         path: resolver.resolve(file.origin, identities.get(path))
         for path, file in selection.files.items()
+        if path not in derived
     }
     protected = {
         file_key(file.origin, file.transform)
@@ -186,15 +210,18 @@ def plan_fetch(
         for path, identity in identities.items()
         if path not in unverified_parameters
     }
+    derived_identities = {
+        path: identities.pop(path) for path in derived if path in identities
+    }
     sources = _prepare_sources(
         sources,
         identities,
         cache,
         offline=offline,
         transforms={
-            path: file.transform
-            for path, file in selection.files.items()
-            if file.transform is not None
+            path: selection.files[path].transform
+            for path in sources
+            if selection.files[path].transform is not None
         },
     )
     update_path = None
@@ -233,6 +260,8 @@ def plan_fetch(
         if catalog is not None or unverified_parameters
         else None,
         unverified_parameters,
+        derived,
+        derived_identities,
     )
 
 
@@ -256,6 +285,10 @@ class LockPlan:
     path: Path
     # Network prohibition retained across planning and acquisition.
     offline: bool
+    # Loader-derived outputs by logical identity; recorded, never acquired.
+    derived: dict[str, DerivedFile] = field(default_factory=dict)
+    # Local card directory where a loader may already have derived payloads.
+    directory: Path | None = None
 
     def summary(self) -> dict:
         return {
@@ -272,6 +305,15 @@ class LockPlan:
                     "transform": self.transforms.get(key),
                 }
                 for key, source in self.sources.items()
+            ]
+            + [
+                {
+                    "origin": output.origin,
+                    "transport": None,
+                    "transform": copy.deepcopy(output.transform),
+                    "derived": output.summary(),
+                }
+                for output in self.derived.values()
             ],
         }
 
@@ -313,17 +355,26 @@ def plan_lock(
     sources = {}
     paths = {}
     transforms = {}
+    derived = {}
     local_inputs = set()
     for choice in selections:
         selected = card.select(**choice)
+        outputs = derived_files(selected)
         for name, file in selected.files.items():
             if PurePosixPath(name).parts[0] in _RESERVED_PATHS:
                 raise ManifestError(f"reserved installation path {name!r}")
-            local = resolver.local_file(file.origin)
+            local = resolver.local_file(file.origin) if name not in outputs else None
             if local is not None:
                 local_inputs.add(local)
         for name, file in lock_files(selected, lock_scope).items():
             key = file_key(file.origin, file.transform)
+            if name in outputs:
+                if derived.setdefault(key, outputs[name]) != outputs[name]:
+                    raise ManifestError(
+                        f"choices derive {name!r} from different sources; "
+                        "give each derived output its own cache path"
+                    )
+                continue
             if key not in sources:
                 sources[key] = resolver.resolve(file.origin, None)
                 paths[key] = name
@@ -343,6 +394,8 @@ def plan_lock(
         lock_scope,
         path,
         offline,
+        derived,
+        None if document.remote else Path(document.location).parent,
     )
 
 
@@ -458,6 +511,64 @@ def _acquire_sources(
     return acquired
 
 
+def _previous_lock(path: Path) -> ModelLock | None:
+    """Reads a lock about to be replaced; an unreadable one carries nothing."""
+    try:
+        return ModelLock.parse(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ManifestError):
+        return None
+
+
+def _observe_derivation(
+    output: DerivedFile,
+    source: FileIdentity,
+    directory: Path | None,
+    previous: ModelLock | None,
+    cache: ContentCache,
+) -> DerivedIdentity:
+    """Records a derived output's recipe and, when known, its payload bytes.
+
+    Acquisition never derives. Payload bytes come from a loader-published file
+    beside a local card, or from the replaced lock when it recorded them for the
+    same recipe and source bytes. Otherwise the record has no size or SHA-256.
+    """
+    size = digest = None
+    payload = directory / output.path if directory is not None else None
+    if payload is not None and payload.is_file():
+        size, digest = file_digest(
+            payload,
+            cancelled=cache.cancelled,
+            progress=ByteProgress(cache.progress.file(output.path), "verify"),
+        )
+    elif previous is not None:
+        prior = previous.files.get(file_key(output.origin, output.transform))
+        prior_source = previous.files.get(file_key(output.source_origin))
+        if (
+            isinstance(prior, DerivedIdentity)
+            and prior.size is not None
+            and prior.derived in (None, output.facts())
+            and isinstance(prior_source, FileIdentity)
+            and (prior_source.size, prior_source.sha256) == (source.size, source.sha256)
+        ):
+            size, digest = prior.size, prior.sha256
+    return DerivedIdentity(
+        output.origin, output.transform, output.facts(), size, digest
+    )
+
+
+def _installed_derivations(
+    plan: FetchPlan, relocated: dict, identities: dict[str, DerivedIdentity]
+) -> list[DerivedIdentity]:
+    """Derived records for an installed card, whose sources may be relocated."""
+    return [
+        replace(
+            identities.get(name) or DerivedIdentity(output.origin, output.transform),
+            derived=output.facts(relocated[output.source]),
+        )
+        for name, output in plan.derived.items()
+    ]
+
+
 def update_lock(
     plan: LockPlan, cache: ContentCache, *, preserve_sources: bool = False
 ) -> Path:
@@ -472,9 +583,20 @@ def update_lock(
             paths=plan.paths,
             preserve_sources=preserve_sources,
         )
+        previous = _previous_lock(plan.path)
+        derived = [
+            _observe_derivation(
+                output,
+                acquired[file_key(output.source_origin)].identity,
+                plan.directory,
+                previous,
+                cache,
+            )
+            for output in plan.derived.values()
+        ]
         document = ModelLock.snapshot(
             plan.origins,
-            [item.identity for item in acquired.values()],
+            [item.identity for item in acquired.values()] + derived,
             scope=plan.scope,
         )
         if cache.cancelled.is_set():
@@ -527,6 +649,9 @@ def _installation_card(plan: FetchPlan) -> tuple[dict, dict[str, str | dict], di
 
     def file(value):
         record = {"path": value} if isinstance(value, str) else value
+        if record["path"] in plan.derived:
+            # Runtime coordinates only: the loader derives this from its source.
+            return record
         record["origin"] = copy.deepcopy(origins[record["path"]])
         if "data" in record:
             record["data"] = [file(auxiliary) for auxiliary in record["data"]]
@@ -700,7 +825,8 @@ def _check_lock_output(plan: FetchPlan, directory: Path, relocated: dict, roots:
         [
             replace(identity, origin=relocated[name])
             for name, identity in plan.identities.items()
-        ],
+        ]
+        + _installed_derivations(plan, relocated, plan.derived_identities),
         scope=plan.lock_scope,
     )
     _check_installation_lock(path, expected)
@@ -860,6 +986,25 @@ def install(
                 )
             },
         )
+        derived = plan.derived_identities
+        if plan.lock_mode == "update":
+            previous = (
+                _previous_lock(plan.update_path)
+                if plan.update_path is not None
+                else None
+            )
+            derived = {
+                name: _observe_derivation(
+                    output,
+                    acquired[file_key(output.source_origin)].identity,
+                    None
+                    if plan.document.remote
+                    else Path(plan.document.location).parent,
+                    previous,
+                    cache,
+                )
+                for name, output in plan.derived.items()
+            }
         identities = [
             replace(
                 acquired[
@@ -869,7 +1014,7 @@ def install(
             )
             for name, source in plan.sources.items()
             if name in required
-        ]
+        ] + _installed_derivations(plan, relocated, derived)
         installation_lock_document = (
             ModelLock.snapshot(roots, identities, scope=plan.lock_scope)
             if plan.lock_mode != "none"
@@ -947,8 +1092,10 @@ def install(
                     plan.origins,
                     [
                         acquired[file_key(file.origin, file.transform)].identity
-                        for file in required.values()
-                    ],
+                        for name, file in required.items()
+                        if name not in plan.derived
+                    ]
+                    + list(derived.values()),
                     scope=plan.lock_scope,
                 )
                 atomic_write(

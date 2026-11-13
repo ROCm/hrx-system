@@ -702,7 +702,7 @@
               "$ref": "#/$defs/fileOrigin"
             },
             "format": {
-              "const": "safetensors"
+              "enum": ["safetensors", "raw"]
             },
             "transform": {
               "$ref": "#/$defs/transform"
@@ -712,7 +712,7 @@
         }
       ]
     },
-    "transform": {
+    "safetensorsTransform": {
       "type": "object",
       "required": [
         "kind",
@@ -759,6 +759,57 @@
             "type": "string"
           },
           "description": "Select these complete named tensors. Omission preserves all tensors."
+        }
+      },
+      "additionalProperties": false
+    },
+    "transform": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/safetensorsTransform"
+        },
+        {
+          "$ref": "#/$defs/i8PanelTransform"
+        }
+      ]
+    },
+    "i8PanelTransform": {
+      "type": "object",
+      "required": [
+        "kind",
+        "version",
+        "source",
+        "layout",
+        "cache",
+        "output",
+        "kernel_version"
+      ],
+      "properties": {
+        "kind": {
+          "const": "i8-panel"
+        },
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "source": {
+          "$ref": "#/$defs/path"
+        },
+        "layout": {
+          "const": "v2"
+        },
+        "cache": {
+          "$ref": "#/$defs/path"
+        },
+        "output": {
+          "enum": [
+            "resident-halves",
+            "colscale"
+          ]
+        },
+        "kernel_version": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false

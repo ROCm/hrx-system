@@ -1391,3 +1391,287 @@ def test_voice_recording_lock_and_fetch_preserve_original_bytes_and_content_type
     assert selected.files["voice.data"].roles == frozenset({"voice"})
     lock = ModelLock.parse((output / "model.json.lock").read_text())
     lock.cover(selected)
+
+
+_PANEL_KEY = "a" * 64
+_PANEL_RECIPE = {
+    "source": "parameter/model.gguf",
+    "layout_version": "full-k-colscale-n128-k128-nfrag-kfrag-k8-n8-v2",
+    "recipe_version": "loom-f16-dequant-bf16-absmax-rne-i8-v1",
+}
+
+
+def _panel(output, name, **change):
+    return {
+        "path": f"parameter/cache/{_PANEL_KEY}/{name}",
+        "format": "raw",
+        "transform": {
+            "kind": "i8-panel",
+            "version": 1,
+            "source": "parameter/model.gguf",
+            "layout": "v2",
+            "cache": "parameter/cache",
+            "output": output,
+            "kernel_version": "resident-full-k-i8-i32-bf16-column-scale-v1",
+        }
+        | change,
+    }
+
+
+def _derived_card():
+    document = _card()
+    document["schema_version"] = 2
+    del document["variants"]["unused"]
+    document["variants"]["v"]["services"]["text"]["parameters"] = {
+        "model": {"files": [{"path": "parameter/model.gguf", "format": "gguf"}]},
+        "npu": {"files": [_panel("colscale", "colscale_gu.f32")]},
+        "resident": {"files": [_panel("resident-halves", "panels_gu.i8")]},
+    }
+    return document
+
+
+def _derived_publication(tmp_path, document=None):
+    publication = tmp_path / "publication"
+    (publication / "parameter").mkdir(parents=True)
+    (publication / "code.loom").write_bytes(b"code")
+    (publication / "parameter/model.gguf").write_bytes(b"gguf source")
+    card = publication / "model.json"
+    card.write_text(json.dumps(document or _derived_card()))
+    return card
+
+
+def _update_publication_lock(card, cache):
+    document = cache.read_document(str(card), offline=True)
+    plan = plan_lock(document, ModelCard.parse(document.text), cache, offline=True)
+    update_lock(plan, cache)
+    return json.loads((card.parent / "model.json.lock").read_text())
+
+
+def _derived_records(lock):
+    return {
+        record["origin"].rsplit("/", 1)[1]: record
+        for record in lock["files"]
+        if "derived" in record
+    }
+
+
+def test_loader_derived_outputs_are_locked_installed_and_verified_without_payloads(
+    tmp_path,
+):
+    card = _derived_publication(tmp_path)
+    cache = ContentCache(tmp_path / "cache")
+    document = cache.read_document(str(card), offline=True)
+    lock_plan = plan_lock(document, ModelCard.parse(document.text), cache, offline=True)
+    assert [
+        file.get("derived") is not None for file in lock_plan.summary()["files"]
+    ] == [
+        False,
+        True,
+        True,
+    ]
+    update_lock(lock_plan, cache)
+    lock = json.loads((card.parent / "model.json.lock").read_text())
+    records = _derived_records(lock)
+    assert set(records) == {"colscale_gu.f32", "panels_gu.i8"}
+    for record in records.values():
+        assert record["derived"] == _PANEL_RECIPE
+        assert "size" not in record and "sha256" not in record
+    assert {"parameter/model.gguf"} <= {record["origin"] for record in lock["files"]}
+
+    plan = plan_fetch(document, ModelCard.parse(document.text).select(), cache)
+    panels = {file["path"]: file for file in plan.summary()["files"]}[
+        f"parameter/cache/{_PANEL_KEY}/panels_gu.i8"
+    ]
+    assert panels["transport"] is None
+    assert panels["size"] is None
+    assert panels["derived"]["source"] == "parameter/model.gguf"
+    assert panels["derived"]["cache_key"] == _PANEL_KEY
+    output = tmp_path / "installed"
+    install(plan, cache, output)
+    assert (output / "parameter/model.gguf").read_bytes() == b"gguf source"
+    # The loader treats an existing content-keyed directory as a published entry.
+    assert not (output / "parameter/cache").exists()
+    installed = json.loads((output / "model.json").read_text())
+    parameters = installed["variants"]["v"]["services"]["text"]["parameters"]
+    assert parameters["resident"]["files"] == [
+        _panel("resident-halves", "panels_gu.i8")
+    ]
+    installed_records = _derived_records(
+        json.loads((output / "model.json.lock").read_text())
+    )
+    assert installed_records["panels_gu.i8"]["derived"] == _PANEL_RECIPE | {
+        "source": "@document/parameter/model.gguf"
+    }
+
+    installed_document = cache.read_document(str(output / "model.json"), offline=True)
+    repeat = plan_fetch(
+        installed_document,
+        ModelCard.parse(installed_document.text).select(),
+        cache,
+        offline=True,
+    )
+    check_output(repeat, output)
+    install(repeat, cache, output)
+    assert not (output / "parameter/cache").exists()
+
+
+def test_lock_update_records_observed_derived_bytes_for_the_same_source_only(tmp_path):
+    card = _derived_publication(tmp_path)
+    cache = ContentCache(tmp_path / "cache")
+    payload = card.parent / f"parameter/cache/{_PANEL_KEY}/panels_gu.i8"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"loader panels")
+    observed = (13, hashlib.sha256(b"loader panels").hexdigest())
+
+    records = _derived_records(_update_publication_lock(card, cache))
+    assert (records["panels_gu.i8"]["size"], records["panels_gu.i8"]["sha256"]) == (
+        observed
+    )
+    assert "size" not in records["colscale_gu.f32"]
+    document = cache.read_document(str(card), offline=True)
+    plan = plan_fetch(document, ModelCard.parse(document.text).select(), cache)
+    sizes = {file["path"]: file["size"] for file in plan.summary()["files"]}
+    assert sizes[f"parameter/cache/{_PANEL_KEY}/panels_gu.i8"] == 13
+    install(plan, cache, tmp_path / "installed")
+    installed = _derived_records(
+        json.loads((tmp_path / "installed/model.json.lock").read_text())
+    )
+    assert installed["panels_gu.i8"]["sha256"] == observed[1]
+
+    # A publication directory without payloads keeps the replaced lock's bytes.
+    payload.unlink()
+    records = _derived_records(_update_publication_lock(card, cache))
+    assert (records["panels_gu.i8"]["size"], records["panels_gu.i8"]["sha256"]) == (
+        observed
+    )
+    # Different source bytes key a different derivation; the bytes are dropped.
+    (card.parent / "parameter/model.gguf").write_bytes(b"another gguf")
+    records = _derived_records(_update_publication_lock(card, cache))
+    assert "size" not in records["panels_gu.i8"]
+    assert records["panels_gu.i8"]["derived"] == _PANEL_RECIPE
+
+
+def test_derived_lock_records_without_recipe_cover_but_other_recipes_fail(tmp_path):
+    card = _derived_publication(tmp_path)
+    cache = ContentCache(tmp_path / "cache")
+    lock = _update_publication_lock(card, cache)
+    records = _derived_records(lock)
+    # Hand-assembled form: payload bytes and transform only.
+    for record in records.values():
+        del record["derived"]
+        record.update(size=7, sha256="0" * 64)
+    (card.parent / "model.json.lock").write_text(json.dumps(lock))
+    document = cache.read_document(str(card), offline=True)
+    selection = ModelCard.parse(document.text).select()
+    plan = plan_fetch(document, selection, cache, offline=True)
+    assert {file["size"] for file in plan.summary()["files"] if "derived" in file} == {
+        7
+    }
+    records["panels_gu.i8"]["derived"] = _PANEL_RECIPE | {
+        "recipe_version": "loom-other-recipe"
+    }
+    (card.parent / "model.json.lock").write_text(json.dumps(lock))
+    with pytest.raises(ManifestError, match="lock records derivation .* use --update"):
+        plan_fetch(document, selection, cache, offline=True)
+
+
+def test_derived_output_requires_its_source_in_the_selection_and_lock(tmp_path):
+    card = _derived_publication(tmp_path)
+    cache = ContentCache(tmp_path / "cache")
+    lock = _update_publication_lock(card, cache)
+    lock["files"] = [
+        record for record in lock["files"] if record["origin"] != "parameter/model.gguf"
+    ]
+    (card.parent / "model.json.lock").write_text(json.dumps(lock))
+    document = cache.read_document(str(card), offline=True)
+    with pytest.raises(
+        ManifestError,
+        match="lock does not cover parameter model 'parameter/model.gguf', "
+        "the source the native loader derives",
+    ):
+        plan_fetch(document, ModelCard.parse(document.text).select(), cache)
+
+    missing = _derived_card()
+    del missing["variants"]["v"]["services"]["text"]["parameters"]["model"]
+    with pytest.raises(
+        ManifestError,
+        match=r"parameter npu '.*colscale_gu.f32': source 'parameter/model.gguf' "
+        "is not a file of this selection",
+    ):
+        plan_fetch(
+            Document(str(card), json.dumps(missing)),
+            ModelCard(missing).select(),
+            cache,
+            no_lock=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "file,message",
+    [
+        (
+            _panel("colscale", "colscale_gu.f32", kernel_version="resident-v2"),
+            "kernel_version 'resident-v2' has no native loader implementation",
+        ),
+        (
+            _panel("colscale", "colscale_gu.f32") | {"format": "safetensors"},
+            "as format 'raw', not 'safetensors'",
+        ),
+        (
+            _panel("colscale", "scales.f32"),
+            "publishes 'colscale' at parameter/cache/<64-hex content key>/",
+        ),
+        (
+            _panel("colscale", "colscale_gu.f32") | {"origin": "prebuilt.f32"},
+            "loader-derived files have no acquisition origin",
+        ),
+        (
+            _panel("colscale", "colscale_gu.f32", source="code.loom"),
+            "source 'code.loom' must be an untransformed parameter file",
+        ),
+    ],
+)
+def test_unimplemented_loader_derivations_are_refused_by_name(tmp_path, file, message):
+    document = _derived_card()
+    document["variants"]["v"]["services"]["text"]["parameters"]["npu"]["files"] = [file]
+    card = _derived_publication(tmp_path, document)
+    cache = ContentCache(tmp_path / "cache")
+    source = cache.read_document(str(card), offline=True)
+    with pytest.raises(ManifestError, match=message):
+        plan_fetch(source, ModelCard(document).select(), cache, no_lock=True)
+    with pytest.raises(ManifestError, match=message):
+        plan_lock(source, ModelCard(document), cache, offline=True)
+
+
+def test_unknown_transform_kind_is_refused_by_name():
+    document = _derived_card()
+    document["variants"]["v"]["services"]["text"]["parameters"]["npu"]["files"] = [
+        _panel("colscale", "colscale_gu.f32", kind="q4-panel")
+    ]
+    with pytest.raises(ManifestError, match="unsupported transform 'q4-panel'"):
+        ModelCard(document)
+
+
+def test_cli_update_lock_installs_sources_and_dry_run_names_derivations(
+    tmp_path, capsys
+):
+    card = _derived_publication(tmp_path)
+    cache = str(tmp_path / "cache")
+    output = tmp_path / "installed"
+    arguments = [str(card), "--offline", "--quiet", "--cache", cache]
+    assert main([*arguments, "--update-lock", f"--output={output}"]) == 0
+    assert capsys.readouterr().out.strip() == str(output.absolute() / "model.json")
+    records = _derived_records(
+        json.loads((card.parent / "model.json.lock").read_text())
+    )
+    assert set(records) == {"colscale_gu.f32", "panels_gu.i8"}
+    assert not (output / "parameter/cache").exists()
+    assert main([*arguments, "--dry-run", f"--output={tmp_path / 'other'}"]) == 0
+    printed = capsys.readouterr().out
+    assert (
+        f"parameter/cache/{_PANEL_KEY}/panels_gu.i8 "
+        "(derived at load from parameter/model.gguf)"
+    ) in printed
+    assert "parameter/model.gguf (11 bytes)" in printed
+    assert main([*arguments, "--update-lock", "--all-variants", "--dry-run"]) == 0
+    assert "(derived at load from parameter/model.gguf)" in capsys.readouterr().out

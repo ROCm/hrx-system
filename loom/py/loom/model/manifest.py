@@ -232,12 +232,42 @@ def _origin(value: Any, roots: dict, path: str, *, group: bool = False) -> None:
 
 
 def _transform(value: Any, path: str) -> dict:
+    if isinstance(value, dict) and value.get("kind") == "i8-panel":
+        _object(
+            value,
+            path,
+            (
+                "kind",
+                "version",
+                "source",
+                "layout",
+                "cache",
+                "output",
+                "kernel_version",
+            ),
+        )
+        if type(value["version"]) is not int or value["version"] != 1:
+            _fail(path, "supported i8-panel transform version: 1")
+        if value["layout"] != "v2" or value["output"] not in (
+            "resident-halves",
+            "colscale",
+        ):
+            _fail(
+                path,
+                "i8-panel requires layout v2 and resident-halves or colscale output",
+            )
+        _path(value["source"], path + ".source")
+        _path(value["cache"], path + ".cache", directory=True)
+        _string(value["kernel_version"], path + ".kernel_version")
+        return copy.deepcopy(value)
+    if isinstance(value, dict) and value.get("kind") != "safetensors":
+        _fail(
+            path + ".kind",
+            f"unsupported transform {value.get('kind')!r}; loom-fetch acquires "
+            "'safetensors' and the native runtime loader derives 'i8-panel'",
+        )
     _object(value, path, ("kind", "version"), ("alignment", "tensors"))
-    if (
-        value["kind"] != "safetensors"
-        or type(value["version"]) is not int
-        or value["version"] != 1
-    ):
+    if type(value["version"]) is not int or value["version"] != 1:
         _fail(path, "supported transform: safetensors version 1")
     alignment = value.get("alignment", 8)
     if (
@@ -288,10 +318,15 @@ def _file(
         _origin(record["origin"], roots, path + ".origin")
     if "transform" in record:
         record["transform"] = _transform(record["transform"], path + ".transform")
-        if record.get("format") != "safetensors":
+        formats = (
+            ("raw", "safetensors")
+            if record["transform"]["kind"] == "i8-panel"
+            else ("safetensors",)
+        )
+        if record.get("format") not in formats:
             _fail(
                 path + ".format",
-                "safetensors transform requires explicit format 'safetensors'",
+                "transform requires explicit format " + " or ".join(formats),
             )
     if provider:
         _strings(record.get("options", []), path + ".options")
@@ -618,12 +653,19 @@ class ModelCard:
                                 scope_path + ".files", "expected a nonempty shard array"
                             )
                         for index, item in enumerate(parameter["files"]):
-                            _file(
+                            file = _file(
                                 item,
                                 origins,
                                 f"{scope_path}.files[{index}]",
                                 parameter=True,
                             )
+                            if (
+                                doc["schema_version"] != 2
+                                and file.get("transform", {}).get("kind") == "i8-panel"
+                            ):
+                                _fail(
+                                    scope_path, "i8-panel requires model-card version 2"
+                                )
                     for identity, tokenizer in _mapping(
                         variant_service.get("tokenizers", {}),
                         current + ".tokenizers",

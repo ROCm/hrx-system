@@ -51,6 +51,15 @@ def local_source(tmp_path, content):
     return Source("checkpoint", {"kind": "local", "path": str(path)})
 
 
+def test_i8_panel_transform_requires_native_runtime_loader(tmp_path):
+    cache = ContentCache(tmp_path / "cache")
+    source = local_source(tmp_path, b"unused")
+    with pytest.raises(FetchError, match="native runtime loader"):
+        cache.acquire_transformed(
+            source, {"kind": "i8-panel"}, None, offline=True, preserve_sources=False
+        )
+
+
 @contextmanager
 def serving(content, mode="normal"):
     requests = []

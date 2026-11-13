@@ -584,6 +584,55 @@ at most four acquisition workers. An uncached HF transform uses the optional
 SDK's HTTP client, authentication, and gate handling without placing the whole
 checkpoint in the HF cache.
 
+A model-card v2 parameter can also declare a local derived NPU cache with
+`transform.kind: "i8-panel"`, `version: 1`, `layout: "v2"`, and an `output` of
+`"resident-halves"` or `"colscale"`. Both declarations name the same
+package-relative GGUF `source`, `cache` directory, and `kernel_version`.
+The file `path` names `panels_gu.i8` or `colscale_gu.f32` under the
+content-derived key, with `format: "raw"`. The native loader derives both files
+before parameter indexing, without a helper process. It locks the content key,
+writes and syncs a private directory, and atomically publishes the complete
+pair. Each load inspects GGUF metadata. For a trusted local cache, unchanged
+source `dev`, `ino`, `size`, nanosecond `mtime`/`ctime`, and ordered quant-map
+digest reuse the previously computed source SHA256. Atomic `identity-<digest>.json`
+records in the cache root are keyed by the SHA256 of the canonical source path.
+The entry's `cache.json` stores the same stat fields and SHA256 for each payload;
+only changed payload identities require hashing. Older receipts are fully
+verified once and upgraded. `LOOM_DERIVE_VERIFY=1` forces the full GGUF and both
+payload hashes on every process load. Source or payload changes during hashing
+fail, and corrupt payloads reject the entry with a diagnostic. Stat trust assumes
+reliable local filesystem identities/timestamps and no privileged or hostile
+concurrent modification; use full verification when those assumptions do not hold.
+The existing
+weight preparer streams the indexed raw tensor ranges directly into final
+storage and reuses them on reactivation. The provider supports the first 64
+gate/up pairs with K5120, source N17408 and output N10496; other geometry and
+unsupported recipe versions fail with a diagnostic. Python recipes remain
+verification oracles.
+
+`loom-fetch` defers these outputs to the loader. It lists, plans, locks, and
+installs such a card, but it never downloads, derives, verifies, or creates a
+derived payload or its content-keyed directory. The loader treats an existing
+directory as a published entry. The installation acquires and verifies the
+`transform.source` GGUF like any other parameter. The derived declaration is
+copied unchanged into the installed card, without an origin. Planning fails with
+the file and parameter named when the declaration is unsupported. That covers a
+transform recipe without a loader implementation, a non-`raw` format, a path
+outside `<cache>/<64-hex key>/<payload>`, an origin, and a source missing from
+the selection. A lock that does not cover the source also fails. Dry runs and
+`--json` plans report these files with a `null` transport and a `derived` object.
+That object names the source, cache key, and the loader's `layout_version` and
+`recipe_version`.
+
+A lock records a derived output by its installation path and transform. Its
+`derived` object names the source's logical origin and the loader recipe
+identifiers. The lock must cover the output and its source; a recorded
+`derived` object must match what the loader implements. `size` and `sha256` are
+optional publisher observations, never checked by `loom-fetch`. `--update-lock`
+hashes a payload the loader already published beside a local card. Otherwise it
+keeps the replaced lock's bytes for the same recipe and unchanged source bytes,
+or omits them. Records written without a `derived` object remain valid.
+
 By default, only the resulting archive is retained. `--preserve-sources` also
 retains the remote intervals actually read, with their offsets in an acquisition
 receipt. It does not fetch omitted tensors. Existing local files and complete HF

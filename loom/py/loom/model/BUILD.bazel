@@ -100,15 +100,25 @@ iree_py_test(
 )
 
 iree_py_library(
+    name = "derived",
+    srcs = ["derived.py"],
+    deps = [":manifest"],
+)
+
+iree_py_library(
     name = "lock",
     srcs = ["lock.py"],
-    deps = [":manifest"],
+    deps = [
+        ":derived",
+        ":manifest",
+    ],
 )
 
 iree_py_library(
     name = "documentation",
     srcs = ["documentation.py"],
     deps = [
+        ":derived",
         ":lock",
         ":manifest",
         ":memory",
@@ -253,6 +263,7 @@ iree_py_library(
     name = "fetch_storage",
     srcs = ["fetch_storage.py"],
     deps = [
+        ":derived",
         ":fetch_filesystem",
         ":fetch_hf",
         ":fetch_progress",
@@ -268,6 +279,7 @@ iree_py_library(
     name = "fetch",
     srcs = ["fetch.py"],
     deps = [
+        ":derived",
         ":fetch_filesystem",
         ":fetch_hf",
         ":fetch_progress",

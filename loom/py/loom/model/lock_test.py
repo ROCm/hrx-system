@@ -11,7 +11,7 @@ import threading
 import pytest
 
 from loom.model import ManifestError, ModelCard
-from loom.model.lock import FileIdentity, ModelLock
+from loom.model.lock import DerivedIdentity, FileIdentity, ModelLock
 
 
 def _card():
@@ -210,3 +210,67 @@ def test_verification_observes_cancelled_operation(tmp_path):
     identity = FileIdentity("weights.data", 7, hashlib.sha256(b"weights").hexdigest())
     with pytest.raises(InterruptedError, match="verification cancelled"):
         identity.verify(path, cancelled=cancelled)
+
+
+_PANEL_TRANSFORM = {
+    "kind": "i8-panel",
+    "version": 1,
+    "source": "shard.bin",
+    "layout": "v2",
+    "cache": "cache",
+    "output": "colscale",
+    "kernel_version": "resident-full-k-i8-i32-bf16-column-scale-v1",
+}
+_PANEL_DERIVATION = {
+    "source": "@weights/shard.bin",
+    "layout_version": "full-k-colscale-n128-k128-nfrag-kfrag-k8-n8-v2",
+    "recipe_version": "loom-f16-dequant-bf16-absmax-rne-i8-v1",
+}
+
+
+def _derived_lock(**record):
+    lock = _lock()
+    lock["files"].append(
+        {
+            "origin": "cache/" + "b" * 64 + "/colscale_gu.f32",
+            "transform": _PANEL_TRANSFORM,
+        }
+        | record
+    )
+    return lock
+
+
+def test_loader_derived_records_commit_recipe_with_optional_payload_bytes():
+    unknown = ModelLock(_derived_lock(derived=_PANEL_DERIVATION))
+    identity = next(
+        item for item in unknown.files.values() if isinstance(item, DerivedIdentity)
+    )
+    assert (identity.size, identity.sha256) == (None, None)
+    assert identity.derived == _PANEL_DERIVATION
+    observed = _derived_lock(size=4, sha256="c" * 64, derived=_PANEL_DERIVATION)
+    lock = ModelLock(observed)
+    # Snapshots keep the source's origin record and round-trip the derived entry.
+    assert ModelLock.snapshot(lock.origins, list(lock.files.values())) == observed
+    snapshot = ModelLock.snapshot(
+        lock.origins,
+        [item for item in lock.files.values() if isinstance(item, DerivedIdentity)],
+    )
+    assert set(snapshot["origins"]) == {"weights"}
+    # A hand-assembled record without derivation facts remains readable.
+    assert ModelLock(_derived_lock(size=4, sha256="c" * 64))
+
+
+@pytest.mark.parametrize(
+    "record,message",
+    [
+        (dict(size=4), "missing fields: sha256"),
+        (dict(sha256="c" * 64), "missing fields: size"),
+        (dict(size=4, sha256="C" * 64), "lowercase SHA-256"),
+        (dict(derived={"source": "@weights/shard.bin"}), "missing fields"),
+        (dict(derived=_PANEL_DERIVATION | {"source": "@other/x"}), "unknown reference"),
+        (dict(resolved={"revision": "a" * 40}), "unknown fields: resolved"),
+    ],
+)
+def test_invalid_loader_derived_records_fail(record, message):
+    with pytest.raises(ManifestError, match=message):
+        ModelLock(_derived_lock(**record))
