@@ -45,6 +45,12 @@ void loom_runtime_execution_retain(loom_runtime_execution_t* execution);
 // NULL is accepted.
 void loom_runtime_execution_release(loom_runtime_execution_t* execution);
 
+// Borrows the immutable family of this domain's dispatch queue. Its timestamp
+// frequency and valid-bit width describe all samples captured on the work
+// timeline. The family remains live through execution release.
+const iree_hal_queue_family_t* loom_runtime_execution_dispatch_family(
+    const loom_runtime_execution_t* execution);
+
 // Terminal model-consumer observation, independent of semaphore readiness.
 // Stop submissions, attach the nonblocking wake, release caller-owned views,
 // and query is_retired. A callback only schedules the owner, never reenters
@@ -129,6 +135,17 @@ iree_status_t loom_runtime_execution_execute(
     loom_runtime_execution_t* execution,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings, uint64_t* out_value);
+
+// Enqueues a raw 64-bit queue-clock capture after preceding accepted work.
+// HAL retains the target through terminal completion. The aligned destination
+// must permit an 8-byte TRANSFER_TARGET write. Subsequent work and feedback
+// observe the capture through the ordinary execution timelines and visibility
+// rules; this does not wait on the host. Success returns an accepted work
+// value, not the captured tick. The caller keeps each sample unchanged until
+// all its readers retire, independently of later work or other sample slots.
+iree_status_t loom_runtime_execution_timestamp(
+    loom_runtime_execution_t* execution, iree_hal_buffer_t* target,
+    iree_device_size_t offset, uint64_t* out_value);
 
 // Enqueues a buffer-only native stage without a command buffer. The executable
 // belongs to the exact dispatch queue family. HAL captures bindings and retains

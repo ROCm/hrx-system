@@ -1568,6 +1568,8 @@ iree_status_t loom_serve_text_model_complete_epoch(
   iree_vm_buffer_t* media_plan =
       media->plan ? media->plan : model->control.host.buffers[TEXT_HOST_INPUT];
   iree_vm_variant_t publish_arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&model->source.vm_types,
+                                               model->source.control_state),
       iree_vm_buffer_variant_from_ptr_borrowed(
           &model->source.vm_types, model->control.host.buffers[TEXT_HOST_PLAN]),
       iree_vm_buffer_variant_from_ptr_borrowed(&model->source.vm_types,

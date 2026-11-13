@@ -214,12 +214,26 @@ static iree_status_t loom_runtime_module_start(
     void* owned = fence;
     iree_vm_ref_t result = iree_vm_ref_from_ptr_move(&owned, module->types[1]);
     iree_vm_call_ref_result_store_move(&params->call, 0, &result);
-  } else {
+  } else if (params->function_ordinal == module->binding_capacity + 3) {
     iree_vm_ref_t fence = iree_vm_ref_null();
     iree_vm_call_ref_argument_load_borrow(&params->call, 0, &fence);
     IREE_RETURN_IF_ERROR(loom_runtime_execution_barrier(
         module->execution,
         iree_hal_fence_semaphore_list((iree_hal_fence_t*)fence.object)));
+  } else if (params->function_ordinal == module->binding_capacity + 4) {
+    iree_vm_ref_t target = iree_vm_ref_null();
+    iree_vm_call_ref_argument_load_borrow(&params->call, 0, &target);
+    const uint64_t offset = iree_vm_call_value_argument_load(&params->call, 0);
+    IREE_RETURN_IF_ERROR(loom_runtime_execution_timestamp(
+        module->execution, (iree_hal_buffer_t*)target.object, offset, &value));
+    iree_vm_call_value_result_store(&params->call, 0, value);
+  } else {
+    const iree_hal_queue_family_spec_t* clock = iree_hal_queue_family_spec(
+        loom_runtime_execution_dispatch_family(module->execution));
+    iree_vm_call_value_result_store(&params->call, 0,
+                                    clock->timestamp_frequency_hz);
+    iree_vm_call_value_result_store(&params->call, 1,
+                                    clock->timestamp_valid_bits);
   }
   *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
   return iree_ok_status();
@@ -354,7 +368,7 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
   module->workspace_requirement = iree_hal_make_pool_reservation_request(
       workspace_length, workspace_alignment);
   loom_runtime_execution_retain(execution);
-  const iree_host_size_t export_count = options.binding_capacity + 4;
+  const iree_host_size_t export_count = options.binding_capacity + 6;
   module->descriptor = (iree_vm_module_descriptor_t){
       .name = IREE_SVL("runner"),
       .flags = IREE_VM_MODULE_FLAG_LINKABLE,
@@ -412,15 +426,18 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
       module->arguments[i] = (iree_vm_module_signature_type_t){
           IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0};
     }
-    // Signatures sort by field count, then type. The one-argument signatures
-    // are execute_0(i32), fence(i64), and join(hal.fence). Feedback has four
-    // fields and its scalar offset sorts before execute_3's third reference.
+    // Signatures sort by argument count, then type. The clock query has no
+    // arguments; execute_0, fence, and join have one. Timestamp follows
+    // execute_1 among two-argument signatures. Feedback precedes execute_3
+    // because its third argument is a scalar rather than a reference.
+    const iree_host_size_t timestamp_ordinal =
+        iree_min(1, options.binding_capacity) + 4;
     const iree_host_size_t feedback_ordinal =
-        iree_min(3, options.binding_capacity + 1) + 2;
+        iree_min(3, options.binding_capacity + 1) + 4;
     for (iree_host_size_t i = 0; i <= options.binding_capacity; ++i) {
       char* name = module->names + i * 16;
       const int length = snprintf(name, 16, "execute_%zu", i);
-      const iree_host_size_t ordinal = i ? i + 2 + (i >= 3) : 0;
+      const iree_host_size_t ordinal = i ? i + 3 + (i >= 2) + (i >= 3) : 1;
       module->callables[ordinal].signature = (iree_vm_module_signature_t){
           .arguments = {module->arguments, i + 1, 1, i, 0},
           .results = {&loom_runtime_module_result, 1, 1, 0, 0},
@@ -454,24 +471,53 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
     };
     static const iree_vm_module_signature_type_t fence_type = {
         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1};
-    module->callables[1].signature = (iree_vm_module_signature_t){
+    module->callables[2].signature = (iree_vm_module_signature_t){
         .arguments = {&loom_runtime_module_result, 1, 1, 0, 0},
         .results = {&fence_type, 1, 0, 1, 0},
     };
-    module->callables[2].signature = (iree_vm_module_signature_t){
+    module->callables[3].signature = (iree_vm_module_signature_t){
         .arguments = {&fence_type, 1, 0, 1, 0},
     };
     module->descriptor.counts.callable_fields.value_count += 1;
     module->descriptor.counts.callable_fields.ref_count += 2;
     module->exports[ordinal + 1] = (iree_vm_module_export_declaration_t){
         .export_name = IREE_SVL("fence"),
-        .callable_type_ordinal = 1,
+        .callable_type_ordinal = 2,
         .function_ordinal = ordinal + 1,
     };
     module->exports[ordinal + 2] = (iree_vm_module_export_declaration_t){
         .export_name = IREE_SVL("join"),
-        .callable_type_ordinal = 2,
+        .callable_type_ordinal = 3,
         .function_ordinal = ordinal + 2,
+    };
+    static const iree_vm_module_signature_type_t timestamp_arguments[] = {
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0},
+    };
+    module->callables[timestamp_ordinal].signature =
+        (iree_vm_module_signature_t){
+            .arguments = {timestamp_arguments, 2, 1, 1, 0},
+            .results = {&loom_runtime_module_result, 1, 1, 0, 0},
+        };
+    module->descriptor.counts.callable_fields.ref_count += 1;
+    module->descriptor.counts.callable_fields.value_count += 2;
+    module->exports[ordinal + 3] = (iree_vm_module_export_declaration_t){
+        .export_name = IREE_SVL("timestamp"),
+        .callable_type_ordinal = timestamp_ordinal,
+        .function_ordinal = ordinal + 3,
+    };
+    static const iree_vm_module_signature_type_t clock_results[] = {
+        {IREE_VM_SCALAR_TYPE_I64, 0},
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+    };
+    module->callables[0].signature = (iree_vm_module_signature_t){
+        .results = {clock_results, 2, 2, 0, 0},
+    };
+    module->descriptor.counts.callable_fields.value_count += 2;
+    module->exports[ordinal + 4] = (iree_vm_module_export_declaration_t){
+        .export_name = IREE_SVL("timestamp_clock"),
+        .callable_type_ordinal = 0,
+        .function_ordinal = ordinal + 4,
     };
     qsort(module->exports, export_count, sizeof(*module->exports),
           loom_runtime_module_compare_exports);
