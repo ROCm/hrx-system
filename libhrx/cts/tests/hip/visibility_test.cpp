@@ -101,6 +101,10 @@ class HipVisibilityTest : public testing::TestWithParam<Observer> {
   }
 
   void TearDown() override {
+    if (other_stream_) {
+      EXPECT_EQ(hipSuccess, Resolve<decltype(&hipStreamDestroy)>(
+                                "hipStreamDestroy")(other_stream_));
+    }
     if (stream_) {
       EXPECT_EQ(hipSuccess, Resolve<decltype(&hipStreamSynchronize)>(
                                 "hipStreamSynchronize")(stream_));
@@ -121,12 +125,12 @@ class HipVisibilityTest : public testing::TestWithParam<Observer> {
     }
   }
 
-  void Launch(uint32_t incarnation) {
+  void Launch(uint32_t incarnation, hipStream_t stream) {
     void* arguments[] = {&device_output_, &incarnation};
     ASSERT_EQ(hipSuccess, Resolve<decltype(&hipModuleLaunchKernel)>(
                               "hipModuleLaunchKernel")(
                               function_, kWorkgroupCount, 1, 1, 64, 1, 1, 0,
-                              stream_, arguments, nullptr));
+                              stream, arguments, nullptr));
   }
 
   void Observe() {
@@ -193,6 +197,8 @@ class HipVisibilityTest : public testing::TestWithParam<Observer> {
   hipFunction_t function_ = nullptr;
   // Nonblocking stream owning the tested dispatch chain.
   hipStream_t stream_ = nullptr;
+  // A second stream whose events transfer ownership back to stream_.
+  hipStream_t other_stream_ = nullptr;
   // Completion point reused for each observed prefix.
   hipEvent_t event_ = nullptr;
   // Noncoherent mapped host storage, read only after the selected observer.
@@ -209,7 +215,7 @@ TEST_P(HipVisibilityTest, CompletionExposesMappedShaderWrites) {
   std::array<uint32_t, kWorkgroupCount> expected = {};
   for (uint32_t incarnation = 1; incarnation <= 32; ++incarnation) {
     SCOPED_TRACE(incarnation);
-    ASSERT_NO_FATAL_FAILURE(Launch(incarnation));
+    ASSERT_NO_FATAL_FAILURE(Launch(incarnation, stream_));
     ASSERT_NO_FATAL_FAILURE(Observe());
     for (uint32_t group = 0; group < kWorkgroupCount; ++group) {
       expected[group] += incarnation + group;
@@ -218,6 +224,44 @@ TEST_P(HipVisibilityTest, CompletionExposesMappedShaderWrites) {
         EXPECT_EQ(callback_output_[group], expected[group]);
       }
     }
+  }
+}
+
+TEST_P(HipVisibilityTest, UnobservedChainsPreserveLocalAndCrossStreamWrites) {
+  std::array<uint32_t, kWorkgroupCount> expected = {};
+  uint32_t incarnation = 0;
+  for (uint32_t batch = 0; batch < 8; ++batch) {
+    SCOPED_TRACE(batch);
+    ASSERT_EQ(hipSuccess, Resolve<decltype(&hipStreamCreateWithFlags)>(
+                              "hipStreamCreateWithFlags")(
+                              &other_stream_, hipStreamNonBlocking));
+    // Re-recording the event must preserve already-admitted native readers.
+    // Each stream also carries a dependent chain with no intervening CPU wait.
+    for (hipStream_t stream : {stream_, other_stream_, stream_}) {
+      if (incarnation) {
+        ASSERT_EQ(hipSuccess, Resolve<decltype(&hipStreamWaitEvent)>(
+                                  "hipStreamWaitEvent")(stream, event_, 0));
+      }
+      for (uint32_t launch = 0; launch < 16; ++launch) {
+        ++incarnation;
+        ASSERT_NO_FATAL_FAILURE(Launch(incarnation, stream));
+        for (uint32_t group = 0; group < kWorkgroupCount; ++group) {
+          expected[group] += incarnation + group;
+        }
+      }
+      ASSERT_EQ(hipSuccess, Resolve<decltype(&hipEventRecord)>(
+                                "hipEventRecord")(event_, stream));
+    }
+    ASSERT_NO_FATAL_FAILURE(Observe());
+    for (uint32_t group = 0; group < kWorkgroupCount; ++group) {
+      EXPECT_EQ(output_[group], expected[group]);
+      if (GetParam() == Observer::kHostCallback) {
+        EXPECT_EQ(callback_output_[group], expected[group]);
+      }
+    }
+    ASSERT_EQ(hipSuccess, Resolve<decltype(&hipStreamDestroy)>(
+                              "hipStreamDestroy")(other_stream_));
+    other_stream_ = nullptr;
   }
 }
 

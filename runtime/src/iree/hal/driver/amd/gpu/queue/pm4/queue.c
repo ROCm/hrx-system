@@ -257,10 +257,11 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_set_profile(
   return status;
 }
 
-// A candidate contains only waits emitted in this native piece. It becomes
-// the accepted FIFO prefix after native acceptance; a rejected KERNEL piece
-// cannot claim its dependencies for a later operation. Retained signals carry
-// exact immutable snapshots, never a producer queue's newer mutable state.
+// A candidate contains only dependencies joined by this native piece. It
+// becomes the accepted FIFO prefix after native acceptance; a rejected KERNEL
+// piece cannot claim its dependencies for a later operation. Retained signals
+// carry exact immutable snapshots, never a producer queue's newer mutable
+// state.
 static void iree_hal_amd_gpu_pm4_prepare_wait_frontier(
     iree_hal_amd_gpu_pm4_queue_t* queue, iree_host_size_t wait_count,
     const iree_hal_amd_gpu_pm4_submission_wait_t* waits,
