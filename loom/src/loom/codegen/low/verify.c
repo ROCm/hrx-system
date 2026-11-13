@@ -2285,19 +2285,21 @@ static iree_status_t loom_low_verify_initialize_block_arg_masks(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
-                                              const loom_op_t* low_func_op) {
+static iree_status_t loom_low_verify_function_impl(
+    loom_low_verify_state_t* state, const loom_op_t* low_func_op,
+    const loom_target_function_version_t* version,
+    loom_diagnostic_export_scope_t* diagnostic_scope) {
   iree_diagnostic_emitter_t counting_emitter = {
       .fn = loom_low_verify_counting_emitter,
       .user_data = state,
   };
-  const loom_target_function_version_t* version =
-      loom_low_verify_function_version(state, low_func_op);
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       state->module, &state->symbol_facts, low_func_op,
       version != NULL ? version->function_target_facts : NULL, state->registry,
       counting_emitter, &target));
+  diagnostic_scope->export_name =
+      loom_target_facts_export_name(target.target_facts);
   loom_region_t* body = loom_low_verify_function_body(low_func_op);
   if (target.descriptor_set == NULL || loom_low_verify_should_stop(state)) {
     return iree_ok_status();
@@ -2370,6 +2372,22 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
   if (iree_status_is_ok(status)) {
     status = loom_low_verify_end_function_providers(&function_state);
   }
+  return status;
+}
+
+static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
+                                              const loom_op_t* low_func_op) {
+  const loom_target_function_version_t* version =
+      loom_low_verify_function_version(state, low_func_op);
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(
+          version != NULL ? version->function_target_facts : NULL),
+      .target = state->emitter,
+  };
+  state->emitter = loom_diagnostic_export_scope_emitter(&diagnostic_scope);
+  const iree_status_t status = loom_low_verify_function_impl(
+      state, low_func_op, version, &diagnostic_scope);
+  state->emitter = diagnostic_scope.target;
   return status;
 }
 

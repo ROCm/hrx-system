@@ -3,7 +3,7 @@
 amdgpu.target<gfx90a> @target
 
 // Diagnose the hardware ceiling before producing an unlaunchable code object.
-// ERROR@+1: AMDGPU/053 {function_name="private_segment_too_large", processor="gfx90a", wave_size="64", private_bytes="186000", limit_bytes="131056"}
+// ERROR@+1: AMDGPU/053 {export="private_segment_too_large", function_name="private_segment_too_large", processor="gfx90a", wave_size="64", private_bytes="186000", limit_bytes="131056"}
 low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @private_segment_too_large() asm {
   %storage = storage {byte_alignment = 16, byte_length = 186000} : low.storage<private>
   return
@@ -33,7 +33,7 @@ amdgpu.target<gfx90a> @target
 
 // Each reservation fits, and their lengths sum to less than the limit. The
 // projected private segment, including alignment, exceeds it by one byte.
-// ERROR@+1: AMDGPU/053 {function_name="aligned_spill_exceeds_limit", processor="gfx90a", wave_size="64", private_bytes="131057", limit_bytes="131056"}
+// ERROR@+1: AMDGPU/053 {export="aligned_spill_exceeds_limit", function_name="aligned_spill_exceeds_limit", processor="gfx90a", wave_size="64", private_bytes="131057", limit_bytes="131056"}
 low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @aligned_spill_exceeds_limit() asm {
   %private = storage {byte_alignment = 1, byte_length = 131053} : low.storage<private>
   %scratch = storage {byte_alignment = 4, byte_length = 1} : low.storage<scratch>
@@ -47,7 +47,7 @@ low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @alig
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 // Use the selected wave size: this reservation would fit in default wave32.
-// ERROR@+1: AMDGPU/053 {function_name="selected_wave_limit", processor="gfx11-generic", wave_size="64", private_bytes="131069", limit_bytes="131068"}
+// ERROR@+1: AMDGPU/053 {export="selected_wave_limit", function_name="selected_wave_limit", processor="gfx11-generic", wave_size="64", private_bytes="131069", limit_bytes="131068"}
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) @selected_wave_limit() asm {
   %storage = storage {byte_alignment = 1, byte_length = 131069} : low.storage<private>
   return
@@ -60,7 +60,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx1250> @target
 
 // Preserve the wide extent in the diagnostic before metadata narrows it.
-// ERROR@+1: AMDGPU/053 {function_name="private_segment_exceeds_metadata_width", processor="gfx1250", wave_size="32", private_bytes="4294967328", limit_bytes="2097144"}
+// ERROR@+1: AMDGPU/053 {export="private_segment_exceeds_metadata_width", function_name="private_segment_exceeds_metadata_width", processor="gfx1250", wave_size="32", private_bytes="4294967328", limit_bytes="2097144"}
 low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 1) @private_segment_exceeds_metadata_width() asm {
   %storage = storage {byte_alignment = 1, byte_length = 4294967328} : low.storage<private>
   return

@@ -824,6 +824,13 @@ iree_status_t loom_vm_function_plan_write(
     iree_io_stream_t* stream, bool* out_accepted,
     iree_vm_bytecode_v0_function_row_t* out_row) {
   *out_accepted = false;
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(
+          function_version != NULL ? function_version->function_target_facts
+                                   : NULL),
+      .target = diagnostic_emitter,
+  };
+  diagnostic_emitter = loom_diagnostic_export_scope_emitter(&diagnostic_scope);
   uint16_t argument_count = 0;
   loom_func_like_arg_ids(function, &argument_count);
   loom_vm_call_contract_provider_context_t call_contracts = {

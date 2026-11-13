@@ -198,6 +198,16 @@ static inline const loom_target_bundle_t* loom_target_facts_bundle(
   return facts ? &facts->storage.bundle : NULL;
 }
 
+// Returns the source export identity retained by function target facts. Empty
+// when the facts describe an invocation or a function without an export.
+static inline iree_string_view_t loom_target_facts_export_name(
+    const loom_target_facts_t* facts) {
+  const loom_target_bundle_t* bundle = loom_target_facts_bundle(facts);
+  return bundle != NULL && bundle->export_plan != NULL
+             ? bundle->export_plan->name
+             : iree_string_view_empty();
+}
+
 // Returns a concise identity name derived from |facts|.
 //
 // Families without a structured presentation callback use the common bundle

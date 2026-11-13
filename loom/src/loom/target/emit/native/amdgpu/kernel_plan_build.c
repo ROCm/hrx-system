@@ -39,6 +39,7 @@ loom_amdgpu_kernel_plan_emit_private_segment_limit(
   };
   const loom_diagnostic_emission_t emission = {
       .op = frame->schedule.function_op,
+      .export_name = loom_target_facts_export_name(frame->target.target_facts),
       .error = LOOM_ERR_AMDGPU_053,
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
@@ -121,6 +122,7 @@ loom_amdgpu_kernel_plan_emit_unsatisfied_residency_requirement(
   };
   const loom_diagnostic_emission_t emission = {
       .op = frame->schedule.function_op,
+      .export_name = loom_target_facts_export_name(frame->target.target_facts),
       .error = LOOM_ERR_AMDGPU_052,
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),

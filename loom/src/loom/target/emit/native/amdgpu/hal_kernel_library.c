@@ -88,6 +88,7 @@ loom_amdgpu_hal_kernel_library_emit_target_identity_mismatch(
   }};
   const loom_diagnostic_emission_t emission = {
       .op = entry->func.op,
+      .export_name = loom_target_facts_export_name(entry->target_facts),
       .error = LOOM_ERR_AMDGPU_051,
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
@@ -526,11 +527,16 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_plan(
     loom_amdgpu_hal_kernel_library_kernel_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_hal_kernel_library_kernel_plan_t){0};
 
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(entry->target_facts),
+      .target = loom_target_entry_emitter(diagnostic_emitter),
+  };
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, table_arena);
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module, &symbol_facts, entry->func.op, entry->target_facts,
-      &low_registry->registry, loom_target_entry_emitter(diagnostic_emitter),
+      &low_registry->registry,
+      loom_diagnostic_export_scope_emitter(&diagnostic_scope),
       &out_plan->target));
   if (out_plan->target.descriptor_set == NULL) {
     return iree_ok_status();
@@ -571,12 +577,16 @@ static iree_status_t loom_amdgpu_hal_kernel_library_verify_kernel_abi(
     uint32_t max_errors, iree_arena_allocator_t* table_arena,
     bool* out_failed) {
   *out_failed = false;
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(plan->target.target_facts),
+      .target = loom_target_entry_emitter(diagnostic_emitter),
+  };
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
       module, plan->low_function_op, plan->target.descriptor_set,
       loom_amdgpu_target_processor_properties_from_resolved_target(
           &plan->target),
-      max_errors, loom_target_entry_emitter(diagnostic_emitter), table_arena,
-      &plan->abi_verify));
+      max_errors, loom_diagnostic_export_scope_emitter(&diagnostic_scope),
+      table_arena, &plan->abi_verify));
   *out_failed = plan->abi_verify.error_count != 0;
   return iree_ok_status();
 }
@@ -610,8 +620,12 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
   *out_built = false;
   *out_emission = (loom_amdgpu_kernel_emission_result_t){0};
 
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = loom_target_facts_export_name(plan->target.target_facts),
+      .target = loom_target_entry_emitter(diagnostic_emitter),
+  };
   const iree_diagnostic_emitter_t emitter =
-      loom_target_entry_emitter(diagnostic_emitter);
+      loom_diagnostic_export_scope_emitter(&diagnostic_scope);
   const loom_amdgpu_function_compile_options_t compile_options = {
       .descriptor_registry = &low_registry->registry,
       .resolved_target = &plan->target,
