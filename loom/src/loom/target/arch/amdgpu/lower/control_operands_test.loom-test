@@ -56,15 +56,20 @@ amdgpu.target<gfx11-generic> @target
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @zero_trip_state(%count: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %begin = s_mov_b32 0
   %step = s_mov_b32 1
-  %15 = v_mov_b32 0
-  %16 = v_mov_b32 1
-  %wide = concat(%15, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %15 = s_mov_b32 0
+  %16 = s_mov_b32 1
+  %wide = concat(%15, %16) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %18 = v_mov_b32_copy %begin
   %19 = v_mov_b32_copy %step
   %20 = v_ashrrev_i32_src0_inline %initial, 31
   %21 = concat(%initial, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %result = low.scf.for signed [%18 to %count step %19] iter_args(%21: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) do(%position: reg<amdgpu.vgpr>, %current: reg<amdgpu.vgpr x2>) {
-    low.scf.yield %wide : reg<amdgpu.vgpr x2>
+    %25 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+    %26 = v_mov_b32_copy %25
+    %27 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+    %28 = v_mov_b32_copy %27
+    %29 = concat(%26, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+    low.scf.yield %29 : reg<amdgpu.vgpr x2>
   }
   return %result
 }

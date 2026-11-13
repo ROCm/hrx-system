@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/analysis/view_regions.h"
+#include "loom/codegen/low/lower/representation_observer.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
@@ -184,6 +185,7 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
     const loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
     const loom_low_descriptor_set_t* descriptor_set,
+    loom_low_representation_plan_t* representation_plan,
     iree_arena_allocator_t* arena,
     loom_amdgpu_source_value_analysis_t* analysis) {
   if (analysis->descriptor_set != descriptor_set) {
@@ -203,6 +205,7 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
        analysis->record_count < value_domain->value_count)) {
     analysis->value_domain = value_domain;
     analysis->fact_table = fact_table;
+    analysis->representation_plan = representation_plan;
     analysis->records = NULL;
     analysis->record_count =
         value_domain != NULL ? value_domain->value_count : 0;
@@ -229,6 +232,20 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
       }
     }
   }
+  if (analysis->representation_plan != representation_plan) {
+    // Width selection can change a producer's native register bank. Drop
+    // dependent cached answers when observation publishes its solved plan,
+    // retaining the independently computed source control-boundary bits.
+    IREE_ASSERT_EQ(analysis->query.depth, 0u);
+    analysis->representation_plan = representation_plan;
+    for (iree_host_size_t i = 0; i < analysis->record_count; ++i) {
+      loom_amdgpu_source_value_analysis_record_t* record =
+          &analysis->records[i];
+      record->known_bits = 0;
+      record->value_bits &=
+          LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY;
+    }
+  }
   return iree_ok_status();
 }
 
@@ -244,6 +261,7 @@ iree_status_t loom_amdgpu_source_value_analysis_for_context(
       loom_low_lower_context_fact_table(context),
       loom_low_lower_context_value_domain(context),
       loom_low_lower_context_descriptor_set(context),
+      loom_low_lower_representation_plan_if_ready(context),
       loom_low_lower_context_function_arena(context), analysis));
   *out_analysis = analysis;
   return iree_ok_status();
@@ -260,7 +278,7 @@ iree_status_t loom_amdgpu_source_value_analysis_for_target_low_legality(
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_prepare(
       loom_target_low_legality_fact_table(context),
       loom_target_low_legality_value_domain(context),
-      loom_target_low_legality_descriptor_set(context),
+      loom_target_low_legality_descriptor_set(context), NULL,
       loom_target_low_legality_scratch_arena(context), analysis));
   *out_analysis = analysis;
   return iree_ok_status();
@@ -281,9 +299,13 @@ iree_status_t loom_amdgpu_source_value_analysis_for_contract_query(
   if (analysis == NULL) {
     return iree_ok_status();
   }
+  loom_low_representation_plan_t* representation_plan = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_representation_query_plan(
+      environment, &representation_plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_prepare(
       environment->fact_table, environment->value_domain,
-      environment->descriptor_set, environment->arena, analysis));
+      environment->descriptor_set, representation_plan, environment->arena,
+      analysis));
   *out_analysis = analysis;
   return iree_ok_status();
 }
