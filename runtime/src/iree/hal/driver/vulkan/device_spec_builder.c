@@ -361,6 +361,16 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
   const iree_hal_queue_priority_t queue_priorities[] = {
       IREE_HAL_QUEUE_PRIORITY_NORMAL,
   };
+  // Vulkan queues share the logical device's execution units and cannot select
+  // individual units. A known capacity is one indivisible resource.
+  const iree_hal_queue_execution_resource_group_spec_t execution_group = {
+      .minimum_selected_resource_count = 1,
+  };
+  const iree_hal_queue_execution_resource_spec_t execution_resource = {
+      .group_ordinal = 0,
+      .first_execution_unit_ordinal = 0,
+      .execution_unit_count = params->device_plan->execution_unit_count,
+  };
   char queue_family_names[IREE_HAL_MAX_QUEUE_FAMILIES][32];
   iree_hal_queue_family_spec_t queue_families[IREE_HAL_MAX_QUEUE_FAMILIES];
   const uint64_t timestamp_frequency_hz =
@@ -422,6 +432,15 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
         .role_flags = role_flags,
         .flags = flags,
     };
+    if (iree_all_bits_set(queue_family->flags, VK_QUEUE_COMPUTE_BIT) &&
+        execution_resource.execution_unit_count != 0) {
+      queue_families[i].execution_unit_count =
+          execution_resource.execution_unit_count;
+      queue_families[i].execution_resource_group_count = 1;
+      queue_families[i].execution_resource_groups = &execution_group;
+      queue_families[i].execution_resource_count = 1;
+      queue_families[i].execution_resources = &execution_resource;
+    }
     if (supports_atomics) {
       queue_families[i].atomic_capabilities = atomic_capabilities;
     }

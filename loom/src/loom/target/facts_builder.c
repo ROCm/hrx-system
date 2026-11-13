@@ -74,6 +74,7 @@ static void loom_target_facts_builder_apply_field(
     LOOM_COPY_FIELD(MAX_WORKGROUP_STORAGE_BYTES, snapshot,
                     max_workgroup_storage_bytes)
     LOOM_COPY_FIELD(SUBGROUP_SIZE, snapshot, subgroup_size)
+    LOOM_COPY_FIELD(EXECUTION_UNIT_COUNT, snapshot, execution_unit_count)
     LOOM_COPY_FIELD(MAX_GRID_SIZE_X, snapshot, max_grid_size.x)
     LOOM_COPY_FIELD(MAX_GRID_SIZE_Y, snapshot, max_grid_size.y)
     LOOM_COPY_FIELD(MAX_GRID_SIZE_Z, snapshot, max_grid_size.z)

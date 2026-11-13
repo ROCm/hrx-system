@@ -177,6 +177,12 @@ TARGET_COMMON_OVERRIDE_ATTRS = [
         doc="Maximum function-local workgroup storage in bytes.",
     ),
     AttrDef("subgroup_size", ATTR_TYPE_I64, optional=True),
+    AttrDef(
+        "execution_unit_count",
+        ATTR_TYPE_I64,
+        optional=True,
+        doc="Execution units available to the deployment; zero means unknown.",
+    ),
     AttrDef("max_grid_size_x", ATTR_TYPE_I64, optional=True),
     AttrDef("max_grid_size_y", ATTR_TYPE_I64, optional=True),
     AttrDef("max_grid_size_z", ATTR_TYPE_I64, optional=True),
@@ -234,6 +240,21 @@ target_subgroup_size = Op(
     facts="loom_target_subgroup_size_facts",
     format=[COLON, ResultType("result")],
     examples=["%size = target.subgroup.size : index"],
+)
+
+target_execution_unit_count = Op(
+    "target.execution.unit.count",
+    group=target_ops,
+    builder_name="execution_unit_count",
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Read the available execution-unit count of the current deployment scope, such as a queue's selected CUs, SMs, or CPU workers. This is a capacity fact, not loaded-kernel occupancy or a throughput guarantee. The query remains unresolved until the deployment supplies a known count; unknown capacity never folds to zero or one."
+    ),
+    results=[Result("result", INDEX, doc="Available execution-unit count.")],
+    traits=[PURE, CONTEXTUAL],
+    facts="loom_target_execution_unit_count_facts",
+    format=[COLON, ResultType("result")],
+    examples=["%units = target.execution.unit.count : index"],
 )
 
 
@@ -302,6 +323,7 @@ ALL_TARGET_OPS: tuple[Op, ...] = (
     target_generic,
     target_decl,
     target_subgroup_size,
+    target_execution_unit_count,
 )
 
 ALL_TARGET_PARAMETERIZED_ATTRS = (target_subgroup_size_attr,)

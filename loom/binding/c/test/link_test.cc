@@ -75,6 +75,7 @@ static iree_status_t ProjectFakeTargetProfileFacts(
 
 static const loom_target_profile_type_t kFakeTargetProfileType = {
     .name = IREE_SVL("fake-link"),
+    .storage_size = sizeof(loom_target_profile_t),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectFakeTargetProfileFacts,
     .equal = loom_target_profile_equal_common,
@@ -100,7 +101,7 @@ static iree_status_t MaterializeFakeTargetDefinition(
       /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
       /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
       /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
-      /*subgroup_size=*/0,
+      /*subgroup_size=*/0, /*execution_unit_count=*/0,
       /*max_grid_size_x=*/0, /*max_grid_size_y=*/0, /*max_grid_size_z=*/0,
       /*max_flat_grid_size=*/0,
       /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,

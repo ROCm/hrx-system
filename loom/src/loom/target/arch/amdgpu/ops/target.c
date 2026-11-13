@@ -80,8 +80,8 @@ iree_status_t loom_amdgpu_target_materialize_definition(
     loom_symbol_ref_t symbol, loom_location_id_t location) {
   const loom_amdgpu_target_facts_t* facts =
       loom_amdgpu_target_facts_cast(resolved_target->facts);
-  static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 30,
-                "AMDGPU target flags reserve the first 30 bits for common "
+  static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ == 31,
+                "AMDGPU target flags reserve the first 31 bits for common "
                 "target facts");
   static_assert(LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT ==
                     (1u << LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT),
@@ -127,16 +127,17 @@ iree_status_t loom_amdgpu_target_materialize_definition(
       snapshot->offset_bitwidth, snapshot->max_workgroup_size.x,
       snapshot->max_workgroup_size.y, snapshot->max_workgroup_size.z,
       snapshot->max_flat_workgroup_size, snapshot->max_workgroup_storage_bytes,
-      snapshot->subgroup_size, snapshot->max_grid_size.x,
-      snapshot->max_grid_size.y, snapshot->max_grid_size.z,
-      snapshot->max_flat_grid_size, snapshot->max_workgroup_count.x,
-      snapshot->max_workgroup_count.y, snapshot->max_workgroup_count.z,
-      snapshot->memory_spaces.generic, snapshot->memory_spaces.global,
-      snapshot->memory_spaces.workgroup, snapshot->memory_spaces.constant,
-      snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
-      snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
-      export_plan->linkage, contract_set_key, config->contract_feature_bits,
-      features, location, &target_op);
+      snapshot->subgroup_size, snapshot->execution_unit_count,
+      snapshot->max_grid_size.x, snapshot->max_grid_size.y,
+      snapshot->max_grid_size.z, snapshot->max_flat_grid_size,
+      snapshot->max_workgroup_count.x, snapshot->max_workgroup_count.y,
+      snapshot->max_workgroup_count.z, snapshot->memory_spaces.generic,
+      snapshot->memory_spaces.global, snapshot->memory_spaces.workgroup,
+      snapshot->memory_spaces.constant, snapshot->memory_spaces.private_memory,
+      snapshot->memory_spaces.host, snapshot->memory_spaces.descriptor,
+      export_plan->abi_kind, export_symbol, export_plan->linkage,
+      contract_set_key, config->contract_feature_bits, features, location,
+      &target_op);
 }
 
 static iree_string_view_t loom_amdgpu_target_record_symbol_name(

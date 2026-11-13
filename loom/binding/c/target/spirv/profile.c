@@ -930,11 +930,8 @@ static loomc_status_t loomc_spirv_profile_validate_query(
   }
   *out_query = (loomc_spirv_profile_query_t){
       .profile = native_profile,
-      .storage =
-          loomc_target_profile_has_storage(profile,
-                                           loomc_spirv_target_profile_destroy)
-              ? (const loomc_spirv_target_profile_storage_t*)native_profile
-              : NULL,
+      .storage = loomc_target_profile_storage(
+          profile, loomc_spirv_target_profile_destroy),
   };
   return loomc_ok_status();
 }

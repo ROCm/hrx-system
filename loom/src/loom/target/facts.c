@@ -122,6 +122,9 @@ bool loom_target_snapshot_satisfies_specialization_requirement(
          (target_requirement->subgroup_size == 0 ||
           effective_snapshot->subgroup_size ==
               target_requirement->subgroup_size) &&
+         (target_requirement->execution_unit_count == 0 ||
+          effective_snapshot->execution_unit_count ==
+              target_requirement->execution_unit_count) &&
          loom_target_limit_satisfies(effective_snapshot->max_grid_size.x,
                                      target_requirement->max_grid_size.x) &&
          loom_target_limit_satisfies(effective_snapshot->max_grid_size.y,

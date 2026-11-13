@@ -131,6 +131,25 @@ static loomc_status_t loomc_iree_hal_validate_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "IREE HAL profile options require a device");
   }
+  if (options->queue != NULL) {
+    const iree_hal_queue_family_t* family =
+        iree_hal_queue_family(options->queue);
+    const iree_hal_queue_family_spec_t* family_spec =
+        iree_hal_queue_family_spec(family);
+    if (iree_hal_queue_family_device(family) != options->device ||
+        !iree_any_bit_set(family_spec->role_flags,
+                          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "target queue must be a dispatch queue "
+                               "belonging to the device");
+    }
+    if (options->physical_device_affinity != 0 &&
+        options->physical_device_affinity !=
+            family_spec->physical_device_affinity) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "target affinity must match the dispatch queue");
+    }
+  }
   if (options->provider_count != 0 && options->providers == NULL) {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
@@ -174,6 +193,25 @@ static loomc_status_t loomc_iree_hal_create_unsupported_result(
       out_result);
 }
 
+// Acquired queues retain validated, nonoverlapping resource ranges. The family
+// unit ordinal extent may contain gaps; capacity is the sum of selected ranges.
+static uint32_t loomc_iree_hal_queue_execution_unit_count(
+    const iree_hal_queue_t* queue) {
+  const iree_hal_queue_family_spec_t* family =
+      iree_hal_queue_family_spec(iree_hal_queue_family(queue));
+  const iree_hal_queue_execution_resource_list_t selected =
+      iree_hal_queue_execution_resources(queue);
+  const iree_host_size_t count =
+      selected.count != 0 ? selected.count : family->execution_resource_count;
+  uint32_t unit_count = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const iree_host_size_t ordinal =
+        selected.count != 0 ? selected.ordinals[i] : i;
+    unit_count += family->execution_resources[ordinal].execution_unit_count;
+  }
+  return unit_count;
+}
+
 loomc_status_t loomc_target_select_iree_hal(
     loomc_target_environment_t* target_environment,
     const loomc_iree_hal_target_options_t* options, loomc_allocator_t allocator,
@@ -190,6 +228,17 @@ loomc_status_t loomc_target_select_iree_hal(
                              "target_environment must not be NULL");
   }
   LOOMC_RETURN_IF_ERROR(loomc_iree_hal_validate_options(options));
+
+  loomc_iree_hal_target_options_t resolved_options = *options;
+  uint32_t execution_unit_count = 0;
+  if (options->queue != NULL) {
+    resolved_options.physical_device_affinity =
+        iree_hal_queue_family_spec(iree_hal_queue_family(options->queue))
+            ->physical_device_affinity;
+    execution_unit_count =
+        loomc_iree_hal_queue_execution_unit_count(options->queue);
+  }
+  options = &resolved_options;
 
   loomc_status_t status = loomc_ok_status();
   for (loomc_host_size_t i = 0;
@@ -245,6 +294,22 @@ loomc_status_t loomc_target_select_iree_hal(
           "supported IREE HAL target provider returned a failed result with "
           "a selection");
       break;
+    }
+    if (loomc_result_succeeded(result) && execution_unit_count != 0) {
+      loomc_target_profile_t* refined = NULL;
+      status = loomc_target_profile_refine_execution_unit_count(
+          selection.target_profile, execution_unit_count, allocator, &refined);
+      loomc_target_profile_release(selection.target_profile);
+      selection.target_profile = refined;
+      if (!loomc_status_is_ok(status)) {
+        loomc_result_release(result);
+        if (loomc_status_code(status) == LOOMC_STATUS_INVALID_ARGUMENT) {
+          return loomc_iree_hal_create_failed_result(
+              allocator, loomc_make_cstring_view("IREE_HAL/TARGET"), status,
+              out_result);
+        }
+        break;
+      }
     }
     *out_selection = selection;
     *out_result = result;

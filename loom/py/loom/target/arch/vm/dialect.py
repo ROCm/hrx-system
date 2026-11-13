@@ -9,6 +9,7 @@
 from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dsl import (
     ATTR_TYPE_ENUM,
+    ATTR_TYPE_I64,
     SYMBOL_DEFINE,
     AttrDef,
     Dialect,
@@ -59,6 +60,12 @@ vm_target = Op(
     attrs=[
         AttrDef("symbol", "symbol"),
         AttrDef("kind", ATTR_TYPE_ENUM, enum_def=VmTargetKind),
+        AttrDef(
+            "execution_unit_count",
+            ATTR_TYPE_I64,
+            optional=True,
+            doc="Execution units available to the deployment; zero means unknown.",
+        ),
     ],
     verify="loom_target_record_verify",
     format=[TemplateParam("kind"), SymbolRef("symbol"), AttrDict()],

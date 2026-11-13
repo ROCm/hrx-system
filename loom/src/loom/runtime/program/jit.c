@@ -396,9 +396,6 @@ static iree_status_t loom_runtime_jit_create_impl(
     loom_runtime_compilation_report_t* report, iree_allocator_t host_allocator,
     loom_runtime_jit_t** out_jit) {
   *out_jit = NULL;
-  const iree_hal_physical_device_affinity_t affinity =
-      iree_hal_queue_family_spec(iree_hal_queue_family(dispatch))
-          ->physical_device_affinity;
   loom_runtime_jit_t* jit = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*jit), (void**)&jit));
@@ -439,7 +436,7 @@ static iree_status_t loom_runtime_jit_create_impl(
   if (iree_status_is_ok(status)) {
     status = loom_runtime_target_select(
         jit->kernel.environment, target_providers, target_provider_count,
-        device, affinity, report, artifact_allocator, &target);
+        device, dispatch, report, artifact_allocator, &target);
     jit->kernel.profile = target.selection.target_profile;
     jit->target = target.selection.executable_target;
     jit->artifact_format = target.artifact_format;

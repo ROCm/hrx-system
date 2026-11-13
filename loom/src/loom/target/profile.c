@@ -47,6 +47,7 @@ static bool loom_target_profile_snapshot_equal(
          lhs->max_flat_workgroup_size == rhs->max_flat_workgroup_size &&
          lhs->max_workgroup_storage_bytes == rhs->max_workgroup_storage_bytes &&
          lhs->subgroup_size == rhs->subgroup_size &&
+         lhs->execution_unit_count == rhs->execution_unit_count &&
          lhs->max_grid_size.x == rhs->max_grid_size.x &&
          lhs->max_grid_size.y == rhs->max_grid_size.y &&
          lhs->max_grid_size.z == rhs->max_grid_size.z &&

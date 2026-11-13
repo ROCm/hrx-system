@@ -372,6 +372,33 @@ LOOMC_API_EXPORT loomc_status_t loomc_target_profile_select(
     loomc_string_view_t specification, loomc_allocator_t allocator,
     loomc_target_profile_t** out_profile);
 
+/// Refines a complete profile with a known deployment execution-unit count.
+///
+/// The count describes available units in the deployment scope, such as a
+/// queue's selected CUs or SMs. It is not kernel occupancy or a workgroup
+/// budget. Unknown capacity is represented by leaving the profile unrefined. A
+/// count supplied here must be nonzero and agree with any count already in the
+/// profile. Named architecture profiles ordinarily leave this fact unknown.
+///
+/// @param base_profile Complete profile to refine, borrowed for this call.
+/// @param execution_unit_count Known available execution-unit count.
+/// @param allocator Host allocator used for the refined profile.
+/// @param out_profile Receives one retained immutable profile on success.
+/// @return OK on success, invalid argument for an incomplete profile, zero
+/// count, or conflicting count, and an allocation failure if storage is needed.
+///
+/// @ownership
+/// Refinement preserves all common and family-specific facts without mutating
+/// the base. The result retains its backing storage independently of the base
+/// handle's caller. Release the result with `loomc_target_profile_release`.
+///
+/// @thread_safety
+/// Refinement may run concurrently with queries or other refinements.
+LOOMC_API_EXPORT loomc_status_t
+loomc_target_profile_refine_execution_unit_count(
+    loomc_target_profile_t* base_profile, uint32_t execution_unit_count,
+    loomc_allocator_t allocator, loomc_target_profile_t** out_profile);
+
 /// Retains a target profile for another owner.
 ///
 /// @param profile Target profile to retain.

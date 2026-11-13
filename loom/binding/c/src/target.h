@@ -126,11 +126,11 @@ LOOMC_API_PRIVATE const loom_target_provider_t*
 loomc_target_profile_loom_target_provider(
     const loomc_target_profile_t* profile);
 
-// Returns whether |profile| owns storage created with |destroy|. Target-family
-// adapters use their private destructor identity before accessing storage that
-// extends the native compiler profile. Family identity alone does not establish
-// that allocation layout: named profiles have provider-owned static storage.
-LOOMC_API_PRIVATE bool loomc_target_profile_has_storage(
+// Returns retained family storage created with |destroy|, or NULL. Common
+// refinements preserve this storage separately from their native profile view.
+// Family identity alone does not establish the allocation layout: named
+// profiles have provider-owned static storage.
+LOOMC_API_PRIVATE const void* loomc_target_profile_storage(
     const loomc_target_profile_t* profile,
     loom_target_profile_destroy_fn_t destroy);
 

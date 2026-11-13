@@ -43,6 +43,7 @@ static iree_status_t ProjectTargetFacts(const loom_target_profile_t* profile,
 
 static const loom_target_profile_type_t kTargetProfileType = {
     .name = IREE_SVL("fake"),
+    .storage_size = sizeof(loom_target_profile_t),
     .fact_type = &kTargetFactType,
     .project_facts = ProjectTargetFacts,
     .equal = loom_target_profile_equal_common,
@@ -57,6 +58,7 @@ static const loom_target_fact_type_t kOtherTargetFactType = {
 };
 static const loom_target_profile_type_t kOtherTargetProfileType = {
     .name = IREE_SVL("other"),
+    .storage_size = sizeof(loom_target_profile_t),
     .fact_type = &kOtherTargetFactType,
     .project_facts = ProjectTargetFacts,
     .equal = loom_target_profile_equal_common,
