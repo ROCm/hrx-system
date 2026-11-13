@@ -207,6 +207,32 @@ CPU or synchronizing other models. A null fence represents no external work.
 Completion describes readiness; storage ownership still extends through the
 last accepted consumer, including when a dependency fails.
 
+### Measure device work
+
+Control programs can bracket prepared stages with queue-clock captures:
+
+```text
+(frequency_hz, valid_bits) = runner.timestamp_clock()
+runner.timestamp(feedback_buffer, begin_byte_offset)
+runner.execute_N(stage, ...)
+finished = runner.timestamp(feedback_buffer, end_byte_offset)
+runner.feedback(slot, feedback_buffer, byte_offset, byte_length)
+```
+
+Each capture writes a raw 64-bit tick to an 8-byte-aligned, transfer-writable
+destination. Its return value is an accepted work timepoint, not the captured
+tick. Captures follow preceding model work, and subsequent work follows the
+capture. They enqueue without a host wait or a device-wide barrier. Returning
+the samples in the existing feedback transfer needs no separate readback.
+
+`timestamp_clock` reports the dispatch queue family's clock. A zero frequency
+or width means that no timestamp clock is advertised; unsupported captures
+return an error. Within that family, subtract samples modulo `2^valid_bits`
+and divide by `frequency_hz` to obtain elapsed seconds. A captured zero is
+valid, and successful completion establishes that the sample was written.
+Each queued epoch owns separate sample slots until its readers retire; a later
+capture must not overwrite feedback that is still in flight.
+
 ### Read checkpoint bytes on demand
 
 Large lookup tables and paged experts can remain in checkpoint files instead
