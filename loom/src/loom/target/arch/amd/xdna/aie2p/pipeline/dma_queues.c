@@ -9,6 +9,49 @@
 #include "loom/analysis/pipeline/lifetime_layout.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 
+typedef struct loom_aie2p_native_shim_queue_t {
+  // Physical shim selected for one complete logical queue lifetime class.
+  loom_aie2p_native_tile_t* tile;
+  // Queue index in the selected transfer direction.
+  uint8_t engine;
+} loom_aie2p_native_shim_queue_t;
+
+// Shim placement is independent of the issuing core and local payload storage.
+// Preserve preferred-column demand before placing overflow, then use the
+// nearest available column. Lower columns win ties to limit partition growth.
+static loom_aie2p_native_tile_t* loom_aie2p_native_find_shim_queue(
+    loom_aie2p_native_context_t* context, uint16_t preferred, bool receive) {
+  for (uint16_t distance = 1; distance < context->family->column_count;
+       ++distance) {
+    for (unsigned side = 0; side < 2; ++side) {
+      const int column = preferred + (side ? distance : -distance);
+      if (column < 0 || column >= context->family->column_count) {
+        continue;
+      }
+      loom_aie2p_native_tile_t* tile =
+          &context->tiles[column * context->family->row_count];
+      const uint8_t count = receive ? tile->s2mm_count : tile->mm2s_count;
+      if (count < tile->facts->dma.channel_count_per_direction) {
+        return tile;
+      }
+    }
+  }
+  return NULL;
+}
+
+static void loom_aie2p_native_remap_shim_queue(
+    loom_aie2p_native_shim_queue_t* const* remaps,
+    loom_aie2p_native_tile_t** shim, bool receive, uint8_t* engine) {
+  const uint8_t capacity = (*shim)->facts->dma.channel_count_per_direction;
+  if (*engine < capacity) {
+    return;
+  }
+  const loom_aie2p_native_shim_queue_t* selected =
+      &remaps[(*shim)->coordinate.column * 2 + receive][*engine - capacity];
+  *shim = selected->tile;
+  *engine = selected->engine;
+}
+
 static void loom_aie2p_native_request_dma_queue(
     const loom_aie2p_native_context_t* context, iree_host_size_t lifetime,
     const loom_aie2p_native_tile_t* tile, bool receive, uint8_t* engine,
@@ -104,20 +147,62 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
   IREE_RETURN_IF_ERROR(
       loom_pipeline_lifetime_layout(lifetimes, requests, count, tile_count * 2,
                                     context->pass->arena, &extents));
+  iree_host_size_t overflow_count = 0;
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
     loom_aie2p_native_tile_t* tile = &context->tiles[i];
-    if (extents[i * 2].length > tile->facts->dma.channel_count_per_direction ||
-        extents[i * 2 + 1].length >
-            tile->facts->dma.channel_count_per_direction) {
+    const uint8_t capacity = tile->facts->dma.channel_count_per_direction;
+    if (tile->facts->kind == LOOM_XDNA_TILE_KIND_SHIM_NOC) {
+      for (unsigned direction = 0; direction < 2; ++direction) {
+        const uint64_t required = extents[i * 2 + direction].length;
+        overflow_count += required > capacity ? required - capacity : 0;
+      }
+    } else if (extents[i * 2].length > capacity ||
+               extents[i * 2 + 1].length > capacity) {
       return loom_aie2p_native_reject(
           context, realization->function.op,
           IREE_SV(
               "available DMA queues for simultaneous construction lifetimes"));
     }
-    tile->mm2s_count = (uint8_t)extents[i * 2].length;
-    tile->s2mm_count = (uint8_t)extents[i * 2 + 1].length;
+    tile->mm2s_count = (uint8_t)iree_min(extents[i * 2].length, capacity);
+    tile->s2mm_count = (uint8_t)iree_min(extents[i * 2 + 1].length, capacity);
+  }
+  loom_aie2p_native_shim_queue_t** remaps = NULL;
+  if (overflow_count) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, context->family->column_count * 2,
+        sizeof(*remaps), (void**)&remaps));
+    loom_aie2p_native_shim_queue_t* next;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, overflow_count, sizeof(*next), (void**)&next));
+    for (uint16_t column = 0; column < context->family->column_count;
+         ++column) {
+      const iree_host_size_t tile_index = column * context->family->row_count;
+      const uint8_t capacity =
+          context->tiles[tile_index].facts->dma.channel_count_per_direction;
+      for (unsigned direction = 0; direction < 2; ++direction) {
+        remaps[column * 2 + direction] = next;
+        const uint64_t required = extents[tile_index * 2 + direction].length;
+        for (uint64_t engine = capacity; engine < required; ++engine) {
+          loom_aie2p_native_tile_t* shim = loom_aie2p_native_find_shim_queue(
+              context, column, direction != 0);
+          if (!shim) {
+            return loom_aie2p_native_reject(
+                context, realization->function.op,
+                IREE_SV("available DMA queues for simultaneous construction "
+                        "lifetimes"));
+          }
+          uint8_t* assigned = direction ? &shim->s2mm_count : &shim->mm2s_count;
+          *next++ = (loom_aie2p_native_shim_queue_t){.tile = shim,
+                                                     .engine = (*assigned)++};
+        }
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < tile_count; ++i) {
+    loom_aie2p_native_tile_t* tile = &context->tiles[i];
     for (unsigned direction = 0; direction < 2; ++direction) {
-      const iree_host_size_t queues = extents[i * 2 + direction].length;
+      const iree_host_size_t queues =
+          direction ? tile->s2mm_count : tile->mm2s_count;
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           context->pass->arena, queues, sizeof(*tile->dma_controls[direction]),
           (void**)&tile->dma_controls[direction]));
@@ -132,6 +217,18 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
   }
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     loom_aie2p_native_worker_t* worker = &context->workers[i];
+    if (remaps) {
+      for (loom_aie2p_native_dma_path_t* path = worker->transfer_paths; path;
+           path = path->next_demand) {
+        loom_aie2p_native_remap_shim_queue(remaps, &path->shim, !path->ingress,
+                                           &path->shim_engine);
+      }
+      if (worker->input) {
+        loom_aie2p_native_input_path_t* path = worker->input->path;
+        loom_aie2p_native_remap_shim_queue(remaps, &path->shim, false,
+                                           &path->input_engine);
+      }
+    }
     for (loom_aie2p_native_distribution_t* distribution =
              worker->distribution_plan ? worker->distribution_plan->geometries
                                        : NULL;

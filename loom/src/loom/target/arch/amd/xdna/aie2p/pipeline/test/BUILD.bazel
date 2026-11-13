@@ -199,6 +199,7 @@ loom_test(
         "packet_phases.loom",
         "retained_copy.loom",
         "retained_handoff.loom",
+        "shim_placement.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [_XDNA_TWO_COLUMN_PROFILE],

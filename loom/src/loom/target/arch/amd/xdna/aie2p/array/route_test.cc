@@ -109,7 +109,7 @@ TEST_P(Aie2pRouteTest, SharedSourceUsesOneLaneAndRetainsPacketPrefixes) {
   iree_arena_block_pool_deinitialize(&blocks);
 }
 
-TEST_P(Aie2pRouteTest, CrossColumnEgressTurnsOnTheShimRow) {
+TEST_P(Aie2pRouteTest, CrossColumnEgressPrefersTheShimRow) {
   iree_arena_block_pool_t blocks;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
   iree_arena_allocator_t arena;
@@ -140,6 +140,75 @@ TEST_P(Aie2pRouteTest, CrossColumnEgressTurnsOnTheShimRow) {
 INSTANTIATE_TEST_SUITE_P(SourceAndMode, Aie2pRouteTest,
                          ::testing::Combine(::testing::Values(1, 2),
                                             ::testing::Bool()));
+
+TEST(Aie2pRouteTest, RelocatedEgressAvoidsSaturatedSourceColumn) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  const auto* family = loom_xdna_npu2_array_family();
+  for (uint16_t column = 0; column < family->column_count; ++column) {
+    SCOPED_TRACE(column);
+    iree_arena_reset(&arena);
+    loom_aie2p_array_route_builder_t routing;
+    loom_aie2p_array_route_tree_t controls[4] = {};
+    loom_aie2p_array_route_tree_t payloads[4] = {};
+    IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(family, 64, &arena,
+                                                             &routing));
+    for (uint16_t worker = 0; worker < 4; ++worker) {
+      const loom_xdna_tile_coordinate_t core = {
+          column, static_cast<uint16_t>(worker + 2)};
+      const loom_xdna_tile_coordinate_t shim = {
+          worker < 2 ? column : static_cast<uint16_t>(column ? column - 1 : 1),
+          0};
+      ASSERT_TRUE(loom_aie2p_array_route_stream(
+          &routing, worker * 2, &controls[worker], core,
+          LOOM_XDNA_STREAM_PORT_CORE, 0, shim,
+          LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
+      ASSERT_TRUE(loom_aie2p_array_route_stream(
+          &routing, worker * 2 + 1, &payloads[worker], core,
+          LOOM_XDNA_STREAM_PORT_DMA, 0, shim, LOOM_XDNA_STREAM_PORT_DMA,
+          worker % 2, false));
+    }
+    // The first pair already consumes all four southbound links: one control
+    // and one payload per core. The other pair must descend in its DMA column.
+    EXPECT_EQ(routing.link_channels.southbound[column], 15u);
+  }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
+TEST(Aie2pRouteTest, FailedSuffixDiscardsTentativePacketPrefix) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  const auto* family = loom_xdna_npu2_array_family();
+  loom_aie2p_array_route_builder_t routing;
+  loom_aie2p_array_route_tree_t trees[5] = {};
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_builder_initialize(family, 64, &arena, &routing));
+  for (uint16_t worker = 0; worker < 4; ++worker) {
+    ASSERT_TRUE(loom_aie2p_array_route_workers(
+        &routing, worker, &trees[worker],
+        {0, static_cast<uint16_t>(worker + 2)}, 0, {0, 1}, worker, false));
+  }
+  // Reusing this horizontal prefix is legal, but extending it to SRAM would
+  // need a fifth southbound lane. Rejection must not leave its new filter.
+  ASSERT_TRUE(loom_aie2p_array_route_workers(&routing, 4, &trees[4], {1, 3}, 0,
+                                             {0, 3}, 0, true));
+  const size_t first = routing.route_count;
+  const size_t source_tile = family->row_count + 3;
+  const auto prefix_count = routing.tile_route_counts[source_tile];
+  const auto node_count = routing.prefixes.node_count;
+  EXPECT_FALSE(loom_aie2p_array_route_workers(&routing, 5, &trees[4], {1, 3}, 0,
+                                              {0, 1}, 4, true));
+  EXPECT_EQ(routing.route_count, first);
+  EXPECT_EQ(routing.tile_route_counts[source_tile], prefix_count);
+  EXPECT_EQ(routing.prefixes.node_count, node_count);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
 
 TEST(Aie2pRouteTest, EveryMemoryAndCorePairUsesLegalConnectedSwitches) {
   iree_arena_block_pool_t blocks;

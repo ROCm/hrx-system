@@ -272,6 +272,18 @@ static uint32_t loom_aie2p_array_route_inputs(
   return sources;
 }
 
+// Packet filters on a reserved prefix are tentative until its suffix fits.
+// Physical links and prefix-tree nodes have not been allocated at this point.
+static void loom_aie2p_array_discard_route_prefix(
+    loom_aie2p_array_route_builder_t* builder, iree_host_size_t first_route) {
+  while (builder->route_count != first_route) {
+    const loom_xdna_tile_coordinate_t tile =
+        builder->routes[--builder->route_count].coordinate;
+    --builder->tile_route_counts[tile.column * builder->family->row_count +
+                                 tile.row];
+  }
+}
+
 static bool loom_aie2p_array_plan_route(
     loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
     iree_host_size_t node_index, loom_xdna_tile_coordinate_t destination,
@@ -279,6 +291,7 @@ static bool loom_aie2p_array_plan_route(
     uint16_t horizontal_row, bool packet,
     loom_aie2p_array_route_sharing_t* sharing,
     loom_aie2p_array_route_multicast_t* multicast) {
+  const iree_host_size_t first_route = builder->route_count;
   const void* sharing_owner = sharing ? (void*)sharing : (void*)multicast;
   uint32_t* sharing_links = sharing     ? sharing->links
                             : multicast ? multicast->links
@@ -300,6 +313,7 @@ static bool loom_aie2p_array_plan_route(
     const loom_aie2p_array_route_node_t* child =
         &builder->prefixes.nodes[node->children[direction]];
     if (child->sharing && child->sharing != sharing_owner) {
+      loom_aie2p_array_discard_route_prefix(builder, first_route);
       return false;
     }
     if (packet) {
@@ -368,11 +382,13 @@ static bool loom_aie2p_array_plan_route(
                                              step->feasible);
   }
   if (!(feasible & (UINT32_C(1) << prefix->incoming_channel))) {
+    loom_aie2p_array_discard_route_prefix(builder, first_route);
     return false;
   }
   bool joined = sharing && prefix->sharing != NULL && shared_step_count != 0;
   if (joined &&
       !(shared_feasible & (UINT32_C(1) << prefix->incoming_channel))) {
+    loom_aie2p_array_discard_route_prefix(builder, first_route);
     return false;
   }
   for (iree_host_size_t i = 0; i < step_count; ++i) {
@@ -516,7 +532,7 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
   }
   const bool shim_dma = destination_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
                         destination_port == LOOM_XDNA_STREAM_PORT_DMA;
-  // External writes turn on the shim row, preserving compute-row lanes for
+  // External writes prefer the shim row, preserving compute-row lanes for
   // payloads and controls that terminate within the array.
   // SRAM switches have only north/south links. Cross-column traffic turns on
   // the receiving core's row, or on the first compute row for SRAM-to-SRAM
@@ -544,7 +560,16 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
           shim_dma ? LOOM_XDNA_STREAM_PORT_SOUTH : destination_port,
           shim_dma ? shim_channel : destination_channel, horizontal_row, packet,
           NULL, NULL)) {
-    return false;
+    // A saturated source column can still reach a relocated shim by crossing
+    // on the producing core's row. Both choices have the same hop count; the
+    // failed admission above leaves physical reservations unchanged.
+    if (!shim_dma || source_kind != LOOM_XDNA_TILE_KIND_COMPUTE ||
+        source.column == destination.column ||
+        !loom_aie2p_array_plan_route(builder, channel_index, root, destination,
+                                     LOOM_XDNA_STREAM_PORT_SOUTH, shim_channel,
+                                     source.row, packet, NULL, NULL)) {
+      return false;
+    }
   }
   if (shim_dma) {
     builder->routes[builder->route_count - 1].dma_destination = true;

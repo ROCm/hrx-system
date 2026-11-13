@@ -271,7 +271,7 @@ static iree_status_t loom_aie2p_native_config_routes(
 }
 
 static iree_status_t loom_aie2p_native_config_queues(
-    loom_aie2p_native_configuration_t* config) {
+    loom_aie2p_native_configuration_t* config, uint64_t* column_count) {
   const loom_aie2p_native_context_t* context = config->context;
   const iree_host_size_t tile_count =
       (iree_host_size_t)context->family->column_count *
@@ -279,6 +279,10 @@ static iree_status_t loom_aie2p_native_config_queues(
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
     const loom_aie2p_native_tile_t* tile = &context->tiles[i];
     const uint8_t counts[] = {tile->mm2s_count, tile->s2mm_count};
+    // Relocated DMA endpoints may occupy columns without a program or pool.
+    if (counts[0] || counts[1]) {
+      *column_count = iree_max(*column_count, tile->coordinate.column + 1);
+    }
     for (unsigned direction = 0; direction < 2; ++direction) {
       const loom_xdna_register_field_id_t field =
           loom_aie2p_native_dma_controller_field(tile, direction + 1);
@@ -1025,7 +1029,7 @@ iree_status_t loom_aie2p_native_emit_configuration(
         range, 4, loom_named_attr_slice_empty()));
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_native_config_routes(&config));
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_config_queues(&config));
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_config_queues(&config, &columns));
   IREE_RETURN_IF_ERROR(
       loom_aie2p_native_config_transfers(&config, realization));
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(&config.builder, NULL, 0));

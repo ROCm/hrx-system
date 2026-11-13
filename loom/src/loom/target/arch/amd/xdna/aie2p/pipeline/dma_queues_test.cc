@@ -241,4 +241,115 @@ TEST_F(DmaQueuesTest, TokenFreeUsersDoNotChangeCompletionDestination) {
   EXPECT_EQ(tiles_[1].dma_controls[0][1].controller, UINT8_MAX);
 }
 
+TEST_F(DmaQueuesTest, ShimOverflowPreservesCompleteSerialLifetimeClasses) {
+  for (bool ingress : {false, true}) {
+    for (uint16_t column : {0, 3, 7}) {
+      const size_t tile_index = column * context_.family->row_count;
+      const uint16_t neighboring_column = column ? column - 1 : 1;
+      const size_t neighbor = neighboring_column * context_.family->row_count;
+      loom_aie2p_native_dma_path_t paths[4] = {};
+      for (size_t i = 0; i < IREE_ARRAYSIZE(workers_); ++i) {
+        workers_[i] = {};
+      }
+      for (auto& path : paths) {
+        path.local = &tiles_[tile_index + 1];
+        path.shim = &tiles_[tile_index];
+        path.ingress = ingress;
+      }
+      // The root has two independent local endpoints. Its two shim queues
+      // coexist with either serial child, whose shared third queue must move.
+      paths[1].local = &tiles_[tile_index + 2];
+      paths[0].next_demand = &paths[1];
+      workers_[0].transfer_paths = paths;
+      workers_[1].transfer_paths = &paths[2];
+      workers_[2].transfer_paths = &paths[3];
+      context_.dma_queue_count = 8;
+      Assign();
+      EXPECT_EQ(paths[0].shim, &tiles_[tile_index]);
+      EXPECT_EQ(paths[1].shim, &tiles_[tile_index]);
+      EXPECT_EQ(paths[0].shim_engine, 0);
+      EXPECT_EQ(paths[1].shim_engine, 1);
+      EXPECT_EQ(paths[2].shim, &tiles_[neighbor]);
+      EXPECT_EQ(paths[3].shim, paths[2].shim);
+      EXPECT_EQ(paths[2].shim_engine, 0);
+      EXPECT_EQ(paths[3].shim_engine, paths[2].shim_engine);
+      EXPECT_EQ(paths[2].local_engine, paths[3].local_engine);
+      EXPECT_EQ(
+          ingress ? tiles_[neighbor].mm2s_count : tiles_[neighbor].s2mm_count,
+          1);
+    }
+  }
+}
+
+TEST_F(DmaQueuesTest, OrdinaryAndPhasedIngressShareRelocatedSerialQueue) {
+  loom_aie2p_native_dma_path_t extra = ordinary_;
+  extra.local = &tiles_[2];
+  ordinary_.next_demand = &extra;
+  loom_aie2p_native_dma_path_t child = ordinary_;
+  child.next_demand = nullptr;
+  workers_[1] = {};
+  workers_[1].transfer_paths = &child;
+  context_.dma_queue_count = 8;
+  Assign();
+  const size_t neighbor = context_.family->row_count;
+  EXPECT_EQ(ordinary_.shim, &tiles_[0]);
+  EXPECT_EQ(extra.shim, &tiles_[0]);
+  EXPECT_EQ(child.shim, &tiles_[neighbor]);
+  EXPECT_EQ(input_path_.shim, child.shim);
+  EXPECT_EQ(input_path_.input_engine, child.shim_engine);
+  EXPECT_EQ(tiles_[neighbor].mm2s_count, 1);
+  EXPECT_EQ(phases_[0].receiver.engine, child.local_engine);
+  EXPECT_EQ(phases_[1].receiver.engine, child.local_engine);
+}
+
+TEST_F(DmaQueuesTest, ConcurrentShimOverflowKeepsIndependentQueues) {
+  nodes_[2].kind = LOOM_PIPELINE_LIFETIME_CONCURRENT;
+  realization_.invocations.lifetimes.has_serial = false;
+  loom_aie2p_native_dma_path_t paths[4] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(workers_); ++i) {
+    workers_[i] = {};
+  }
+  for (auto& path : paths) {
+    path.local = &tiles_[1];
+    path.shim = &tiles_[0];
+  }
+  paths[1].local = &tiles_[2];
+  paths[0].next_demand = &paths[1];
+  workers_[0].transfer_paths = paths;
+  workers_[1].transfer_paths = &paths[2];
+  workers_[2].transfer_paths = &paths[3];
+  context_.dma_queue_count = 8;
+  Assign();
+  const size_t neighbor = context_.family->row_count;
+  EXPECT_EQ(paths[2].shim, &tiles_[neighbor]);
+  EXPECT_EQ(paths[3].shim, paths[2].shim);
+  EXPECT_NE(paths[2].shim_engine, paths[3].shim_engine);
+  EXPECT_EQ(tiles_[neighbor].s2mm_count, 2);
+}
+
+TEST_F(DmaQueuesTest, OverflowPreservesPreferredQueuesInOtherColumns) {
+  const size_t neighbor = context_.family->row_count;
+  loom_aie2p_native_dma_path_t paths[4] = {};
+  for (auto& worker : workers_) {
+    worker = {};
+  }
+  for (size_t i = 0; i < IREE_ARRAYSIZE(paths); ++i) {
+    paths[i].local = &tiles_[i + 2];
+    paths[i].shim = &tiles_[i == 3 ? neighbor : 0];
+    if (i + 1 < IREE_ARRAYSIZE(paths)) {
+      paths[i].next_demand = &paths[i + 1];
+    }
+  }
+  workers_[0].transfer_paths = paths;
+  context_.dma_queue_count = 8;
+  Assign();
+  // Column one's preferred demand is reserved before placing column zero's
+  // third queue. Earlier overflow cannot displace a later preferred request.
+  EXPECT_EQ(paths[3].shim, &tiles_[neighbor]);
+  EXPECT_EQ(paths[3].shim_engine, 0);
+  EXPECT_EQ(paths[2].shim, &tiles_[neighbor]);
+  EXPECT_EQ(paths[2].shim_engine, 1);
+  EXPECT_EQ(tiles_[neighbor].s2mm_count, 2);
+}
+
 }  // namespace
