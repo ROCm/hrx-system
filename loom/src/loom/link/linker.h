@@ -7,8 +7,11 @@
 // Incremental materialized module linker for in-memory Loom IR.
 //
 // This is the inner link step for modules that have already been parsed,
-// bytecode-decoded, or otherwise materialized into loom_module_t. Larger
-// library workflows should discover reachable symbols through a module index,
+// bytecode-decoded, or otherwise materialized into loom_module_t. Callers
+// establish valid IR identities, a shared finalized context, and dependency-
+// closed selections before linking; this is not an external input boundary.
+//
+// Larger library workflows discover reachable symbols through a module index,
 // materialize only those modules/functions, and then stream those inputs
 // through this linker. Each added module is cloned into the output immediately;
 // callers may release a source module as soon as loom_linker_add_module()
@@ -202,8 +205,8 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 // Adds an exact precomputed source symbol selection to |linker|.
 //
 // |source_symbols| must be strictly increasing. The caller owns dependency
-// closure: references from selected IR to omitted source symbols fail unless
-// |source_bindings| explicitly maps them to symbols projected by a prior add.
+// closure: every reference from selected IR to an omitted source symbol must
+// have a |source_bindings| entry projected by a prior add.
 // Bindings do not clone, merge, or otherwise inspect the omitted source
 // definition; the caller owns compatibility with the projected target. When
 // |selected_targets| is non-empty it must have one entry per selected source
@@ -265,8 +268,9 @@ iree_status_t loom_linker_finish(loom_linker_t* linker,
 // Links already-materialized source modules into a freshly allocated output
 // module. This is a compatibility wrapper around the incremental linker.
 //
-// All source modules must share the same finalized context. The returned module
-// is owned by the caller and must be released with loom_module_free().
+// At least one source module is required. All source modules must share the
+// same finalized context. The caller owns the returned module and releases it
+// with loom_module_free().
 //
 // Symbol policy:
 // - Concrete private definitions keep per-input identity and are renamed on

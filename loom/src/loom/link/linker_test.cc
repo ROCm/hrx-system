@@ -591,33 +591,6 @@ func.def @second(%x: i32) -> (i32) {
       IREE_SV("first")));
 }
 
-TEST_F(LinkerTest, LinkRootsRejectMismatchedTargetStorage) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def @root(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  const loom_module_t* inputs[] = {module};
-  const iree_string_view_t roots[] = {IREE_SV("@root")};
-  loom_symbol_ref_t root_targets[2] = {};
-  const loom_link_options_t options = {
-      .module_name = IREE_SV("linked"),
-      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
-      .root_target_symbols =
-          {
-              .count = IREE_ARRAYSIZE(root_targets),
-              .values = root_targets,
-          },
-  };
-  loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_link_materialized_modules(
-                            inputs, IREE_ARRAYSIZE(inputs), &options,
-                            &block_pool_, iree_allocator_system(), &linked));
-  EXPECT_EQ(linked, nullptr);
-}
-
 TEST_F(LinkerTest, LinkRootInternalizesPublicDependencies) {
   loom_module_t* module = Parse(IREE_SV(R"(
 func.def public @dependency(%x: i32) -> (i32) {
@@ -1477,34 +1450,6 @@ func.def @second() {
   }
 }
 
-TEST_F(LinkerTest, ExactSelectionRejectsMissingDependency) {
-  loom_module_t* source = Parse(IREE_SV(R"(
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-func.def public @caller(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-
-  loom_linker_t* linker = CreateIncrementalLinker();
-  const iree_host_size_t source_symbols[] = {1};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_linker_add_module_symbols(
-                            linker, source,
-                            loom_linker_source_symbol_list_t{
-                                .count = IREE_ARRAYSIZE(source_symbols),
-                                .ordinals = source_symbols,
-                            },
-                            loom_linker_source_symbol_binding_list_empty(),
-                            loom_linker_selected_symbol_target_list_empty(),
-                            loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_target_symbol_list_empty()));
-  loom_linker_free(linker);
-}
-
 TEST_F(LinkerTest, ExactSelectionUsesPreviouslyProjectedBinding) {
   loom_module_t* projected = Parse(IREE_SV(R"(
 func.decl @projected_helper(%x: i32) -> (i32)
@@ -1560,68 +1505,6 @@ func.def public @caller(%x: i32) -> (i32) {
   EXPECT_NE(text.find("func.decl @projected_helper"), std::string::npos);
   EXPECT_NE(text.find("func.call @projected_helper"), std::string::npos);
   EXPECT_EQ(text.find("func.def @helper"), std::string::npos);
-}
-
-TEST_F(LinkerTest, ExactSelectionRejectsMalformedOrdinals) {
-  loom_module_t* source = Parse(IREE_SV(R"(
-func.def @first() {
-  func.return
-}
-
-func.def @second() {
-  func.return
-}
-)"));
-
-  loom_linker_t* linker = CreateIncrementalLinker();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_linker_add_module_symbols(
-                            linker, source,
-                            loom_linker_source_symbol_list_t{
-                                .count = 1,
-                                .ordinals = nullptr,
-                            },
-                            loom_linker_source_symbol_binding_list_empty(),
-                            loom_linker_selected_symbol_target_list_empty(),
-                            loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_target_symbol_list_empty()));
-  const iree_host_size_t duplicate_symbols[] = {0, 0};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_linker_add_module_symbols(
-                            linker, source,
-                            loom_linker_source_symbol_list_t{
-                                .count = IREE_ARRAYSIZE(duplicate_symbols),
-                                .ordinals = duplicate_symbols,
-                            },
-                            loom_linker_source_symbol_binding_list_empty(),
-                            loom_linker_selected_symbol_target_list_empty(),
-                            loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_target_symbol_list_empty()));
-  const iree_host_size_t descending_symbols[] = {1, 0};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_linker_add_module_symbols(
-                            linker, source,
-                            loom_linker_source_symbol_list_t{
-                                .count = IREE_ARRAYSIZE(descending_symbols),
-                                .ordinals = descending_symbols,
-                            },
-                            loom_linker_source_symbol_binding_list_empty(),
-                            loom_linker_selected_symbol_target_list_empty(),
-                            loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_target_symbol_list_empty()));
-  const iree_host_size_t out_of_range_symbols[] = {2};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_linker_add_module_symbols(
-                            linker, source,
-                            loom_linker_source_symbol_list_t{
-                                .count = IREE_ARRAYSIZE(out_of_range_symbols),
-                                .ordinals = out_of_range_symbols,
-                            },
-                            loom_linker_source_symbol_binding_list_empty(),
-                            loom_linker_selected_symbol_target_list_empty(),
-                            loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_target_symbol_list_empty()));
-  loom_linker_free(linker);
 }
 
 TEST_F(LinkerTest, RejectsDuplicatePublicConcreteDefinitions) {
