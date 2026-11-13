@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <thread>
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/pool_test_util.h"
@@ -12,6 +13,8 @@
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
 #include "iree/hal/driver/amd/gpu/cts/testdata.h"
 #include "iree/hal/driver/amd/gpu/image/cooperative_images.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/queue.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/queue.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -329,6 +332,15 @@ TEST_P(GpuCooperativeTest, QueueStateSurvivesMixedReplaysAndQueueReplacement) {
     if (iree_hal_queue_family_spec(family)->placement_capabilities &
         (1u << replacement_placement)) {
       params.placement = replacement_placement;
+    }
+    // Public completion ends payload borrows before the worker's final
+    // retirement bookkeeping. Trim can replace the queue only after that
+    // separate idle predicate holds.
+    const auto is_idle = command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+                             ? iree_hal_amd_gpu_pm4_queue_is_idle
+                             : iree_hal_amd_gpu_aql_queue_is_idle;
+    while (!is_idle(queue)) {
+      std::this_thread::yield();
     }
     queue.reset();
     IREE_ASSERT_OK(iree_hal_device_trim(device_));
