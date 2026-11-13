@@ -64,6 +64,8 @@ struct ControlFlow::ReferenceIdentityFacts {
     std::vector<ObjectInterval> intervals;
     // Wide fixed-point canonicalization index, absent for small results.
     std::unique_ptr<std::unordered_set<ObjectInterval, IntervalHash>> index;
+    // Complete fixed array reached by a pointer-returning accessor.
+    const cxx::Type* array_type = nullptr;
   };
 
   // Sparse member-slice vectors referenced directly by retained call edges.
@@ -152,6 +154,22 @@ namespace {
 // Small reference sets dominate ordinary source calls. Keep them inline while
 // bounding the linear prefix before switching large sets to hashed lookup.
 constexpr size_t kLinearCanonicalizationThreshold = 8;
+
+bool pointer_returning_call(cxx::ExpressionAST* expression) {
+  cxx::FunctionSymbol* function = nullptr;
+  if (auto call = direct_operator_call(expression)) {
+    function = call->function;
+  } else if (auto* subscript =
+                 cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
+             subscript && subscript->symbol) {
+    function = cxx::symbol_cast<cxx::FunctionSymbol>(subscript->symbol);
+  } else if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(expression)) {
+    function = direct_callee(call);
+  }
+  return function &&
+         cxx::type_cast<cxx::PointerType>(
+             cxx::type_cast<cxx::FunctionType>(function->type())->returnType());
+}
 
 // Most projected origins translate through one complete argument owner. Keep
 // that result inline and spill only when the argument itself has several
@@ -649,6 +667,13 @@ std::pair<size_t, bool> ControlFlow::retain_projected_reference_origin(
   if (inserted) {
     facts.origins.push_back(std::move(origin));
     const auto& retained = facts.origins.back();
+    if (facts.origins.size() > 1 &&
+        retained.projection.type != facts.origins.front().projection.type &&
+        unit_.typeTraits().is_pointer(
+            cxx::type_cast<cxx::FunctionType>(function_->type())
+                ->returnType())) {
+      promote_projected_reference_storage(facts);
+    }
     if (retained.owner_ordinal == ReferenceResultOrigin::kReceiver) {
       const bool partial = retained.projection.component_offset != 0 ||
                            retained.projection.partition != receiver_partition_;
@@ -913,9 +938,66 @@ cxx::ExpressionAST* ControlFlow::pointer_alias(cxx::Symbol* binding) const {
   auto found = pointer_aliases_.find(binding);
   return found != pointer_aliases_.end() && found->second.transparent &&
                  found->second.referent &&
+                 (!found->second.array_origin ||
+                  borrowed_array_type(found->second.array_origin)) &&
                  !argument_requires_storage(found->second.identity)
              ? found->second.referent
              : nullptr;
+}
+
+cxx::ExpressionAST* ControlFlow::array_borrow_origin(
+    cxx::ExpressionAST* expression) const {
+  auto* source = unwrap_expression(expression);
+  if (unit_.typeTraits().is_array(source->type)) {
+    return source;
+  }
+  if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(source)) {
+    auto found = pointer_aliases_.find(id->symbol);
+    return found != pointer_aliases_.end() && found->second.transparent
+               ? found->second.array_origin
+               : nullptr;
+  }
+  return pointer_returning_call(source) ? source : nullptr;
+}
+
+const cxx::Type* ControlFlow::borrowed_array_type(
+    cxx::ExpressionAST* expression) const {
+  auto* source = array_borrow_origin(expression);
+  if (!source) {
+    return nullptr;
+  }
+  if (unit_.typeTraits().is_array(source->type)) {
+    return source->type;
+  }
+  if (!reference_identity_facts_ ||
+      reference_identity_facts_->storage_results.contains(source)) {
+    return nullptr;
+  }
+  auto found = reference_identity_facts_->results.find(source);
+  return found == reference_identity_facts_->results.end()
+             ? nullptr
+             : found->second.array_type;
+}
+
+CallArgument ControlFlow::retain_array_identity(
+    cxx::ExpressionAST* expression) {
+  if (auto* id =
+          cxx::ast_cast<cxx::IdExpressionAST>(unwrap_expression(expression))) {
+    auto found = pointer_aliases_.find(id->symbol);
+    if (found != pointer_aliases_.end() && found->second.transparent &&
+        found->second.array_origin) {
+      return found->second.identity;
+    }
+  }
+  return retain_call_argument(expression);
+}
+
+void ControlFlow::require_pointer_result_storage() {
+  auto* signature = cxx::type_cast<cxx::FunctionType>(function_->type());
+  if (unit_.typeTraits().is_pointer(signature->returnType()) &&
+      projected_reference_return_facts_) {
+    promote_projected_reference_storage(*projected_reference_return_facts_);
+  }
 }
 
 cxx::Symbol* ControlFlow::object_owner(cxx::ExpressionAST* expression) const {
@@ -1081,7 +1163,8 @@ void ControlFlow::postVisit(cxx::AST* ast) {
       if (!pointer_aliases_.empty()) {
         if (auto found = pointer_aliases_.find(id->symbol);
             found != pointer_aliases_.end() &&
-            pointer_alias_use_ != id->symbol) {
+            pointer_alias_use_ != id->symbol &&
+            borrowed_pointer_expression_ != id) {
           found->second.transparent = false;
         }
       }
@@ -1597,7 +1680,7 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
     return;
   }
   if (!ast->symbol && ast->op == cxx::TokenKind::T_AMP) {
-    if (ast != pointer_alias_initializer_ && ast != borrowed_call_address_) {
+    if (ast != borrowed_pointer_expression_ && ast != borrowed_call_address_) {
       if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
               unwrap_expression(ast->expression));
           dereference && !dereference->symbol &&
@@ -1757,19 +1840,22 @@ bool ControlFlow::collect_projected_reference_return(
       auto* signature =
           cxx::type_cast<cxx::FunctionType>(subscript->symbol->type());
       reference_call =
-          signature && traits.is_reference(signature->returnType());
+          signature && (traits.is_reference(signature->returnType()) ||
+                        traits.is_pointer(signature->returnType()));
     } else if (auto call = direct_operator_call(expression)) {
       auto* signature =
           cxx::type_cast<cxx::FunctionType>(call->function->type());
       reference_call =
-          signature && traits.is_reference(signature->returnType());
+          signature && (traits.is_reference(signature->returnType()) ||
+                        traits.is_pointer(signature->returnType()));
     } else if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(expression)) {
       auto* function = direct_callee(call);
       auto* signature =
           function ? cxx::type_cast<cxx::FunctionType>(function->type())
                    : nullptr;
       reference_call =
-          signature && traits.is_reference(signature->returnType());
+          signature && (traits.is_reference(signature->returnType()) ||
+                        traits.is_pointer(signature->returnType()));
     }
     if (reference_call) {
       auto selection = facts.selections.try_emplace(expression).first;
@@ -1784,12 +1870,13 @@ bool ControlFlow::collect_projected_reference_return(
   if (!selection) {
     return false;
   }
-  auto target = classify_destination(selection->array);
-  if (!target ||
-      argument_requires_storage(retain_call_argument(selection->array))) {
+  auto* source = array_borrow_origin(selection->array);
+  auto target = source ? classify_destination(source) : std::nullopt;
+  if (!target || !selection->type ||
+      argument_requires_storage(retain_array_identity(selection->array))) {
     return false;
   }
-  const auto* array = types_.array(selection->array->type, expression);
+  const auto* array = types_.array(selection->type, expression);
   if (!array || !array->source->size()) {
     return false;
   }
@@ -1820,35 +1907,54 @@ bool ControlFlow::collect_projected_reference_return(
 }
 
 void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
-  cxx::ASTVisitor::visit(ast);
   auto* signature = function_
                         ? cxx::type_cast<cxx::FunctionType>(function_->type())
                         : nullptr;
+  const bool pointer_result =
+      signature && unit_.typeTraits().is_pointer(signature->returnType());
+  auto* returned_source = ast->expression;
+  auto* saved_borrowed_expression = borrowed_pointer_expression_;
+  if (pointer_result && returned_source) {
+    returned_source = unwrap_expression(returned_source);
+    if (unit_.typeTraits().is_array(returned_source->type) ||
+        pointer_returning_call(returned_source)) {
+      borrowed_pointer_expression_ = returned_source;
+    }
+  }
+  cxx::ASTVisitor::visit(ast);
+  borrowed_pointer_expression_ = saved_borrowed_expression;
   if (signature && !unit_.typeTraits().is_reference(signature->returnType()) &&
       ast->expression) {
     record_parameter_read(ast->expression);
   }
-  if (!signature || !unit_.typeTraits().is_reference(signature->returnType()) ||
+  if (!signature ||
+      (!unit_.typeTraits().is_reference(signature->returnType()) &&
+       !pointer_result) ||
       !ast->expression) {
     return;
   }
 
   if (reference_return_ == ReferenceReturn::Storage) {
-    require_identity(ast->expression);
+    if (!pointer_result || unit_.typeTraits().is_array(returned_source->type) ||
+        pointer_returning_call(returned_source)) {
+      require_identity(returned_source);
+    }
     return;
   }
 
   auto parameters = function_->parameters();
   const bool returns_current_receiver =
-      is_current_object(unit_, ast->expression);
+      !pointer_result && is_current_object(unit_, ast->expression);
   std::vector<size_t> parameter_ordinals;
   const bool returns_parameters =
-      !returns_current_receiver &&
+      !pointer_result && !returns_current_receiver &&
       collect_reference_return_parameters(ast->expression, parameter_ordinals);
   ProjectedReferenceReturnFacts projected_origins;
   const bool returns_projection =
       !returns_current_receiver && !returns_parameters &&
-      collect_projected_reference_return(ast->expression, projected_origins);
+      (!pointer_result || unit_.typeTraits().is_array(returned_source->type) ||
+       pointer_returning_call(returned_source)) &&
+      collect_projected_reference_return(returned_source, projected_origins);
   ReferenceReturn incoming = ReferenceReturn::Storage;
   size_t incoming_parameter = SIZE_MAX;
   if (returns_current_receiver) {
@@ -1898,7 +2004,12 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
         require_reference_storage(parameters[ordinal]);
       }
     } else if (origin == ReferenceReturn::Storage && expression) {
-      require_identity(expression);
+      auto* source =
+          pointer_result ? unwrap_expression(expression) : expression;
+      if (!pointer_result || unit_.typeTraits().is_array(source->type) ||
+          pointer_returning_call(source)) {
+        require_identity(source);
+      }
     }
   };
 
@@ -2084,7 +2195,29 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
+  auto* saved_alias_use = pointer_alias_use_;
+  auto* saved_borrowed_expression = borrowed_pointer_expression_;
+  cxx::ExpressionAST* borrowed_array = nullptr;
+  const cxx::Type* borrowed_type = nullptr;
+  if (!ast->symbol) {
+    for (auto* operand : {ast->baseExpression, ast->indexExpression}) {
+      if (!unit_.typeTraits().is_pointer(operand->type) ||
+          !array_borrow_origin(operand)) {
+        continue;
+      }
+      borrowed_array = operand;
+      borrowed_type = borrowed_array_type(operand);
+      auto* source = unwrap_expression(operand);
+      borrowed_pointer_expression_ = source;
+      if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(source)) {
+        pointer_alias_use_ = id->symbol;
+      }
+      break;
+    }
+  }
   cxx::ASTVisitor::visit(ast);
+  pointer_alias_use_ = saved_alias_use;
+  borrowed_pointer_expression_ = saved_borrowed_expression;
   if (auto* function = cxx::symbol_cast<cxx::FunctionSymbol>(ast->symbol)) {
     retain_call(ast, function);
     return;
@@ -2092,22 +2225,25 @@ void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
   auto traits = unit_.typeTraits();
   auto* base_type = traits.remove_reference(ast->baseExpression->type);
   auto* index_type = traits.remove_reference(ast->indexExpression->type);
-  const bool array_first = traits.is_array(base_type);
-  if (!array_first && !traits.is_array(index_type)) {
+  const bool array_first =
+      traits.is_array(base_type) || borrowed_array == ast->baseExpression;
+  if (!array_first && !traits.is_array(index_type) && !borrowed_array) {
     return;
   }
   ArraySubscript selection{
       array_first ? ast->baseExpression : ast->indexExpression,
-      array_first ? ast->indexExpression : ast->baseExpression, array_first,
-      std::nullopt};
+      array_first ? ast->indexExpression : ast->baseExpression,
+      borrowed_array ? borrowed_type : (array_first ? base_type : index_type),
+      array_first, std::nullopt};
   auto* type = cxx::type_cast<cxx::BoundedArrayType>(
-      types_.unqualified(selection.array->type));
-  if (type) {
+      selection.type ? types_.unqualified(selection.type) : nullptr);
+  if (type || !selection.type) {
     cxx::ASTInterpreter interpreter(&unit_);
     auto constant = interpreter.evaluate(selection.index);
     auto* integer = constant ? std::get_if<cxx::ConstInt>(&*constant) : nullptr;
     if (integer && !integer->isNegative() &&
-        integer->toUWide() < static_cast<cxx::ConstInt::UWide>(type->size())) {
+        (!type || integer->toUWide() <
+                      static_cast<cxx::ConstInt::UWide>(type->size()))) {
       selection.constant_index = static_cast<size_t>(integer->toUIntMax());
     }
   }
@@ -2119,6 +2255,18 @@ void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
 const ArraySubscript* ControlFlow::array_subscript(
     cxx::SubscriptExpressionAST* expression) const {
   auto found = array_subscripts_.find(expression);
+  if (found != array_subscripts_.end() &&
+      unit_.typeTraits().is_pointer(found->second.array->type)) {
+    auto* id = cxx::ast_cast<cxx::IdExpressionAST>(
+        unwrap_expression(found->second.array));
+    if (id) {
+      auto alias = pointer_aliases_.find(id->symbol);
+      if (alias == pointer_aliases_.end() || !alias->second.transparent ||
+          argument_requires_storage(alias->second.identity)) {
+        return nullptr;
+      }
+    }
+  }
   return found == array_subscripts_.end() ? nullptr : &found->second;
 }
 
@@ -2311,7 +2459,12 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
   }
 }
 
-void ControlFlow::retain_reference_arguments(const DirectCall& call) {
+void ControlFlow::retain_reference_arguments(DirectCall& call) {
+  call.pointer_result_observed =
+      call.source != borrowed_pointer_expression_ &&
+      unit_.typeTraits().is_pointer(
+          cxx::type_cast<cxx::FunctionType>(call.function->type())
+              ->returnType());
   auto parameters = call.function->parameters();
   auto traits = unit_.typeTraits();
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
@@ -2408,6 +2561,10 @@ bool ControlFlow::record_pointer_alias_read(cxx::ExpressionAST* expression) {
       source ? pointer_aliases_.find(source->symbol) : pointer_aliases_.end();
   if (found == pointer_aliases_.end() || !found->second.transparent) {
     return false;
+  }
+  if (found->second.array_origin && projection.component_count == SIZE_MAX) {
+    projection.component_count =
+        types_.partition(expression->type, expression).component_count;
   }
   visit_intervals(
       found->second.identity, projection, [&](ObjectInterval interval) {
@@ -2798,13 +2955,24 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       argument.inherent_storage = true;
       return;
     }
-    auto array_identity = retain_call_argument(selection->array);
+    auto array_identity = retain_array_identity(selection->array);
     if (argument_requires_storage(array_identity)) {
       append_identity(array_identity, argument);
       argument.inherent_storage = true;
       return;
     }
-    const auto* array = types_.array(selection->array->type, expression);
+    if (!selection->type) {
+      const size_t count =
+          types_.partition(subscript->type, expression).component_count;
+      append_identity(
+          array_identity, argument,
+          selection->constant_index
+              ? compose_projection({*selection->constant_index * count, count},
+                                   projection)
+              : projection);
+      return;
+    }
+    const auto* array = types_.array(selection->type, expression);
     const size_t first = selection->constant_index.value_or(0);
     const size_t end =
         selection->constant_index ? first + 1 : array->source->size();
@@ -2825,7 +2993,8 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto call = direct_operator_call(expression)) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(call->function->type());
-    if (signature && traits.is_reference(signature->returnType())) {
+    if (signature && (traits.is_reference(signature->returnType()) ||
+                      traits.is_pointer(signature->returnType()))) {
       argument.reference_calls.push_back({expression, projection});
       return;
     }
@@ -2837,6 +3006,12 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       if (source) {
         auto found = pointer_aliases_.find(source->symbol);
         if (found != pointer_aliases_.end() && found->second.transparent) {
+          if (found->second.array_origin) {
+            projection = compose_projection(
+                {0, types_.partition(expression->type, expression)
+                        .component_count},
+                projection);
+          }
           append_identity(found->second.identity, argument, projection);
           return;
         }
@@ -2849,7 +3024,8 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     auto* callee = direct_callee(call);
     auto* signature =
         callee ? cxx::type_cast<cxx::FunctionType>(callee->type()) : nullptr;
-    if (signature && traits.is_reference(signature->returnType())) {
+    if (signature && (traits.is_reference(signature->returnType()) ||
+                      traits.is_pointer(signature->returnType()))) {
       argument.reference_calls.push_back({expression, projection});
       return;
     }
@@ -3527,6 +3703,14 @@ bool ControlFlow::propagate_projected_reference_return(
 
 bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
                                                    const ControlFlow& callee) {
+  if (callee.reference_return_ == ReferenceReturn::None ||
+      (callee.reference_return_ == ReferenceReturn::Storage &&
+       !callee.projected_reference_return_facts_ &&
+       unit_.typeTraits().is_pointer(
+           cxx::type_cast<cxx::FunctionType>(callee.function_->type())
+               ->returnType()))) {
+    return false;
+  }
   // Retain an exact automatic origin whenever every return aliases one
   // parameter or its receiver. Outer call edges can compare nested aliases
   // without traversing either function body again. The selected storage ABI is
@@ -3651,6 +3835,19 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
         result_storage |= argument_requires_storage(*source);
         visit_intervals(*source, projection, append_result_interval);
       }
+    }
+  }
+  if (!result_storage && callee.projected_reference_return_facts_ &&
+      retained_result &&
+      unit_.typeTraits().is_pointer(
+          cxx::type_cast<cxx::FunctionType>(callee.function_->type())
+              ->returnType())) {
+    const auto& origins = callee.projected_reference_return_facts_->origins;
+    const auto* array_type =
+        origins.empty() ? nullptr : origins.front().projection.type;
+    if (array_type && retained_result->array_type != array_type) {
+      retained_result->array_type = array_type;
+      changed = true;
     }
   }
   if (result_storage) {
@@ -3882,7 +4079,8 @@ CallPropagation ControlFlow::propagate_call(
   caller_changed = overlap_changes.caller_changed || caller_changed;
   callee_changed = overlap_changes.callee_changed || callee_changed;
 
-  if (identity_call_results_.contains(call.source)) {
+  if (call.pointer_result_observed ||
+      identity_call_results_.contains(call.source)) {
     if (auto ordinal = callee.reference_return_parameter()) {
       callee_changed = callee.require_reference_storage(parameters[*ordinal]) ||
                        callee_changed;
@@ -3988,7 +4186,8 @@ CallPropagation ControlFlow::propagate_call(
   if (!call.function->isImplicitObjectMemberFunction()) {
     return {caller_changed, callee_changed};
   }
-  if (identity_call_results_.contains(call.source) &&
+  if ((call.pointer_result_observed ||
+       identity_call_results_.contains(call.source)) &&
       callee.returns_current_receiver_reference()) {
     caller_changed =
         storage_call_results_.insert(call.source).second || caller_changed;
@@ -4200,6 +4399,26 @@ bool ControlFlow::propagate_field_inputs() {
 }
 
 void ControlFlow::finalize_callable_effects() {
+  for (auto entry = array_subscripts_.begin();
+       entry != array_subscripts_.end();) {
+    auto& selection = entry->second;
+    if (selection.type) {
+      ++entry;
+      continue;
+    }
+    selection.type = borrowed_array_type(selection.array);
+    if (!selection.type) {
+      entry = array_subscripts_.erase(entry);
+      continue;
+    }
+    const auto* array = cxx::type_cast<cxx::BoundedArrayType>(
+        types_.unqualified(selection.type));
+    if (selection.constant_index &&
+        *selection.constant_index >= array->size()) {
+      selection.constant_index.reset();
+    }
+    ++entry;
+  }
   if (reference_identity_facts_) {
     for (auto& entry : reference_identity_facts_->results) {
       entry.second.index.reset();
@@ -4242,7 +4461,7 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(ast->symbol);
   auto* saved_initializing_binding = initializing_binding_;
   initializing_binding_ = variable;
-  auto* saved_pointer_alias_initializer = pointer_alias_initializer_;
+  auto* saved_borrowed_expression = borrowed_pointer_expression_;
   const bool saved_retain_reference_materializations =
       retain_reference_materializations_;
   if (variable && variable->isStatic()) {
@@ -4259,29 +4478,51 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
             variable->type(), conversion->conversionFunction, ast)) {
       bound_constructor_conversions_.insert(conversion);
     }
-    if (ast->initializer && unit_.typeTraits().is_pointer(variable->type()) &&
-        !unit_.typeTraits().is_volatile(variable->type())) {
+    auto traits = unit_.typeTraits();
+    if (ast->initializer &&
+        traits.is_pointer(types_.unqualified_value(variable->type())) &&
+        !traits.is_volatile(types_.unqualified_value(variable->type()))) {
       auto* initialized = cxx::Initializer(ast->initializer).singleExpression();
-      auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(
-          initialized ? unwrap_expression(initialized) : nullptr);
+      auto* source = initialized ? unwrap_expression(initialized) : nullptr;
+      auto* address = cxx::ast_cast<cxx::UnaryExpressionAST>(source);
+      cxx::ExpressionAST* referent = nullptr;
+      cxx::ExpressionAST* array_origin = nullptr;
+      CallArgument identity{};
       if (address && !address->symbol && address->op == cxx::TokenKind::T_AMP &&
-          !unit_.typeTraits().is_array(address->expression->type)) {
-        auto identity = retain_call_argument(address->expression);
-        if (!identity.inherent_storage &&
-            (identity.current_receiver || !identity.identity_bindings.empty() ||
-             identity.identity_intervals ||
-             !identity.reference_calls.empty())) {
-          pointer_alias_initializer_ = address;
-          pointer_aliases_.emplace(
-              variable,
-              PointerAlias{address->expression, nullptr, std::move(identity)});
+          !traits.is_array(address->expression->type)) {
+        referent = address->expression;
+        identity = retain_call_argument(referent);
+      } else if (source && traits.is_array(source->type)) {
+        referent = array_origin = source;
+        identity = retain_call_argument(referent);
+      } else if (source && pointer_returning_call(source)) {
+        referent = array_origin = source;
+        identity = retain_call_argument(referent);
+      } else if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(source)) {
+        auto found = pointer_aliases_.find(id->symbol);
+        if (found != pointer_aliases_.end() && found->second.transparent &&
+            found->second.array_origin) {
+          referent = source;
+          array_origin = found->second.array_origin;
+          identity = found->second.identity;
         }
+      }
+      if (referent &&
+          (!traits.is_reference(variable->type()) ||
+           initialized->valueCategory == cxx::ValueCategory::kPrValue) &&
+          !identity.inherent_storage &&
+          (identity.current_receiver || !identity.identity_bindings.empty() ||
+           identity.identity_intervals || !identity.reference_calls.empty())) {
+        borrowed_pointer_expression_ = source;
+        pointer_aliases_.emplace(
+            variable, PointerAlias{referent, nullptr, std::move(identity), true,
+                                   array_origin});
       }
     }
   }
   cxx::ASTVisitor::visit(ast);
   initializing_binding_ = saved_initializing_binding;
-  pointer_alias_initializer_ = saved_pointer_alias_initializer;
+  borrowed_pointer_expression_ = saved_borrowed_expression;
   retain_reference_materializations_ = saved_retain_reference_materializations;
   if (variable) {
     const cxx::Type* automatic_object_type = nullptr;
@@ -4364,7 +4605,8 @@ void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
     record_parameter_read(ast->expression);
   }
   if (!ast->conversionFunction &&
-      ast->castKind == cxx::ImplicitCastKind::kArrayToPointerConversion) {
+      ast->castKind == cxx::ImplicitCastKind::kArrayToPointerConversion &&
+      ast->expression != borrowed_pointer_expression_) {
     require_identity(ast->expression);
   }
   if (is_class_adjustment(ast)) {
@@ -4721,8 +4963,9 @@ std::optional<Destination> ControlFlow::classify_destination(
     }
     if (auto* selection = array_subscript(subscript);
         selection && selection->constant_index) {
-      auto target = classify_destination(selection->array);
-      if (target) {
+      auto* source = array_borrow_origin(selection->array);
+      auto target = source ? classify_destination(source) : std::nullopt;
+      if (target && selection->type) {
         auto* binding_type = source_object_type(target->binding);
         if (storage_backed(target->binding) ||
             (!is_direct_subobject(target->binding) &&
@@ -4731,7 +4974,7 @@ std::optional<Destination> ControlFlow::classify_destination(
              !types_.requires_value_transport(binding_type))) {
           return std::nullopt;
         }
-        const auto* array = types_.array(selection->array->type, expression);
+        const auto* array = types_.array(selection->type, expression);
         target->component_offset +=
             *selection->constant_index * array->element->component_count;
         target->member = array->element;

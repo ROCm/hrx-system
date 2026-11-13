@@ -56,3 +56,15 @@ void escaped(int* data) {
   View view{data, {1, 2, 3}};
   observe(view.values);
 }
+
+// ====
+// An escaping copy invalidates the original array borrow as well.
+struct State { int* data; int values[2]; };
+static void observe(const int* values);
+void escaped_copy(int* data) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  State state{data, {1, 2}};
+  const int* pointer = state.values;
+  const int* copy = pointer;
+  observe(copy);
+}

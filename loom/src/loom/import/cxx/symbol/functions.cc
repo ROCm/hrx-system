@@ -360,6 +360,9 @@ void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
   }
   auto analysis = std::make_unique<ControlFlow>(
       unit_, diagnostics_, types, body ? body->statement : nullptr, concrete);
+  if (exported_.contains(concrete) || template_definitions_.lookup(concrete)) {
+    analysis->require_pointer_result_storage();
+  }
   auto* retained = analysis.get();
   control_flows_.emplace(canonical, std::move(analysis));
   functions.emplace_back(canonical, retained);
@@ -454,10 +457,12 @@ void Functions::analyze(Types& types) {
   for (const auto& [canonical, analysis] : analyzed_functions) {
     auto* function = definition(canonical);
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
-    const bool whole = exported_.contains(function) ||
-                       function_contracts_.has_predicates(function) ||
-                       template_definitions_.lookup(function) ||
-                       unit_.typeTraits().is_reference(signature->returnType());
+    const bool whole =
+        exported_.contains(function) ||
+        function_contracts_.has_predicates(function) ||
+        template_definitions_.lookup(function) ||
+        unit_.typeTraits().is_reference(signature->returnType()) ||
+        !analysis->projected_reference_return_origins(true).empty();
     const bool receiver_storage = receiver_requires_storage(function);
     analysis->configure_receiver(
         receiver_storage ? Construction::ParameterMode::Storage
@@ -499,10 +504,12 @@ void Functions::analyze(Types& types) {
     std::vector<IndirectParameter> indirect_parameters;
     auto parameters = function->parameters();
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
-    const bool whole = exported_.contains(function) ||
-                       function_contracts_.has_predicates(function) ||
-                       template_definitions_.lookup(function) ||
-                       unit_.typeTraits().is_reference(signature->returnType());
+    const bool whole =
+        exported_.contains(function) ||
+        function_contracts_.has_predicates(function) ||
+        template_definitions_.lookup(function) ||
+        unit_.typeTraits().is_reference(signature->returnType()) ||
+        !analysis->projected_reference_return_origins(true).empty();
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
       auto* parameter = parameters[ordinal];
       const bool source_reference =
@@ -1501,8 +1508,7 @@ BoundSignature Functions::bind_callable_signature(
       returns_reference && reference_return_parameter(symbol).has_value();
   const auto projected_reference_origins = projected_reference_return_origins(
       symbol, receiver ? receiver->abi : ImplicitObjectABI::None);
-  const bool returns_projected_reference =
-      returns_reference && !projected_reference_origins.empty();
+  const bool returns_projected_reference = !projected_reference_origins.empty();
   const bool returns_receiver_alias =
       returns_reference && receiver &&
       receiver->abi == ImplicitObjectABI::Value &&
