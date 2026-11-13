@@ -198,12 +198,13 @@ iree_status_t loom_amdgpu_materialize_uniform_sgpr_address(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, loom_value_id_t* out_low_value);
 
-// Converts a one- or two-word scalar register payload to its selected carrier.
-// Widening zero-extends; narrowing retains the low word. Selection must prove
+// Converts a numeric scalar or vector register payload to its selected bank.
+// One- and two-word address carriers may also change width: widening
+// zero-extends and narrowing retains the low word. Selection must prove
 // subgroup uniformity before requesting an SGPR for a VGPR payload. Consumes
 // only Low values and the retained destination type, preserving source
 // bindings.
-iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
+iree_status_t loom_amdgpu_materialize_low_numeric_carrier(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_value, loom_type_t required_type,
     loom_value_id_t* out_low_value);

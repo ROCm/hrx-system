@@ -3,7 +3,15 @@
 // A narrow header and a dynamically sized tail share a materialized record
 // base. The tail's field bias belongs in its descriptor end even though the
 // retained common prefix contains only the dynamic record address.
-func.def @biased_tail_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %input: buffer) -> (i32, vector<4xi32>) {
+kernel.def @biased_tail_zero_fill() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%row0: index, %rows0: index, %base_i32: i32, %input: buffer, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
+  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64x4xi32>
   %row = index.assume %row0 [range(%row0, 0, 1023)] : index
   %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
   %base0 = index.cast %base_i32 : i32 to offset
@@ -18,32 +26,41 @@ func.def @biased_tail_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %in
   %mask = vector.splat %inside : vector<4xi1>
   %passthrough = vector.splati 0 : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
-  func.return %header_value, %value : i32, vector<4xi32>
+  view.store %header_value, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  vector.store %value, %result_view_1[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @biased_tail_zero_fill(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 3, direct_arg_names = {arg0 = "row0", arg1 = "rows0", arg2 = "base_i32"}, direct_arg_offsets = [0, 4, 8], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [4, 4, 4], parameter_count = 6, resource_count = 3, resource_offsets = [16, 24, 32], resource_parameter_indices = [3, 4, 5], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @biased_tail_zero_fill(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %26 = v_mov_b32 0
-  %27 = s_mov_b32 4
-  %28 = s_add_u32 %base, %27
-  %39 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %40 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %41 = s_mov_b32 65535
-  %42 = s_and_b32 %40, %41
-  %43 = concat(%39, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %44 = s_mov_b32 822173696
-  %45 = concat(%43, %28, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %header_value = buffer_load_dword %45, %26, %base
-  %32 = s_lshl_b32_rhs_inline %row, 4
-  %33 = s_add_u32 %base, %32
-  %34 = s_lshl_b32_rhs_inline %rows, 4
-  %35 = s_add_u32 %base, %34
-  %36 = s_add_u32_rhs_inline %35, 16
-  %50 = concat(%39, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %52 = concat(%50, %36, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %value = buffer_load_b128 %52, %26, %33 {offset = 16}
-  return %header_value, %value
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_1 = resource<hal_binding> {extent = 1024, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %36 = v_mov_b32 0
+  %37 = s_mov_b32 4
+  %38 = s_add_u32 %base, %37
+  %51 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %52 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53 = s_mov_b32 65535
+  %54 = s_and_b32 %52, %53
+  %55 = concat(%51, %54) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %56 = s_mov_b32 822173696
+  %57 = concat(%55, %38, %56) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %header_value = buffer_load_dword %57, %36, %base
+  %42 = s_lshl_b32_rhs_inline %row, 4
+  %43 = s_add_u32 %base, %42
+  %44 = s_lshl_b32_rhs_inline %rows, 4
+  %45 = s_add_u32 %base, %44
+  %46 = s_add_u32_rhs_inline %45, 16
+  %62 = concat(%51, %54) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %64 = concat(%62, %46, %56) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %value = buffer_load_b128 %64, %36, %43 {offset = 16}
+  %49 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %49, %header_value, %result_view_0
+  %50 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %50, %value, %result_view_1
+  return
 }
 
 // ====
@@ -64,16 +81,25 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @split_packed_load(%con
   %source = resource<hal_binding> {extent = 20, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %14 = slice %old[0] : reg<amdgpu.vgpr x5> -> reg<amdgpu.vgpr x4>
   %15 = copy %14 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %16 = v_mov_b32 0
-  %17, %18 = s_and_saveexec_b64 %condition
-  %19 = global_load_b128_saddr_preserve %15, %16, %source
-  s_mov_b64_exec %17
-  %20 = slice %old[4] : reg<amdgpu.vgpr x5> -> reg<amdgpu.vgpr>
-  %21 = copy %20 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
-  %22, %23 = s_and_saveexec_b64 %condition
-  %24 = global_load_b32_saddr_preserve %21, %16, %source {offset = 16}
-  s_mov_b64_exec %22
-  %value = concat(%19, %24) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x5>
+  %16 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %16
+  %19 = v_mov_b32_copy %17
+  %20 = concat(%18, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %21, %22 = s_and_saveexec_b64 %condition
+  %23 = global_load_b128_vaddr_preserve %15, %20
+  s_mov_b64_exec %21
+  %24 = slice %old[4] : reg<amdgpu.vgpr x5> -> reg<amdgpu.vgpr>
+  %25 = copy %24 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %26 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = v_mov_b32_copy %26
+  %29 = v_mov_b32_copy %27
+  %30 = concat(%28, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %31, %32 = s_and_saveexec_b64 %condition
+  %33 = global_load_b32_vaddr_preserve %25, %30 {offset = 16}
+  s_mov_b64_exec %31
+  %value = concat(%23, %33) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x5>
   return %value, %old
 }
 
@@ -93,41 +119,75 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @packed_tail(%condition
   %source = resource<hal_binding> {extent = 3, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %15 = v_bfe_u32_offset_width_inline %old {offset = 0, width = 16}
   %16 = copy %15 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
-  %17 = v_mov_b32 0
-  %18, %19 = s_and_saveexec_b64 %condition
-  %20 = global_load_u16_saddr_preserve %16, %17, %source
-  s_mov_b64_exec %18
-  %22 = v_bfe_u32_offset_width_inline %old {offset = 16, width = 8}
-  %23 = copy %22 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
-  %24, %25 = s_and_saveexec_b64 %condition
-  %26 = global_load_u8_saddr_preserve %23, %17, %source {offset = 2}
-  s_mov_b64_exec %24
-  %27 = v_lshlrev_b32_src0_inline %26, 16
-  %value = v_or_b32 %20, %27
+  %17 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = v_mov_b32_copy %17
+  %20 = v_mov_b32_copy %18
+  %21 = concat(%19, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %22, %23 = s_and_saveexec_b64 %condition
+  %24 = global_load_u16_vaddr_preserve %16, %21
+  s_mov_b64_exec %22
+  %26 = v_bfe_u32_offset_width_inline %old {offset = 16, width = 8}
+  %27 = copy %26 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %28 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = v_mov_b32_copy %28
+  %31 = v_mov_b32_copy %29
+  %32 = concat(%30, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %33, %34 = s_and_saveexec_b64 %condition
+  %35 = global_load_u8_vaddr_preserve %27, %32 {offset = 2}
+  s_mov_b64_exec %33
+  %36 = v_lshlrev_b32_src0_inline %35, 16
+  %value = v_or_b32 %24, %36
   return %value, %old
 }
 
 // ====
 
 // An immutable uniform address still needs lane-predicated vector memory.
-func.def @uniform_address(%input: buffer, %condition: i1, %old: vector<4xi32>) -> (vector<4xi32>) {
+kernel.def @uniform_address() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %condition_buffer: buffer, %old_buffer: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %condition_view = buffer.view %condition_buffer[%fixture_base] : buffer -> view<64xi8>
+  %condition_bits = view.load %condition_view[%fixture_lane] : view<64xi8> -> i8
+  %condition = scalar.trunci %condition_bits : i8 to i1
+  %old_view = buffer.view %old_buffer[%fixture_base] : buffer -> view<64x4xi32>
+  %old = vector.load %old_view[%fixture_lane, 0] : view<64x4xi32> -> vector<4xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
   %base = index.constant 0 : offset
   %constant_input = buffer.assume.memory_space<constant> %input : buffer
   %source = buffer.view %constant_input[%base] : buffer -> view<4xi32>
   %mask = vector.splat %condition : vector<4xi1>
   %value = vector.load.mask %source[0], %mask, %old : view<4xi32>, vector<4xi1>, vector<4xi32>
-  func.return %value : vector<4xi32>
+  vector.store %value, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @uniform_address(%condition: reg<amdgpu.sgpr x2>, %old: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 4, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_address() asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %source = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %14 = copy %old : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %15 = v_mov_b32 0
-  %16, %17 = s_and_saveexec_b64 %condition
-  %value = global_load_b128_saddr_preserve %14, %15, %source
-  s_mov_b64_exec %16
-  return %value
+  %condition_view = resource<hal_binding> {extent = 64, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %old_view = resource<hal_binding> {extent = 1024, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %condition_bits = global_load_u8_saddr %fixture_lane, %condition_view
+  %31 = v_and_b32_src0_inline %condition_bits, 1
+  %32 = v_mov_b32 1
+  %condition = v_cmp_eq_i32 %31, %32
+  %34 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  %old = global_load_b128_saddr %34, %old_view
+  %37 = copy %old : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %38 = v_mov_b32 0
+  %39, %40 = s_and_saveexec_b64 %condition
+  %value = global_load_b128_saddr_preserve %37, %38, %source
+  s_mov_b64_exec %39
+  %42 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %42, %value, %result_view_0
+  return
 }
 
 // ====
@@ -250,31 +310,56 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @private_words(%conditi
 
 // Descriptor construction remains outside the lane mask, and its off-zero
 // operand form retains the tied fallback without encoding it as an address.
-func.def @descriptor_words(%input: buffer, %condition: i1, %old: vector<4xi32>) -> (vector<4xi32>) {
+kernel.def @descriptor_words() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %condition_buffer: buffer, %old_buffer: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %condition_view = buffer.view %condition_buffer[%fixture_base] : buffer -> view<64xi8>
+  %condition_bits = view.load %condition_view[%fixture_lane] : view<64xi8> -> i8
+  %condition = scalar.trunci %condition_bits : i8 to i1
+  %old_view = buffer.view %old_buffer[%fixture_base] : buffer -> view<64x4xi32>
+  %old = vector.load %old_view[%fixture_lane, 0] : view<64x4xi32> -> vector<4xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
   %base = index.constant 0 : offset
   %descriptor = buffer.assume.memory_space<descriptor> %input : buffer
   %source = buffer.view %descriptor[%base] : buffer -> view<4xi32>
   %mask = vector.splat %condition : vector<4xi1>
   %value = vector.load.mask %source[0], %mask, %old : view<4xi32>, vector<4xi1>, vector<4xi32>
-  func.return %value : vector<4xi32>
+  vector.store %value, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @descriptor_words(%condition: reg<amdgpu.sgpr x2>, %old: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 4, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @descriptor_words() asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %source = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %14 = copy %old : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %19 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %21 = s_mov_b32 65535
-  %22 = s_and_b32 %20, %21
-  %23 = concat(%19, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %24 = s_mov_b32 16
-  %25 = s_mov_b32 822173696
-  %26 = concat(%23, %24, %25) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %16, %17 = s_and_saveexec_b64 %condition
-  %value = buffer_load_b128_off_zero_preserve %14, %26
-  s_mov_b64_exec %16
-  return %value
+  %condition_view = resource<hal_binding> {extent = 64, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %old_view = resource<hal_binding> {extent = 1024, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %condition_bits = global_load_u8_saddr %fixture_lane, %condition_view
+  %31 = v_and_b32_src0_inline %condition_bits, 1
+  %32 = v_mov_b32 1
+  %condition = v_cmp_eq_i32 %31, %32
+  %34 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  %old = global_load_b128_saddr %34, %old_view
+  %37 = copy %old : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %43 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = s_mov_b32 65535
+  %46 = s_and_b32 %44, %45
+  %47 = concat(%43, %46) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %48 = s_mov_b32 16
+  %49 = s_mov_b32 822173696
+  %50 = concat(%47, %48, %49) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %39, %40 = s_and_saveexec_b64 %condition
+  %value = buffer_load_b128_off_zero_preserve %37, %50
+  s_mov_b64_exec %39
+  %42 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %42, %value, %result_view_0
+  return
 }
 
 // ====
@@ -311,7 +396,14 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @lds_strided_pair(%cond
 // A dynamic view base contributes to both the access address and the
 // root-relative descriptor end. The hardware range remains the logical view
 // boundary instead of the broader resource extent.
-func.def @dynamic_base_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %input: buffer) -> (vector<4xi32>) {
+kernel.def @dynamic_base_zero_fill() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%row0: index, %rows0: index, %base_i32: i32, %input: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
   %row = index.assume %row0 [range(%row0, 0, 1023)] : index
   %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
   %base0 = index.cast %base_i32 : i32 to offset
@@ -322,33 +414,45 @@ func.def @dynamic_base_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %i
   %mask = vector.splat %inside : vector<4xi1>
   %passthrough = vector.splati 0 : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
-  func.return %value : vector<4xi32>
+  vector.store %value, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @dynamic_base_zero_fill(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 3, direct_arg_names = {arg0 = "row0", arg1 = "rows0", arg2 = "base_i32"}, direct_arg_offsets = [0, 4, 8], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [4, 4, 4], parameter_count = 5, resource_count = 2, resource_offsets = [16, 24], resource_parameter_indices = [3, 4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @dynamic_base_zero_fill(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %20 = v_mov_b32 0
-  %21 = s_lshl_b32_rhs_inline %row, 4
-  %22 = s_add_u32 %base, %21
-  %23 = s_lshl_b32_rhs_inline %rows, 4
-  %24 = s_add_u32 %base, %23
-  %27 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = s_mov_b32 65535
-  %30 = s_and_b32 %28, %29
-  %31 = concat(%27, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %32 = s_mov_b32 822173696
-  %33 = concat(%31, %24, %32) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %value = buffer_load_b128 %33, %20, %22
-  return %value
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %29 = v_mov_b32 0
+  %30 = s_lshl_b32_rhs_inline %row, 4
+  %31 = s_add_u32 %base, %30
+  %32 = s_lshl_b32_rhs_inline %rows, 4
+  %33 = s_add_u32 %base, %32
+  %37 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_mov_b32 65535
+  %40 = s_and_b32 %38, %39
+  %41 = concat(%37, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %42 = s_mov_b32 822173696
+  %43 = concat(%41, %33, %42) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %value = buffer_load_b128 %43, %29, %31
+  %36 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %36, %value, %result_view_0
+  return
 }
 
 // ====
 
 // Floating-point negative zero is observably different at the bit level and
 // therefore retains the source passthrough path.
-func.def @negative_zero_passthrough_preserved(%row0: index, %rows0: index, %input: buffer) -> (vector<4xf32>) {
+kernel.def @negative_zero_passthrough_preserved() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%row0: index, %rows0: index, %input: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xf32>
   %row = index.assume %row0 [range(%row0, 0, 1023)] : index
   %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
   %base = index.constant 0 : offset
@@ -358,37 +462,49 @@ func.def @negative_zero_passthrough_preserved(%row0: index, %rows0: index, %inpu
   %mask = vector.splat %inside : vector<4xi1>
   %passthrough = vector.splatf -0.0 : vector<4xf32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xf32>, vector<4xi1>, vector<4xf32>
-  func.return %value : vector<4xf32>
+  vector.store %value, %result_view_0[%fixture_lane, 0] : vector<4xf32>, view<64x4xf32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @negative_zero_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "row0", arg1 = "rows0"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @negative_zero_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %inside = v_cmp_lt_i32 %row, %rows
-  %18 = v_mov_b32 2147483648
-  %passthrough = concat(%18, %18, %18, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %24 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %25 = v_mov_b32 0
-  %26 = s_lshl_b32_rhs_inline %row, 4
-  %27 = s_lshl_b32_rhs_inline %rows, 4
-  %32 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %33 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %34 = s_mov_b32 65535
-  %35 = s_and_b32 %33, %34
-  %36 = concat(%32, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %37 = s_mov_b32 822173696
-  %38 = concat(%36, %27, %37) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %29, %30 = s_and_saveexec_b64 %inside
-  %value = buffer_load_b128_preserve %24, %38, %25, %26
-  s_mov_b64_exec %29
-  return %value
+  %27 = v_mov_b32 2147483648
+  %passthrough = concat(%27, %27, %27, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %33 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %34 = v_mov_b32 0
+  %35 = s_lshl_b32_rhs_inline %row, 4
+  %36 = s_lshl_b32_rhs_inline %rows, 4
+  %42 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = s_mov_b32 65535
+  %45 = s_and_b32 %43, %44
+  %46 = concat(%42, %45) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %47 = s_mov_b32 822173696
+  %48 = concat(%46, %36, %47) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %38, %39 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %33, %48, %34, %35
+  s_mov_b64_exec %38
+  %41 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %41, %value, %result_view_0
+  return
 }
 
 // ====
 
 // A false conjunction does not identify which operand failed, so the row may
 // remain in bounds. Descriptor zero fill cannot replace the source mask.
-func.def @conjunctive_passthrough_preserved(%row0: index, %rows0: index, %column0: index, %input: buffer) -> (vector<4xi32>) {
+kernel.def @conjunctive_passthrough_preserved() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%row0: index, %rows0: index, %column0: index, %input: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
   %row = index.assume %row0 [range(%row0, 0, 1023)] : index
   %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
   %column = index.assume %column0 [range(%column0, 0, 7)] : index
@@ -402,49 +518,61 @@ func.def @conjunctive_passthrough_preserved(%row0: index, %rows0: index, %column
   %mask = vector.splat %inside : vector<4xi1>
   %passthrough = vector.splati 0 : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
-  func.return %value : vector<4xi32>
+  vector.store %value, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @conjunctive_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %column: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 3, direct_arg_names = {arg0 = "row0", arg1 = "rows0", arg2 = "column0"}, direct_arg_offsets = [0, 4, 8], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [4, 4, 4], parameter_count = 5, resource_count = 2, resource_offsets = [16, 24], resource_parameter_indices = [3, 4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @conjunctive_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %column: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %columns = s_mov_b32 4
   %row_inside = s_cmp_lt_i32 %row, %rows
   %column_inside = s_cmp_lt_i32 %column, %columns
-  %26 = s_mov_b64_exec_read
-  %27 = slice %26[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = slice %26[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = s_mov_b32 0
-  %30 = s_cselect_b32 %27, %29, %row_inside
-  %31 = s_cselect_b32 %28, %29, %row_inside
-  %32 = concat(%30, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %37 = s_cselect_b32 %27, %29, %column_inside
-  %38 = s_cselect_b32 %28, %29, %column_inside
-  %39 = concat(%37, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %inside = s_and_b64 %32, %39
-  %41 = v_mov_b32 0
-  %passthrough = concat(%41, %41, %41, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %47 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %49 = s_lshl_b32_rhs_inline %row, 4
-  %50 = s_lshl_b32_rhs_inline %rows, 4
-  %55 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %56 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %57 = s_mov_b32 65535
-  %58 = s_and_b32 %56, %57
-  %59 = concat(%55, %58) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %60 = s_mov_b32 822173696
-  %61 = concat(%59, %50, %60) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %52, %53 = s_and_saveexec_b64 %inside
-  %value = buffer_load_b128_preserve %47, %61, %41, %49
-  s_mov_b64_exec %52
-  return %value
+  %35 = s_mov_b64_exec_read
+  %36 = slice %35[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = slice %35[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = s_mov_b32 0
+  %39 = s_cselect_b32 %36, %38, %row_inside
+  %40 = s_cselect_b32 %37, %38, %row_inside
+  %41 = concat(%39, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %46 = s_cselect_b32 %36, %38, %column_inside
+  %47 = s_cselect_b32 %37, %38, %column_inside
+  %48 = concat(%46, %47) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %inside = s_and_b64 %41, %48
+  %50 = v_mov_b32 0
+  %passthrough = concat(%50, %50, %50, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %56 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %58 = s_lshl_b32_rhs_inline %row, 4
+  %59 = s_lshl_b32_rhs_inline %rows, 4
+  %65 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %66 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %67 = s_mov_b32 65535
+  %68 = s_and_b32 %66, %67
+  %69 = concat(%65, %68) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %70 = s_mov_b32 822173696
+  %71 = concat(%69, %59, %70) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %61, %62 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %56, %71, %50, %58
+  s_mov_b64_exec %61
+  %64 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %64, %value, %result_view_0
+  return
 }
 
 // ====
 
 // A strided view needs a stronger address proof than the dense row boundary.
 // It retains the source mask even when the passthrough is positive zero.
-func.def @strided_passthrough_preserved(%row0: index, %rows0: index, %input: buffer) -> (vector<4xi32>) {
+kernel.def @strided_passthrough_preserved() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%row0: index, %rows0: index, %input: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
   %row = index.assume %row0 [range(%row0, 0, 1023)] : index
   %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
   %base = index.constant 0 : offset
@@ -455,27 +583,32 @@ func.def @strided_passthrough_preserved(%row0: index, %rows0: index, %input: buf
   %mask = vector.splat %inside : vector<4xi1>
   %passthrough = vector.splati 0 : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32, %layout>, vector<4xi1>, vector<4xi32>
-  func.return %value : vector<4xi32>
+  vector.store %value, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @strided_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "row0", arg1 = "rows0"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @strided_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %inside = v_cmp_lt_i32 %row, %rows
-  %19 = v_mov_b32 0
-  %passthrough = concat(%19, %19, %19, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %25 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %27 = s_lshl_b32_rhs_inline %row, 5
-  %32 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %33 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %34 = s_mov_b32 65535
-  %35 = s_and_b32 %33, %34
-  %36 = concat(%32, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %37 = s_mov_b32 4294967295
-  %38 = s_mov_b32 822173696
-  %39 = concat(%36, %37, %38) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %29, %30 = s_and_saveexec_b64 %inside
-  %value = buffer_load_b128_preserve %25, %39, %19, %27
-  s_mov_b64_exec %29
-  return %value
+  %28 = v_mov_b32 0
+  %passthrough = concat(%28, %28, %28, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %34 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %36 = s_lshl_b32_rhs_inline %row, 5
+  %42 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = s_mov_b32 65535
+  %45 = s_and_b32 %43, %44
+  %46 = concat(%42, %45) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %47 = s_mov_b32 4294967295
+  %48 = s_mov_b32 822173696
+  %49 = concat(%46, %47, %48) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %38, %39 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %34, %49, %28, %36
+  s_mov_b64_exec %38
+  %41 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  global_store_b128_saddr %41, %value, %result_view_0
+  return
 }

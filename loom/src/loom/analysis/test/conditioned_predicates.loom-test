@@ -421,3 +421,54 @@ func.def @predicate_reference(%input: i64, %divisor: i64) {
   }
   func.return
 }
+
+// ====
+
+// RUN: pass unroll-scf-for,dce
+
+// A bitmask loop proves nonzero only in its body, including after the backedge
+// clears the lowest set bit. Scoped trip-count queries observe that distinction.
+func.def @bitmask_loop_scope(%input: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %outside = test.fact_non_zero %input : i32 -> i1
+  %outside_count = index.cast %outside : i1 to index
+  scf.for %unexpected = [%begin to %outside_count step %step] unroll {
+    test.use %unexpected : index
+  }
+  %result = scf.while(%before = %input : i32) -> (i32) {
+    %nonempty = scalar.cmpi ne, %before, %c0 : i32
+    scf.condition %nonempty, %before : i1, i32
+  } do(%mask: i32) {
+    %inside = test.fact_non_zero %mask : i32 -> i1
+    %inside_count = index.cast %inside : i1 to index
+    scf.for %observed = [%begin to %inside_count step %step] unroll {
+      test.use %observed : index
+    }
+    %below = scalar.subi %mask, %c1 : i32
+    %next = scalar.andi %mask, %below : i32
+    scf.yield %next : i32
+  }
+  test.use %result : i32
+  func.return
+}
+
+// ----
+func.def @bitmask_loop_scope(%input: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %result = scf.while(%before = %input : i32) -> (i32) {
+    %nonempty = scalar.cmpi ne, %before, %c0 : i32
+    scf.condition %nonempty, %before : i1, i32
+  } do(%mask: i32) {
+    %observed_0 = index.constant 0 : index
+    test.use %observed_0 : index
+    %below = scalar.subi %mask, %c1 : i32
+    %next = scalar.andi %mask, %below : i32
+    scf.yield %next : i32
+  }
+  test.use %result : i32
+  func.return
+}

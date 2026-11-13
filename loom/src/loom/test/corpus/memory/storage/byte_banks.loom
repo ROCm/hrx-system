@@ -1,3 +1,60 @@
+// Raw byte operations retain their truncation and unsigned-load semantics in
+// global, private, and workgroup storage. Each workitem owns its shared byte.
+kernel.def @raw_byte_spaces() {
+  %unit = index.constant 1 : index
+  %width = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %position = index.cast %lane : index to offset
+  %base = index.constant 0 : offset
+  %private_size = index.constant 1 : offset
+  %shared_size = index.constant 256 : offset
+  %private = buffer.alloca<private> align(1) %private_size : buffer
+  %shared = buffer.alloca<workgroup> align(1) %shared_size : buffer
+  %original = buffer.load.i8.u %input[%position]
+  %high_bits = scalar.constant 256 : i32
+  %tagged = scalar.addi %original, %high_bits : i32
+  buffer.store.i8 %tagged, %private[%base]
+  buffer.store.i8 %tagged, %shared[%position]
+  %private_value = buffer.load.i8.u %private[%base]
+  %shared_value = buffer.load.i8.u %shared[%position]
+  %results = buffer.view %output[%base] : buffer -> view<3x256xi32>
+  view.store %original, %results[0, %lane] : i32, view<3x256xi32>
+  view.store %private_value, %results[1, %lane] : i32, view<3x256xi32>
+  view.store %shared_value, %results[2, %lane] : i32, view<3x256xi32>
+  kernel.return
+}
+
+func.def @raw_byte_spaces_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %width = index.constant 256 : index
+  %source = buffer.view %input[%base] : buffer -> view<256xi8>
+  %results = buffer.view %output[%base] : buffer -> view<3x256xi32>
+  scf.for %lane = [%c0 to %width step %c1] {
+    %byte = view.load %source[%lane] : view<256xi8> -> i8
+    %value = scalar.extui %byte : i8 to i32
+    view.store %value, %results[0, %lane] : i32, view<3x256xi32>
+    view.store %value, %results[1, %lane] : i32, view<3x256xi32>
+    view.store %value, %results[2, %lane] : i32, view<3x256xi32>
+  }
+  func.return
+}
+
+check.scenario @raw_byte_storage_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(-99) : tensor<768xi32>
+    check.compare<@raw_byte_spaces, @raw_byte_spaces_oracle>(%input, %output) : (tensor<256xi8>, tensor<768xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<256xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<768xi32>
+    }
+  }
+  check.return
+}
+
 // A byte load preserves its unsigned byte value in an i32 result.
 kernel.def @aligned_byte_increment() {
   %unit = index.constant 1 : index

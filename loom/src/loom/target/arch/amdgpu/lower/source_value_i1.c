@@ -607,6 +607,10 @@ static bool loom_amdgpu_source_value_can_lower_as_scc_i1(
       excluded_value_id == LOOM_VALUE_ID_INVALID ? source_value_id
                                                  : excluded_value_id;
   const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id)) {
+    return loom_amdgpu_source_value_facts_are_uniform_i1(module, fact_table,
+                                                         source_value_id);
+  }
   loom_amdgpu_register_shape_t native_shape = {0};
   if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
     return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SCC;
@@ -701,6 +705,10 @@ static bool loom_amdgpu_source_value_can_lower_as_sgpr_i1_bool(
       excluded_value_id == LOOM_VALUE_ID_INVALID ? source_value_id
                                                  : excluded_value_id;
   const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id)) {
+    return loom_amdgpu_source_value_facts_are_uniform_i1(module, fact_table,
+                                                         source_value_id);
+  }
   loom_amdgpu_register_shape_t native_shape = {0};
   if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
     return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
@@ -794,6 +802,10 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
       excluded_value_id == LOOM_VALUE_ID_INVALID ? source_value_id
                                                  : excluded_value_id;
   const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id)) {
+    return !loom_amdgpu_source_value_facts_are_uniform_i1(module, fact_table,
+                                                          source_value_id);
+  }
   loom_amdgpu_register_shape_t native_shape = {0};
   if (loom_amdgpu_source_invoke_result_shape(module, value, &native_shape)) {
     return native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&

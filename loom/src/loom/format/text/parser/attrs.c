@@ -17,6 +17,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/type_registry.h"
+#include "loom/util/adaptive_sort.h"
 
 static bool loom_parse_special_f64_spelling(iree_string_view_t text,
                                             double* out_value) {
@@ -1173,7 +1174,14 @@ iree_status_t loom_parse_predicate_list(loom_parser_t* parser,
 // Dict attribute parsing
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_parser_emit_duplicate_attr_dict_key(
+typedef struct loom_parsed_attr_dict_entry_t {
+  // Parsed attribute payload in canonical module storage form.
+  loom_named_attr_t attr;
+  // Source token for duplicate-key diagnostics.
+  loom_token_t key_token;
+} loom_parsed_attr_dict_entry_t;
+
+static iree_status_t loom_parser_emit_duplicate_attr_dict_key(
     loom_parser_t* parser, loom_token_t key_token,
     loom_token_t previous_key_token) {
   loom_diagnostic_param_t params[] = {
@@ -1316,26 +1324,22 @@ iree_status_t loom_parse_generic_attr_value(loom_parser_t* parser,
       parser, nesting_depth, LOOM_TYPE_PARSE_BODY, out_attr);
 }
 
-void loom_parser_sort_attr_dict_entries(const loom_module_t* module,
-                                        loom_parsed_attr_dict_entry_t* entries,
-                                        uint16_t count) {
-  for (uint16_t i = 1; i < count; ++i) {
-    loom_parsed_attr_dict_entry_t entry = entries[i];
-    iree_string_view_t key_name =
-        loom_parsed_attr_dict_entry_name(module, &entry);
-    uint16_t slot = i;
-    while (slot > 0) {
-      iree_string_view_t previous_key_name =
-          loom_parsed_attr_dict_entry_name(module, &entries[slot - 1]);
-      if (iree_string_view_compare(previous_key_name, key_name) <= 0) {
-        break;
-      }
-      entries[slot] = entries[slot - 1];
-      --slot;
-    }
-    entries[slot] = entry;
+static bool loom_parsed_attr_dict_entry_less(
+    const loom_module_t* module, const loom_parsed_attr_dict_entry_t* lhs,
+    const loom_parsed_attr_dict_entry_t* rhs) {
+  const int order =
+      iree_string_view_compare(loom_parsed_attr_dict_entry_name(module, lhs),
+                               loom_parsed_attr_dict_entry_name(module, rhs));
+  if (order != 0) {
+    return order < 0;
   }
+  // Equal names retain source order for the original-definition diagnostic.
+  return lhs->key_token.source_text.data < rhs->key_token.source_text.data;
 }
+
+LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT_OUTLINED_HEAP(
+    loom_parser_sort_attr_dict_entries, loom_parsed_attr_dict_entry_t,
+    const loom_module_t*, loom_parsed_attr_dict_entry_less)
 
 static iree_status_t loom_parse_present_attr_dict(
     loom_parser_t* parser, uint16_t nesting_depth,
@@ -1351,8 +1355,10 @@ static iree_status_t loom_parse_present_attr_dict(
   }
 
   uint32_t errors_before = parser->error_count;
-  loom_parsed_attr_dict_entry_t stack_entries[16];
-  uint16_t count = 0;
+  loom_parsed_attr_dict_entry_t inline_entries[16];
+  loom_parsed_attr_dict_entry_t* entries = inline_entries;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_entries);
+  iree_host_size_t count = 0;
 
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACE) &&
          !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
@@ -1361,10 +1367,15 @@ static iree_status_t loom_parse_present_attr_dict(
         break;
       }
     }
-    if (count >= IREE_ARRAYSIZE(stack_entries)) {
+    if (count == UINT16_MAX) {
       loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
-      return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
-                                               peek);
+      return loom_parser_emit_unexpected_token(
+          parser, peek, IREE_SV("at most 65535 dictionary entries"));
+    }
+    if (count == capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(&parser->parser_arena, count,
+                                                 count + 1, sizeof(*entries),
+                                                 &capacity, (void**)&entries));
     }
 
     loom_token_t key_token = loom_token_none();
@@ -1372,12 +1383,6 @@ static iree_status_t loom_parse_present_attr_dict(
     loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         loom_module_intern_string(parser->module, key_token.text, &key_id));
-    for (uint16_t i = 0; i < count; ++i) {
-      if (stack_entries[i].attr.name_id == key_id) {
-        return loom_parser_emit_duplicate_attr_dict_key(
-            parser, key_token, stack_entries[i].key_token);
-      }
-    }
 
     LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_EQUALS, NULL);
 
@@ -1388,10 +1393,10 @@ static iree_status_t loom_parse_present_attr_dict(
       return iree_ok_status();
     }
 
-    stack_entries[count].attr.name_id = key_id;
-    stack_entries[count].attr.reserved = 0;
-    stack_entries[count].attr.value = value;
-    stack_entries[count].key_token = key_token;
+    entries[count].attr.name_id = key_id;
+    entries[count].attr.reserved = 0;
+    entries[count].attr.value = value;
+    entries[count].key_token = key_token;
     ++count;
   }
 
@@ -1402,14 +1407,20 @@ static iree_status_t loom_parse_present_attr_dict(
     return iree_ok_status();
   }
 
-  loom_parser_sort_attr_dict_entries(parser->module, stack_entries, count);
+  loom_parser_sort_attr_dict_entries(parser->module, entries, count);
+  for (iree_host_size_t i = 1; i < count; ++i) {
+    if (entries[i - 1].attr.name_id == entries[i].attr.name_id) {
+      return loom_parser_emit_duplicate_attr_dict_key(
+          parser, entries[i].key_token, entries[i - 1].key_token);
+    }
+  }
 
   loom_named_attr_t* arena_entries = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&parser->module->arena, count,
                                                  sizeof(*arena_entries),
                                                  (void**)&arena_entries));
   for (uint16_t i = 0; i < count; ++i) {
-    arena_entries[i] = stack_entries[i].attr;
+    arena_entries[i] = entries[i].attr;
   }
   *out_attr = loom_make_canonical_attr_dict(arena_entries, count);
   return iree_ok_status();

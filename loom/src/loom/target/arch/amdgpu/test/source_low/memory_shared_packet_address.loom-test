@@ -1,7 +1,10 @@
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-// Scalar-memory packets share their dynamic SOFFSET expression.
-func.def @scalar_memory_load(%input: buffer, %row: index) {
+// Volatile loads retain VMEM and share one dynamic scalar base across packets.
+kernel.def @volatile_constant_load() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %row: index) {
   %bounded_row = index.assume %row [range(%row, 0, 1023)] : index
   %row_bytes = index.constant 131072 : offset
   %row_offset = index.scale %bounded_row, %row_bytes : index, offset -> offset
@@ -9,31 +12,35 @@ func.def @scalar_memory_load(%input: buffer, %row: index) {
   %constant_input = buffer.assume.memory_space<constant> %aligned : buffer
   %source = buffer.view %constant_input[%row_offset] : buffer -> view<16xi32>
   %value = vector.load<volatile> %source[0] : view<16xi32> -> vector<16xi32>
-  func.return
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @scalar_memory_load(%bounded_row: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "row"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @volatile_constant_load(%bounded_row: reg<amdgpu.sgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %13 = s_lshl_b32_rhs_inline %bounded_row, 17
-  %14 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %15 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %16 = s_mov_b32 0
-  %17, %18 = s_add_co_u32 %14, %13
-  %19, %20 = s_addc_u32 %15, %16, %18
-  %21 = concat(%17, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %22 = v_mov_b32 0
-  %23 = global_load_b128_saddr<volatile> %22, %21
-  %24 = global_load_b128_saddr<volatile> %22, %21 {offset = 16}
-  %25 = global_load_b128_saddr<volatile> %22, %21 {offset = 32}
-  %26 = global_load_b128_saddr<volatile> %22, %21 {offset = 48}
+  %14 = s_lshl_b32_rhs_inline %bounded_row, 17
+  %15 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = s_mov_b32 0
+  %18, %19 = s_add_co_u32 %15, %14
+  %20, %21 = s_addc_u32 %16, %17, %19
+  %22 = concat(%18, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %23 = v_mov_b32 0
+  %24 = global_load_b128_saddr<volatile> %23, %22
+  %25 = global_load_b128_saddr<volatile> %23, %22 {offset = 16}
+  %26 = global_load_b128_saddr<volatile> %23, %22 {offset = 32}
+  %27 = global_load_b128_saddr<volatile> %23, %22 {offset = 48}
   return
 }
 
 // ====
 
 // Dynamic descriptor packets share their descriptor, VADDR, and SOFFSET.
-func.def @descriptor_dynamic_load(%input: buffer, %row: index) {
+kernel.def @descriptor_dynamic_load() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %row: index) {
   %bounded_row = index.assume %row [range(%row, 0, 1023)] : index
   %row_bytes = index.constant 131072 : offset
   %row_offset = index.scale %bounded_row, %row_bytes : index, offset -> offset
@@ -41,35 +48,38 @@ func.def @descriptor_dynamic_load(%input: buffer, %row: index) {
   %descriptor_input = buffer.assume.memory_space<descriptor> %aligned : buffer
   %source = buffer.view %descriptor_input[%row_offset] : buffer -> view<16xi32>
   %value = vector.load<volatile> %source[0] : view<16xi32> -> vector<16xi32>
-  func.return
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @descriptor_dynamic_load(%bounded_row: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "row"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @descriptor_dynamic_load(%bounded_row: reg<amdgpu.sgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %row_bytes = s_mov_b32 131072
   %row_offset = s_mul_i32 %bounded_row, %row_bytes
-  %13 = v_mov_b32 0
-  %14 = s_mov_b32 64
-  %15 = s_add_u32 %row_offset, %14
-  %22 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %24 = s_mov_b32 65535
-  %25 = s_and_b32 %23, %24
-  %26 = concat(%22, %25) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %27 = s_mov_b32 822173696
-  %28 = concat(%26, %15, %27) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %17 = buffer_load_b128<volatile> %28, %13, %row_offset
-  %18 = buffer_load_b128<volatile> %28, %13, %row_offset {offset = 16}
-  %19 = buffer_load_b128<volatile> %28, %13, %row_offset {offset = 32}
-  %20 = buffer_load_b128<volatile> %28, %13, %row_offset {offset = 48}
+  %15 = v_mov_b32 0
+  %16 = s_mov_b32 64
+  %17 = s_add_u32 %row_offset, %16
+  %24 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = s_mov_b32 65535
+  %27 = s_and_b32 %25, %26
+  %28 = concat(%24, %27) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %29 = s_mov_b32 822173696
+  %30 = concat(%28, %17, %29) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %19 = buffer_load_b128<volatile> %30, %15, %row_offset
+  %20 = buffer_load_b128<volatile> %30, %15, %row_offset {offset = 16}
+  %21 = buffer_load_b128<volatile> %30, %15, %row_offset {offset = 32}
+  %22 = buffer_load_b128<volatile> %30, %15, %row_offset {offset = 48}
   return
 }
 
 // ====
 
 // Descriptor stores use the same shared address path as loads.
-func.def @descriptor_dynamic_store(%output: buffer, %row: index) {
+kernel.def @descriptor_dynamic_store() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%output: buffer, %row: index) {
   %bounded_row = index.assume %row [range(%row, 0, 1023)] : index
   %row_bytes = index.constant 131072 : offset
   %row_offset = index.scale %bounded_row, %row_bytes : index, offset -> offset
@@ -78,41 +88,47 @@ func.def @descriptor_dynamic_store(%output: buffer, %row: index) {
   %destination = buffer.view %descriptor_output[%row_offset] : buffer -> view<16xi32>
   %value = vector.splati 1 : vector<16xi32>
   vector.store<volatile> %value, %destination[0] : vector<16xi32>, view<16xi32>
-  func.return
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @descriptor_dynamic_store(%bounded_row: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "row"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @descriptor_dynamic_store(%bounded_row: reg<amdgpu.sgpr>) asm {
   %destination = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %row_bytes = s_mov_b32 131072
   %row_offset = s_mul_i32 %bounded_row, %row_bytes
-  %13 = v_mov_b32 1
-  %value = concat(%13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
-  %30 = slice %value[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  %31 = v_mov_b32 0
-  %32 = s_mov_b32 64
-  %33 = s_add_u32 %row_offset, %32
-  %38 = slice %destination[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %39 = slice %destination[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %40 = s_mov_b32 65535
-  %41 = s_and_b32 %39, %40
-  %42 = concat(%38, %41) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %43 = s_mov_b32 822173696
-  %44 = concat(%42, %33, %43) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  buffer_store_b128<volatile> %30, %44, %31, %row_offset
-  %35 = slice %value[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  buffer_store_b128<volatile> %35, %44, %31, %row_offset {offset = 16}
-  %36 = slice %value[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  buffer_store_b128<volatile> %36, %44, %31, %row_offset {offset = 32}
-  %37 = slice %value[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  buffer_store_b128<volatile> %37, %44, %31, %row_offset {offset = 48}
+  %14 = v_mov_b32 1
+  %value = concat(%14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
+  %31 = slice %value[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
+  %32 = v_mov_b32 0
+  %33 = s_mov_b32 64
+  %34 = s_add_u32 %row_offset, %33
+  %39 = slice %destination[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = slice %destination[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = s_mov_b32 65535
+  %42 = s_and_b32 %40, %41
+  %43 = concat(%39, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %44 = s_mov_b32 822173696
+  %45 = concat(%43, %34, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  buffer_store_b128<volatile> %31, %45, %32, %row_offset
+  %36 = slice %value[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
+  buffer_store_b128<volatile> %36, %45, %32, %row_offset {offset = 16}
+  %37 = slice %value[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
+  buffer_store_b128<volatile> %37, %45, %32, %row_offset {offset = 32}
+  %38 = slice %value[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
+  buffer_store_b128<volatile> %38, %45, %32, %row_offset {offset = 48}
   return
 }
 
 // ====
 
 // Atomic descriptor bounds and packet SOFFSET share the authored view base.
-func.def @descriptor_dynamic_atomic(%storage: buffer, %row: index) -> (i32) {
+kernel.def @descriptor_dynamic_atomic() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%storage: buffer, %row: index, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<1xi32>
   %bounded_row = index.assume %row [range(%row, 0, 1023)] : index
   %row_bytes = index.constant 131072 : offset
   %row_offset = index.scale %bounded_row, %row_bytes : index, offset -> offset
@@ -121,25 +137,28 @@ func.def @descriptor_dynamic_atomic(%storage: buffer, %row: index) -> (i32) {
   %word = buffer.view %global_storage[%row_offset] : buffer -> view<1xi32>
   %increment = scalar.constant 1 : i32
   %old = view.atomic.rmw<addi> %increment, %word[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
-  func.return %old : i32
+  view.store %old, %captured[%capture_lane] : i32, view<1xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @descriptor_dynamic_atomic(%bounded_row: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "row"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @descriptor_dynamic_atomic(%bounded_row: reg<amdgpu.sgpr>) asm {
   %word = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %row_bytes = s_mov_b32 131072
   %row_offset = s_mul_i32 %bounded_row, %row_bytes
-  %17 = v_mov_b32 0
-  %18 = s_mov_b32 4
-  %19 = s_add_u32 %row_offset, %18
-  %23 = slice %word[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %24 = slice %word[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %25 = s_mov_b32 65535
-  %26 = s_and_b32 %24, %25
-  %27 = concat(%23, %26) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %28 = s_mov_b32 822173696
-  %29 = concat(%27, %19, %28) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %21 = v_mov_b32 1
-  %old = buffer_atomic_add_u32_rtn %21, %29, %17, %row_offset
-  return %old
+  %22 = v_mov_b32 0
+  %23 = s_mov_b32 4
+  %24 = s_add_u32 %row_offset, %23
+  %29 = slice %word[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = slice %word[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = s_mov_b32 65535
+  %32 = s_and_b32 %30, %31
+  %33 = concat(%29, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %34 = s_mov_b32 822173696
+  %35 = concat(%33, %24, %34) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %26 = v_mov_b32 1
+  %old = buffer_atomic_add_u32_rtn %26, %35, %22, %row_offset
+  global_store_b32_saddr %22, %old, %captured
+  return
 }

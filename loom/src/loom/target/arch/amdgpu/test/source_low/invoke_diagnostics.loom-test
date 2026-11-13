@@ -1,0 +1,240 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1151> @helper_target
+
+amdgpu.target<gfx11-generic> @caller_target
+
+low.func.def target<amdgpu.rdna3_5.core>(@helper_target) @exact_helper(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+func.def target(@caller_target) @generic_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/052 {function_name="exact_helper", authored_target_name="helper_target", specialization_target_name="gfx11-generic"}
+  %result = low.invoke @exact_helper(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @unary_helper(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+func.def target(@target) @wrong_operand_count(%lhs: vector<1xi32>, %rhs: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/073 {callee_name="unary_helper", value_kind="operand", actual_count="2", expected_count="1"}
+  %result = low.invoke @unary_helper(%lhs, %rhs) : (vector<1xi32>, vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_helper(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  return %value
+}
+
+func.def target(@target) @wrong_operand_type(%value: vector<1xi32>) -> (vector<2xi32>) {
+  // ERROR@+1: TARGET/074 {callee_name="wide_helper", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.vgpr x2>"}
+  %result = low.invoke @wide_helper(%value) : (vector<1xi32>) -> (vector<2xi32>)
+  func.return %result : vector<2xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @multiple_of_16(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) where [multiple_of(%value, 16)] asm {
+  return %value
+}
+
+func.def target(@target) @unproven_precondition(%value: index) -> (index) {
+  // ERROR@+1: TARGET/078 {callee_name="multiple_of_16", predicate_index="0", predicate_kind="multiple_of", proof_result="not proven"}
+  %result = low.invoke @multiple_of_16(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @multiple_of_16(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) where [multiple_of(%value, 16)] asm {
+  return %value
+}
+
+func.def target(@target) @contradicted_precondition() -> (index) {
+  %c3 = index.constant 3 : index
+  // ERROR@+1: TARGET/078 {callee_name="multiple_of_16", predicate_index="0", predicate_kind="multiple_of", proof_result="proven false"}
+  %result = low.invoke @multiple_of_16(%c3) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @ordered_pair(%lower: reg<amdgpu.vgpr>, %upper: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) where [le(%lower, %upper)] asm {
+  return %lower, %upper
+}
+
+// A stronger relational caller contract proves the helper precondition even
+// though neither argument has a scalar interval that proves the relation.
+func.def target(@target) @proven_relational_precondition(%lower: index, %upper: index) -> (index, index) where [lt(%lower, %upper)] {
+  %result_lower, %result_upper = low.invoke @ordered_pair(%lower, %upper) : (index, index) -> (index, index)
+  func.return %result_lower, %result_upper : index, index
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @proven_relational_precondition(%lower: reg<amdgpu.vgpr>, %upper: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) where [lt(%lower, %upper)] asm {
+  %14, %15 = low.assume %lower, %upper [le(%lower, %upper)] : reg<amdgpu.vgpr>, reg<amdgpu.vgpr>
+  %18 = copy %14 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %19 = copy %15 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  return %18, %19
+}
+
+// ====
+
+// Diagnose omitted results at the lowering boundary before dead-call cleanup.
+// RUN: pass source-to-low
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @unary_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+func.def target(@target) @wrong_result_count(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/073 {callee_name="unary_result", value_kind="result", actual_count="0", expected_count="1"}
+  low.invoke @unary_result(%value) : (vector<1xi32>)
+  func.return %value : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %wide = concat(%value, %value) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %wide
+}
+
+func.def target(@target) @wrong_result_type(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/074 {callee_name="wide_result", value_kind="result", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.vgpr x2>"}
+  %result = low.invoke @wide_result(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_a(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="native_call_cycle"}
+  %result = low.func.call @cycle_b(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  return %result
+}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @cycle_b(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="cycle_a", failure_code="native_call_cycle"}
+  %result = low.func.call @cycle_a(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  return %result
+}
+
+func.def target(@target) @recursive_closure_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  %result = low.invoke @cycle_a(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_input(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = v_mov_b32_copy %value
+  return %result
+}
+
+func.def target(@target) @varying_helper_argument(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/074 {callee_name="scalar_input", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.sgpr>"}
+  %result = low.invoke @scalar_input(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_input(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = v_mov_b32_copy %value
+  return %result
+}
+
+// A scalar source type does not prove that every lane supplies the same value.
+func.def target(@target) @unknown_scalar_argument(%value: i32) -> (i32) {
+  // ERROR@+1: TARGET/074 {callee_name="scalar_input", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.sgpr>"}
+  %result = low.invoke @scalar_input(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @packet_input(%value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  return %value
+}
+
+func.def target(@target) @wrong_address_width(%value: index) -> (vector<4xi32>) {
+  // ERROR@+1: TARGET/074 {callee_name="packet_input", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.vgpr x4>"}
+  %result = low.invoke @packet_input(%value) : (index) -> (vector<4xi32>)
+  func.return %result : vector<4xi32>
+}
+
+// ====
+
+// A declared numeric bank does not override the source payload width.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @wide_scalar() -> (reg<amdgpu.sgpr x2>) asm {
+  %word = s_mov_b32 1
+  %pair = concat(%word, %word) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %pair
+}
+
+func.def target(@target) @wrong_narrow_result_width() -> (i8) {
+  // ERROR@+1: TARGET/074 {callee_name="wide_scalar", value_kind="result", actual_type="reg<amdgpu.sgpr>", expected_type="reg<amdgpu.sgpr x2>"}
+  %result = low.invoke @wide_scalar() : () -> (i8)
+  func.return %result : i8
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scalar_word() -> (reg<amdgpu.sgpr>) asm {
+  %word = s_mov_b32 1
+  return %word
+}
+
+func.def target(@target) @wrong_packed_result_width() -> (vector<3xi16>) {
+  // ERROR@+1: TARGET/074 {callee_name="scalar_word", value_kind="result", actual_type="reg<amdgpu.sgpr x2>", expected_type="reg<amdgpu.sgpr>"}
+  %result = low.invoke @scalar_word() : () -> (vector<3xi16>)
+  func.return %result : vector<3xi16>
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @condition_bit() -> (reg<amdgpu.scc>) asm {
+  %word = s_mov_b32 1
+  %truth = s_cmp_lg_i32_src1_inline %word {rhs = 0}
+  return %truth
+}
+
+func.def target(@target) @wrong_numeric_result_class() -> (i16) {
+  // ERROR@+1: TARGET/074 {callee_name="condition_bit", value_kind="result", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.scc>"}
+  %result = low.invoke @condition_bit() : () -> (i16)
+  func.return %result : i16
+}

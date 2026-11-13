@@ -1,0 +1,50 @@
+// RUN: pass target=amdgpu:gfx11-generic source-to-low,low-dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @cfg_binary_search_retains_narrow_index_carrier(%choose_upper: i1, %reference_value: index) -> (i32) {
+  %reference_length = index.assume %reference_value [range(%reference_value, 1, 513)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.br ^header(%c0: index)
+^header(%first: index):
+  %more = index.cmp ult, %first, %reference_length : index
+  cfg.cond_br %more, ^update, ^exit
+^update:
+  %sum = index.add %first, %reference_length : index
+  %middle = index.shrui %sum, %c1 : index
+  %increment = index.add %middle, %c1 : index
+  %next = scf.select %choose_upper, %increment, %first : index
+  cfg.br ^header(%next: index)
+^exit:
+  %result = index.cast %first : index to i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @cfg_binary_search_retains_narrow_index_carrier(%choose_upper: reg<amdgpu.sgpr x2>, %reference_length: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %c0 = s_mov_b32 0
+  %c1 = s_mov_b32 1
+  %20 = v_mov_b32_copy %c0
+  low.br ^_bb4(%20: reg<amdgpu.vgpr>)
+^_bb4(%first: reg<amdgpu.vgpr>):
+  %22 = s_mov_b64_exec_read
+  low.br ^header(%first: reg<amdgpu.vgpr>)
+^header(%result: reg<amdgpu.vgpr>):
+  %more = v_cmp_lt_u32 %result, %reference_length
+  %23, %24 = s_and_saveexec_b64 %more
+  low.cond_br %24, ^update, ^_bb5 : reg<amdgpu.scc>
+^update:
+  %sum = v_add_u32 %result, %reference_length
+  %middle = v_lshrrev_b32_src0_inline %sum, 1
+  %increment = v_add_u32 %c1, %middle
+  %next = v_cndmask_b32 %result, %increment, %choose_upper
+  low.br ^header(%next: reg<amdgpu.vgpr>)
+^_bb5:
+  s_mov_b64_exec %22
+  low.br ^exit
+^exit:
+  return %result
+}

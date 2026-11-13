@@ -9,16 +9,17 @@ func.def @optional_global(%input: buffer, %use: i1) -> (i1) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @optional_global(%use: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>) asm {
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @optional_global(%use: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %11 = s_cmp_lg_i32_src1_inline %use {rhs = 0}
-  %12 = s_mov_b32 0
-  %14 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %16 = s_cselect_b32 %14, %12, %11
+  %11 = v_mov_b32 0
+  %13 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %13
+  %16 = v_cndmask_b32 %11, %14, %use
   %17 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %19 = s_cselect_b32 %17, %12, %11
-  %selected = concat(%16, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %missing = s_cmp_eq_u64_src1_inline %selected {rhs = 0}
+  %18 = v_mov_b32_copy %17
+  %20 = v_cndmask_b32 %11, %18, %use
+  %24 = v_or_b32 %16, %20
+  %missing = v_cmp_eq_i32_src0_inline %24 {lhs = 0}
   return %missing
 }
 
@@ -40,21 +41,26 @@ func.def @optional_private(%iterations: index) -> (i1) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @optional_private(%iterations: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
-  %26 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
-  %storage = storage_address %26 : low.storage<private> -> reg<amdgpu.vgpr>
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @optional_private(%iterations: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %29 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %storage = storage_address %29 : low.storage<private> -> reg<amdgpu.vgpr>
   %begin = s_mov_b32 0
   %step = s_mov_b32 1
-  %32 = v_mov_b32 4294967295
-  low.br ^_bb1(%begin: reg<amdgpu.sgpr>, %32: reg<amdgpu.vgpr>, %storage: reg<amdgpu.vgpr>)
-^_bb1(%i: reg<amdgpu.sgpr>, %current: reg<amdgpu.vgpr>, %next: reg<amdgpu.vgpr>):
-  %33 = s_cmp_lt_i32 %i, %iterations
-  low.cond_br %33, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %35 = v_mov_b32_copy %begin
+  %36 = v_mov_b32 4294967295
+  %38 = s_mov_b64_exec_read
+  low.br ^_bb1(%35: reg<amdgpu.vgpr>, %36: reg<amdgpu.vgpr>, %storage: reg<amdgpu.vgpr>)
+^_bb1(%i: reg<amdgpu.vgpr>, %current: reg<amdgpu.vgpr>, %next: reg<amdgpu.vgpr>):
+  %37 = v_cmp_lt_i32 %i, %iterations
+  %39, %40 = s_and_saveexec_b64 %37
+  low.cond_br %40, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %34 = s_add_u32 %i, %step
-  low.br ^_bb1(%34: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr>, %current: reg<amdgpu.vgpr>)
+  %41 = v_add_u32 %step, %i
+  low.br ^_bb1(%41: reg<amdgpu.vgpr>, %next: reg<amdgpu.vgpr>, %current: reg<amdgpu.vgpr>)
 ^_bb3:
-  %missing = v_cmp_eq_i32 %32, %current
+  s_mov_b64_exec %38
+  %42 = v_mov_b32 4294967295
+  %missing = v_cmp_eq_i32 %42, %current
   return %missing
 }
 

@@ -12,105 +12,27 @@ func.def @wide_subview_selection(%input: buffer, %byte_base0: offset, %condition
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_subview_selection(%byte_base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_subview_selection(%byte_base: reg<amdgpu.vgpr x2>, %condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %selected = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %20 = s_mov_b32 4
-  %21 = s_mov_b32 0
-  %23 = slice %byte_base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %24 = slice %byte_base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %27, %28 = s_add_co_u32 %23, %20
-  %29, %30 = s_addc_u32 %24, %21, %28
-  %32 = s_mov_b32 8
-  %39, %40 = s_add_co_u32 %23, %32
-  %41, %42 = s_addc_u32 %24, %21, %40
-  %44 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
-  %47 = s_cselect_b32 %27, %39, %44
-  %50 = s_cselect_b32 %29, %41, %44
-  %52 = v_mov_b32 0
-  %53 = slice %selected[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %54 = slice %selected[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %57, %58 = s_add_co_u32 %53, %47
-  %59, %60 = s_addc_u32 %54, %50, %58
-  %61 = concat(%57, %59) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value = global_load_b32_saddr %52, %61
+  %21 = v_mov_b32_copy %20
+  %22 = v_mov_b32 0
+  %24 = slice %byte_base[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = slice %byte_base[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28, %29 = v_add_co_u32 %24, %21
+  %30, %31 = v_add_co_ci_u32 %25, %22, %29
+  %33 = s_mov_b32 8
+  %34 = v_mov_b32_copy %33
+  %41, %42 = v_add_co_u32 %24, %34
+  %43, %44 = v_add_co_ci_u32 %25, %22, %42
+  %48 = v_cndmask_b32 %41, %28, %condition
+  %51 = v_cndmask_b32 %43, %30, %condition
+  %55 = slice %selected[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = slice %selected[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57, %58 = v_add_co_u32 %55, %48
+  %59 = v_mov_b32_copy %56
+  %60, %61 = v_add_co_ci_u32 %59, %51, %58
+  %62 = concat(%57, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %62
   return %value
-}
-
-// ====
-
-func.def @distinct_root_selection(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
-  %first_offset = index.constant 4 : offset
-  %second_offset = index.constant 8 : offset
-  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
-  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
-  %first_view = buffer.view %first_aligned[%first_offset] : buffer -> view<1xi32>
-  %second_view = buffer.view %second_aligned[%second_offset] : buffer -> view<1xi32>
-  %selected = scf.select %condition, %first_view, %second_view : view<1xi32>
-  %value = view.load %selected[0] : view<1xi32> -> i32
-  func.return %value : i32
-}
-
-// ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @distinct_root_selection(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %first_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %second_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %first_offset = s_mov_b32 4
-  %second_offset = s_mov_b32 8
-  %25 = s_mov_b32 0
-  %26 = s_cmp_lg_i32 %condition, %25
-  low.cond_br %26, ^_bb1, ^_bb2 : reg<amdgpu.scc>
-^_bb1:
-  %39 = slice %first_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %40 = slice %first_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb3(%39: reg<amdgpu.sgpr>, %40: reg<amdgpu.sgpr>, %first_offset: reg<amdgpu.sgpr>)
-^_bb2:
-  %41 = slice %second_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %42 = slice %second_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  low.br ^_bb3(%41: reg<amdgpu.sgpr>, %42: reg<amdgpu.sgpr>, %second_offset: reg<amdgpu.sgpr>)
-^_bb3(%37: reg<amdgpu.sgpr>, %38: reg<amdgpu.sgpr>, %selected_offset: reg<amdgpu.sgpr>):
-  %27 = v_mov_b32 0
-  %31, %32 = s_add_co_u32 %37, %selected_offset
-  %33, %34 = s_addc_u32 %38, %25, %32
-  %35 = concat(%31, %33) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value = global_load_b32_saddr %27, %35
-  return %value
-}
-
-// ====
-
-// Dynamic view refinements used only by memory accesses remain structural
-// through nested control flow. Their source views need no target SSA storage.
-func.def @nested_dynamic_view_refinement(%input: buffer, %extent_input: index, %position_input: index, %condition: i1) -> (i32) {
-  %extent = index.assume %extent_input [range(%extent_input, 1, 128)] : index
-  %position = index.assume %position_input [range(%position_input, 0, 127), lt(%position_input, %extent)] : index
-  %base = index.constant 0 : offset
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %view = buffer.view %aligned[%base] : buffer -> view<[%extent]xi32>
-  %result = scf.if %condition -> (i32) {
-    %refined_extent = index.assume %extent [gt(%extent, 0)] : index
-    %refined_view = view.refine %view : view<[%extent]xi32> -> view<[%refined_extent]xi32>
-    %second_extent = index.assume %refined_extent [gt(%refined_extent, 0)] : index
-    %second_view = view.refine %refined_view : view<[%refined_extent]xi32> -> view<[%second_extent]xi32>
-    %value = view.load %second_view[%position] : view<[%second_extent]xi32> -> i32
-    scf.yield %value : i32
-  } else {
-    %value = view.load %view[%position] : view<[%extent]xi32> -> i32
-    scf.yield %value : i32
-  }
-  func.return %result : i32
-}
-
-// ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @nested_dynamic_view_refinement(%extent: reg<amdgpu.sgpr>, %position: reg<amdgpu.sgpr>, %condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %25 = v_mov_b32 0
-  %26 = s_lshl_b32_rhs_inline %position, 2
-  %27 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = s_mov_b32 0
-  %30, %31 = s_add_co_u32 %27, %26
-  %32, %33 = s_addc_u32 %28, %29, %31
-  %34 = concat(%30, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %result = global_load_b32_saddr %25, %34
-  return %result
 }

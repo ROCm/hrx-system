@@ -162,6 +162,7 @@ loom_corpus_test(
     profile_sources = {
         VM_REFERENCE_PROFILE.name: [
             "control/loop/scalar_state.loom",
+            "control/loop/vector_recurrence.loom",
             "function/call/calls.loom",
             "function/call/direct.loom",
             "function/template/library.loom",
@@ -172,6 +173,7 @@ loom_corpus_test(
             "memory/buffer/positions.loom",
             "memory/buffer/packing.loom",
             "memory/buffer/selection.loom",
+            "memory/packed/transport.loom",
             "memory/view/bitcast.loom",
             "memory/view/offset_recurrence.loom",
             "memory/view/scalar_exchange.loom",
@@ -194,6 +196,7 @@ loom_corpus_test(
             "numeric/float/inverse_hyperbolic.loom",
             "numeric/float/inverse_hyperbolic_narrow.loom",
             "numeric/integer/arithmetic.loom",
+            "numeric/integer/bit_count.loom",
             "numeric/integer/division.loom",
             "numeric/integer/widening.loom",
             "numeric/vector/coordinates.loom",

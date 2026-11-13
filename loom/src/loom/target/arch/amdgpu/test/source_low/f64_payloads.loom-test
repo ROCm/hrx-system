@@ -37,9 +37,18 @@ func.def @copy_scalar_f64(%source: buffer, %destination: buffer) {
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_scalar_f64() asm {
   %input = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %8 = v_mov_b32 0
-  %value = global_load_b64_saddr %8, %input
-  global_store_b64_saddr %8, %value, %output
+  %8 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %9 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %10 = v_mov_b32_copy %8
+  %11 = v_mov_b32_copy %9
+  %12 = concat(%10, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b64_vaddr %12
+  %14 = slice %output[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = slice %output[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %14
+  %17 = v_mov_b32_copy %15
+  %18 = concat(%16, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_vaddr %18, %value
   return
 }
 
@@ -58,10 +67,21 @@ func.def @copy_vector_f64(%source: buffer, %destination: buffer) {
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_vector_f64() asm {
   %input = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 32, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %8 = v_mov_b32 0
-  %9 = global_load_b128_saddr %8, %input
-  %10 = global_load_b128_saddr %8, %input {offset = 16}
-  global_store_b128_saddr %8, %9, %output
-  global_store_b128_saddr %8, %10, %output {offset = 16}
+  %8 = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %9 = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %10 = v_mov_b32_copy %8
+  %11 = v_mov_b32_copy %9
+  %12 = concat(%10, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %13 = global_load_b128_vaddr %12
+  %18 = concat(%10, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %19 = global_load_b128_vaddr %18 {offset = 16}
+  %22 = slice %output[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = slice %output[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = v_mov_b32_copy %22
+  %25 = v_mov_b32_copy %23
+  %26 = concat(%24, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr %26, %13
+  %32 = concat(%24, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b128_vaddr %32, %19 {offset = 16}
   return
 }

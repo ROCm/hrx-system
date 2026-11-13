@@ -1,0 +1,146 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @packed4_payload_word_offset(%weights: buffer, %block0: index, %word0: index) -> (i32) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %word = index.assume %word0 [range(%word0, 0, 3)] : index
+  %block_byte_stride = index.constant 18 : offset
+  %payload_header_offset = index.constant 2 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %payload_base = index.add %block_base, %payload_header_offset : offset
+  %word_byte_offset = index.scale %word, %word_byte_stride : index, offset -> offset
+  %byte_offset = index.add %payload_base, %word_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %word_view = buffer.view %weights_global[%byte_offset] : buffer -> view<1xi32>
+  %packed_word = view.load %word_view[0] : view<1xi32> -> i32
+  func.return %packed_word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @packed4_payload_word_offset(%block: reg<amdgpu.vgpr>, %word: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %word_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %29 = v_mov_b32 18
+  %30 = v_mul_lo_u32 %block, %29
+  %31 = v_mul_hi_u32 %block, %29
+  %32 = slice %word_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %word_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34, %35 = v_add_co_u32 %32, %30
+  %36 = v_mov_b32_copy %33
+  %37, %38 = v_add_co_ci_u32 %36, %31, %35
+  %39 = v_lshlrev_b32_src0_inline %word, 2
+  %40 = v_lshrrev_b32_src0_inline %word, 30
+  %41, %42 = v_add_co_u32 %34, %39
+  %43, %44 = v_add_co_ci_u32 %37, %40, %42
+  %45 = concat(%41, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %packed_word = global_load_b32_vaddr %45 {offset = 2}
+  return %packed_word
+}
+
+// ====
+
+func.def @packed5_split_payload_offsets(%weights: buffer, %block0: index, %word0: index) -> (i32, i32) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %word = index.assume %word0 [range(%word0, 0, 3)] : index
+  %block_byte_stride = index.constant 22 : offset
+  %side_bits_header_offset = index.constant 2 : offset
+  %low_bits_header_offset = index.constant 6 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %side_bits_byte_offset = index.add %block_base, %side_bits_header_offset : offset
+  %low_bits_base = index.add %block_base, %low_bits_header_offset : offset
+  %low_word_byte_offset = index.scale %word, %word_byte_stride : index, offset -> offset
+  %low_bits_byte_offset = index.add %low_bits_base, %low_word_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %side_bits_view = buffer.view %weights_global[%side_bits_byte_offset] : buffer -> view<1xi32>
+  %low_bits_view = buffer.view %weights_global[%low_bits_byte_offset] : buffer -> view<1xi32>
+  %side_bits_word = view.load %side_bits_view[0] : view<1xi32> -> i32
+  %low_bits_word = view.load %low_bits_view[0] : view<1xi32> -> i32
+  func.return %side_bits_word, %low_bits_word : i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @packed5_split_payload_offsets(%block: reg<amdgpu.vgpr>, %word: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %low_bits_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %35 = v_mov_b32 22
+  %36 = v_mul_lo_u32 %block, %35
+  %37 = v_mul_hi_u32 %block, %35
+  %38 = slice %low_bits_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = slice %low_bits_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40, %41 = v_add_co_u32 %38, %36
+  %42 = v_mov_b32_copy %39
+  %43, %44 = v_add_co_ci_u32 %42, %37, %41
+  %45 = concat(%40, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %side_bits_word = global_load_b32_vaddr %45 {offset = 2}
+  %57 = v_lshlrev_b32_src0_inline %word, 2
+  %58 = v_lshrrev_b32_src0_inline %word, 30
+  %59, %60 = v_add_co_u32 %40, %57
+  %61, %62 = v_add_co_ci_u32 %43, %58, %60
+  %63 = concat(%59, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %low_bits_word = global_load_b32_vaddr %63 {offset = 6}
+  return %side_bits_word, %low_bits_word
+}
+
+// ====
+
+func.def @packed6_split_payload_offsets(%weights: buffer, %block0: index, %low_word0: index, %high_word0: index, %scale0: index) -> (i32, i32, f16) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %low_word = index.assume %low_word0 [range(%low_word0, 0, 31)] : index
+  %high_word = index.assume %high_word0 [range(%high_word0, 0, 15)] : index
+  %scale = index.assume %scale0 [range(%scale0, 0, 15)] : index
+  %block_byte_stride = index.constant 210 : offset
+  %low_bits_header_offset = index.constant 0 : offset
+  %high_bits_header_offset = index.constant 128 : offset
+  %scale_header_offset = index.constant 192 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %half_byte_stride = index.constant 2 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %low_bits_base = index.add %block_base, %low_bits_header_offset : offset
+  %high_bits_base = index.add %block_base, %high_bits_header_offset : offset
+  %scale_base = index.add %block_base, %scale_header_offset : offset
+  %low_word_byte_offset = index.scale %low_word, %word_byte_stride : index, offset -> offset
+  %high_word_byte_offset = index.scale %high_word, %word_byte_stride : index, offset -> offset
+  %scale_element_byte_offset = index.scale %scale, %half_byte_stride : index, offset -> offset
+  %low_bits_byte_offset = index.add %low_bits_base, %low_word_byte_offset : offset
+  %high_bits_byte_offset = index.add %high_bits_base, %high_word_byte_offset : offset
+  %scale_byte_offset = index.add %scale_base, %scale_element_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %low_bits_view = buffer.view %weights_global[%low_bits_byte_offset] : buffer -> view<1xi32>
+  %high_bits_view = buffer.view %weights_global[%high_bits_byte_offset] : buffer -> view<1xi32>
+  %scale_view = buffer.view %weights_global[%scale_byte_offset] : buffer -> view<1xf16>
+  %low_bits_word = view.load %low_bits_view[0] : view<1xi32> -> i32
+  %high_bits_word = view.load %high_bits_view[0] : view<1xi32> -> i32
+  %scale_value = view.load %scale_view[0] : view<1xf16> -> f16
+  func.return %low_bits_word, %high_bits_word, %scale_value : i32, i32, f16
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @packed6_split_payload_offsets(%block: reg<amdgpu.vgpr>, %low_word: reg<amdgpu.vgpr>, %high_word: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %scale_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %61 = v_mov_b32 210
+  %62 = v_mul_lo_u32 %block, %61
+  %63 = v_mul_hi_u32 %block, %61
+  %64 = slice %scale_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %65 = slice %scale_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %66, %67 = v_add_co_u32 %64, %62
+  %68 = v_mov_b32_copy %65
+  %69, %70 = v_add_co_ci_u32 %68, %63, %67
+  %71 = v_lshlrev_b32_src0_inline %low_word, 2
+  %72 = v_lshrrev_b32_src0_inline %low_word, 30
+  %73, %74 = v_add_co_u32 %66, %71
+  %75, %76 = v_add_co_ci_u32 %69, %72, %74
+  %77 = concat(%73, %75) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %low_bits_word = global_load_b32_vaddr %77
+  %89 = v_lshlrev_b32_src0_inline %high_word, 2
+  %90 = v_lshrrev_b32_src0_inline %high_word, 30
+  %91, %92 = v_add_co_u32 %66, %89
+  %93, %94 = v_add_co_ci_u32 %69, %90, %92
+  %95 = concat(%91, %93) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %high_bits_word = global_load_b32_vaddr %95 {offset = 128}
+  %107 = v_lshlrev_b32_src0_inline %scale, 1
+  %108 = v_lshrrev_b32_src0_inline %scale, 31
+  %109, %110 = v_add_co_u32 %66, %107
+  %111, %112 = v_add_co_ci_u32 %69, %108, %110
+  %113 = concat(%109, %111) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %scale_value = global_load_u16_vaddr %113 {offset = 192}
+  return %low_bits_word, %high_bits_word, %scale_value
+}

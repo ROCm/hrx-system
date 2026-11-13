@@ -202,6 +202,14 @@ authored target bindings can use the existing whole-module form without a
 function or target option. Pipeline-text outputs describe the pipeline itself
 and do not accept specialization requests.
 
+Participation-sensitive fixtures use actual program contracts: kernel launch
+inputs establish uniformity, and lane-indexed loads supply varying values.
+Ordinary function parameters need caller or value facts to establish uniformity;
+the absence of callers supplies no such guarantee. Scalar source types
+describe per-invocation values, while shared facts determine whether work items
+agree. Fixtures for scalar registers, SCC lifetimes, or mixed register operands
+make those inputs explicit and check their operand wiring in exact output.
+
 The optional `diagnostics=memory`, `diagnostics=operand-forms`, or
 `diagnostics=all` selects lowering remarks without changing source normalization,
 legalization, or sanitizer policy. `diagnostics=none` is the default. Diagnostics

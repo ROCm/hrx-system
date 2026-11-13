@@ -87,30 +87,11 @@ func.def target(@target) @unknown_selection(%condition: i1, %first: i1, %second:
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @unknown_selection(%condition: reg<amdgpu.sgpr>, %first: reg<amdgpu.sgpr>, %second: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
-  %9 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
-  %10 = s_cmp_lg_i32_src1_inline %first {rhs = 0}
-  %11 = s_mov_b64_exec_read
-  %12 = slice %11[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %13 = slice %11[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %14 = s_mov_b32 0
-  %15 = s_cselect_b32 %12, %14, %10
-  %16 = s_cselect_b32 %13, %14, %10
-  %17 = concat(%15, %16) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %18 = s_cmp_lg_i32_src1_inline %second {rhs = 0}
-  %19 = s_mov_b64_exec_read
-  %20 = slice %19[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %21 = slice %19[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %22 = s_mov_b32 0
-  %23 = s_cselect_b32 %20, %22, %18
-  %24 = s_cselect_b32 %21, %22, %18
-  %25 = concat(%23, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %26 = slice %17[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %27 = slice %25[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = s_cselect_b32 %26, %27, %9
-  %29 = slice %17[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %30 = slice %25[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %31 = s_cselect_b32 %29, %30, %9
-  %selected = concat(%28, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @unknown_selection(%condition: reg<amdgpu.sgpr x2>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %9 = s_mov_b64_exec_read
+  %10 = s_xor_b64 %condition, %9
+  %11 = s_and_b64 %condition, %first
+  %12 = s_and_b64 %10, %second
+  %selected = s_or_b64 %11, %12
   return %selected
 }

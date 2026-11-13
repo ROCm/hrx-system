@@ -480,19 +480,10 @@ static iree_status_t loom_low_source_invocation_initialize_function(
   }
   const loom_target_facts_t* target =
       function->selection ? function->selection->target_facts : NULL;
-  const bool launch_only =
-      target && node->caller_count == 0 &&
-      target->storage.export_plan.abi_kind == LOOM_TARGET_ABI_HAL_KERNEL;
   for (uint16_t i = 0; i < seed_argument_count; ++i) {
     seeds[i] = arguments[i];
     loom_value_facts_t initial = loom_low_source_invocation_unknown(
         module, arguments[i], function->selection);
-    const loom_type_t type = loom_module_value_type(module, arguments[i]);
-    if (launch_only &&
-        (loom_type_is_scalar(type) || loom_type_is_vector(type) ||
-         loom_type_is_buffer(type) || loom_type_is_view(type))) {
-      loom_value_facts_mark_cluster_uniform(&initial);
-    }
     IREE_RETURN_IF_ERROR(
         loom_value_fact_table_define(facts, arguments[i], initial));
   }

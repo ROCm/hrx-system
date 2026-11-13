@@ -1,0 +1,401 @@
+// RUN: emit source-low output=low
+
+// A helper authored against the gfx11 family contract can be reused by a
+// concrete gfx1151 caller. Source-to-Low projects its register types and
+// descriptor ordinals into the caller's rdna3_5 representation while inlining
+// the body. schedule(locked) becomes explicit source-order boundaries in the
+// surrounding freely scheduled kernel.
+amdgpu.target<gfx11-generic> @helper_target
+
+amdgpu.target<gfx1151> @caller_target
+
+low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@helper_target) @pack_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
+  %even0 = slice %even[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %even1 = slice %even[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %odd0 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %odd1 = slice %odd[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %selector0 = s_mov_b32 84148480
+  %selector1 = s_mov_b32 117834498
+  %packed0 = v_perm_b32 %odd0, %even0, %selector0
+  %packed1 = v_perm_b32 %odd1, %even1, %selector0
+  %packed2 = v_perm_b32 %odd0, %even0, %selector1
+  %packed3 = v_perm_b32 %odd1, %even1, %selector1
+  %packed = concat(%packed0, %packed1, %packed2, %packed3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %packed
+}
+
+kernel.def target(@caller_target) @caller() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %input_global = buffer.assume.memory_space<global> %input_buffer : buffer
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %input = buffer.view %input_global[%base] : buffer -> view<8xf16>
+  %output = buffer.view %output_global[%base] : buffer -> view<8xf16>
+  %even = vector.load %input[%c0] : view<8xf16> -> vector<4xf16>
+  %c4 = index.constant 4 : index
+  %odd = vector.load %input[%c4] : view<8xf16> -> vector<4xf16>
+  %packed = low.invoke @pack_pair(%even, %odd) : (vector<4xf16>, vector<4xf16>) -> (vector<8xf16>)
+  vector.store %packed, %output[%c0] : vector<8xf16>, view<8xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core>(@caller_target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @caller() asm {
+  %input = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %29 = v_mov_b32 0
+  %even = global_load_b64_saddr %29, %input
+  %odd = global_load_b64_saddr %29, %input {offset = 8}
+  low.schedule.fence
+  %even0 = slice %even[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.schedule.fence
+  %even1 = slice %even[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.schedule.fence
+  %odd0 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.schedule.fence
+  %odd1 = slice %odd[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.schedule.fence
+  %selector0 = s_mov_b32 84148480
+  low.schedule.fence
+  %selector1 = s_mov_b32 117834498
+  low.schedule.fence
+  %packed0 = v_perm_b32 %odd0, %even0, %selector0
+  low.schedule.fence
+  %packed1 = v_perm_b32 %odd1, %even1, %selector0
+  low.schedule.fence
+  %packed2 = v_perm_b32 %odd0, %even0, %selector1
+  low.schedule.fence
+  %packed3 = v_perm_b32 %odd1, %even1, %selector1
+  low.schedule.fence
+  %packed = concat(%packed0, %packed1, %packed2, %packed3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  low.schedule.fence
+  global_store_b128_saddr %29, %packed, %output
+  return
+}
+
+// ====
+
+// The ordinary low.invoke contract leaves the helper schedule free. A
+// nontrivial instruction fragment is inlined without synthetic scheduling
+// boundaries so its packets can participate in the caller's schedule.
+amdgpu.target<gfx11-generic> @helper_target
+
+amdgpu.target<gfx1151> @caller_target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @schedule_free_pack_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
+  %even0 = slice %even[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %even1 = slice %even[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %odd0 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %odd1 = slice %odd[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %selector0 = s_mov_b32 84148480
+  %selector1 = s_mov_b32 117834498
+  %packed0 = v_perm_b32 %odd0, %even0, %selector0
+  %packed1 = v_perm_b32 %odd1, %even1, %selector0
+  %packed2 = v_perm_b32 %odd0, %even0, %selector1
+  %packed3 = v_perm_b32 %odd1, %even1, %selector1
+  %packed = concat(%packed0, %packed1, %packed2, %packed3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %packed
+}
+
+kernel.def target(@caller_target) @schedule_free_caller() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %input_global = buffer.assume.memory_space<global> %input_buffer : buffer
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %input = buffer.view %input_global[%base] : buffer -> view<8xf16>
+  %output = buffer.view %output_global[%base] : buffer -> view<8xf16>
+  %even = vector.load %input[%c0] : view<8xf16> -> vector<4xf16>
+  %c4 = index.constant 4 : index
+  %odd = vector.load %input[%c4] : view<8xf16> -> vector<4xf16>
+  %packed = low.invoke @schedule_free_pack_pair(%even, %odd) : (vector<4xf16>, vector<4xf16>) -> (vector<8xf16>)
+  vector.store %packed, %output[%c0] : vector<8xf16>, view<8xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core>(@caller_target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @schedule_free_caller() asm {
+  %input = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %29 = v_mov_b32 0
+  %even = global_load_b64_saddr %29, %input
+  %odd = global_load_b64_saddr %29, %input {offset = 8}
+  %even0 = slice %even[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %even1 = slice %even[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %odd0 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %odd1 = slice %odd[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %selector0 = s_mov_b32 84148480
+  %selector1 = s_mov_b32 117834498
+  %packed0 = v_perm_b32 %odd0, %even0, %selector0
+  %packed1 = v_perm_b32 %odd1, %even1, %selector0
+  %packed2 = v_perm_b32 %odd0, %even0, %selector1
+  %packed3 = v_perm_b32 %odd1, %even1, %selector1
+  %packed = concat(%packed0, %packed1, %packed2, %packed3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %29, %packed, %output
+  return
+}
+
+// ====
+
+// A targetless helper inherits compatibility from its representation contract
+// alone. The caller retains its semantic vector type while AMDGPU target
+// mapping selects the helper's carrier-only VGPR contract. This form is useful
+// when the same helper body is valid for every concrete target represented by
+// the generic descriptor set.
+amdgpu.target<gfx1151> @caller_target
+
+low.func.def target<amdgpu.gfx11.generic.core> @identity_helper(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+func.def target(@caller_target) @targetless_helper_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  %result = low.invoke @identity_helper(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @targetless_helper_caller(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// ====
+
+// Required inlining keeps the caller's complete scalar argument contract on
+// the generated function and materializes the helper's narrower contract as a
+// Low fact identity. This lets the inlined body consume facts about dimensions
+// and indices without giving low.invoke an interprocedural fact environment.
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @bounded_identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) where [multiple_of(%value, 16)] asm {
+  return %value
+}
+
+func.def target(@target) @scalar_argument_contract(%value: index) -> (index) where [range(%value, 1, 1024), multiple_of(%value, 16)] {
+  %result = low.invoke @bounded_identity(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_argument_contract(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) where [range(%value, 1, 1024), multiple_of(%value, 16)] asm {
+  %7 = low.assume %value [multiple_of(%value, 16)] : reg<amdgpu.vgpr>
+  %9 = copy %7 : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  return %9
+}
+
+// ====
+
+// low.invoke's authored inline policy survives normalization to low.func.call.
+// The shared callable inliner splices the schedule-free helper's complete CFG,
+// including its block argument, into the exact-target caller.
+amdgpu.target<gfx11-generic> @helper_target
+
+amdgpu.target<gfx1151> @caller_target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @cfg_identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  low.br ^exit(%value: reg<amdgpu.vgpr>)
+^exit(%forwarded: reg<amdgpu.vgpr>):
+  return %forwarded
+}
+
+func.def target(@caller_target) @cfg_identity_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  %result = low.invoke inline @cfg_identity(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @cfg_identity_caller(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+// ====
+
+// schedule(locked) preserves source order independently in every helper CFG
+// block. The inliner materializes each block's order as fences before the
+// target-neutral splice remaps its block argument and return edge.
+amdgpu.target<gfx11-generic> @helper_target
+
+amdgpu.target<gfx1151> @caller_target
+
+low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@helper_target) @locked_cfg_add(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %first = v_add_u32 %value, %value
+  low.br ^tail(%first: reg<amdgpu.vgpr>)
+^tail(%forwarded: reg<amdgpu.vgpr>):
+  %second = v_add_u32 %forwarded, %value
+  return %second
+}
+
+func.def target(@caller_target) @locked_cfg_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  %result = low.invoke inline @locked_cfg_add(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @locked_cfg_caller(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  low.schedule.fence
+  %first = v_add_u32 %value, %value
+  low.schedule.fence
+  low.schedule.fence
+  %second = v_add_u32 %first, %value
+  low.schedule.fence
+  return %second
+}
+
+// ====
+
+// AMDGPU requires the normalized Low call closure to inline before emission.
+// Both generic helpers are specialized to the exact caller representation,
+// including the nested descriptor operation and the outer CFG block argument.
+amdgpu.target<gfx11-generic> @helper_target
+
+amdgpu.target<gfx1151> @caller_target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @double_value(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %doubled = v_add_u32 %value, %value
+  return %doubled
+}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@helper_target) @compose_cfg(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %doubled = low.func.call @double_value(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  low.br ^exit(%doubled: reg<amdgpu.vgpr>)
+^exit(%forwarded: reg<amdgpu.vgpr>):
+  return %forwarded
+}
+
+func.def target(@caller_target) @composed_cfg_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  %result = low.invoke @compose_cfg(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @composed_cfg_caller(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %doubled = v_add_u32 %value, %value
+  return %doubled
+}
+
+// ====
+
+// A same-type tied result retains the consumed buffer's selected native
+// carrier even though the call result has no independent buffer-reference
+// facts. A later assumption can refine its semantic memory space without
+// reconstructing the physical representation selected before the call.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @forward_buffer(%base: reg<amdgpu.sgpr x2>) -> (%base as reg<amdgpu.sgpr x2>) asm {
+  return %base
+}
+
+func.def target(@target) @tied_buffer_caller(%input: buffer) -> (i32) {
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %forwarded = low.invoke inline @forward_buffer(%input_global) : (buffer) -> (%input_global as buffer)
+  %forwarded_global = buffer.assume.memory_space<global> %forwarded : buffer
+  %base = index.constant 0 : offset
+  %view = buffer.view %forwarded_global[%base] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @tied_buffer_caller() -> (reg<amdgpu.vgpr>) asm {
+  %input_global = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = v_mov_b32 0
+  %value = global_load_b32_saddr %13, %input_global
+  return %value
+}
+
+// ====
+
+// Helpers receive their declared bank without forcing their callers' producers
+// to use it. Constant operands reuse the ordinary receiving-value recipe.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @join_words(%value: reg<amdgpu.vgpr>, %tag: reg<amdgpu.vgpr>, %pair: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
+  %joined = concat(%value, %tag, %pair) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  return %joined
+}
+
+kernel.def target(@target) @uniform_helper_arguments() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.noalias %input, %output : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %source[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %destination[%base] : buffer -> view<4xi32>
+  %value = view.load %input_view[0] : view<4xi32> -> i32
+  %pair = vector.load %input_view[2] : view<4xi32> -> vector<2xi32>
+  %tag = scalar.constant 42 : i32
+  %result = low.invoke @join_words(%value, %tag, %pair) : (i32, i32, vector<2xi32>) -> (vector<4xi32>)
+  vector.store %result, %output_view[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_helper_arguments() asm {
+  %input_view = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = s_mov_b32 0
+  %value = s_load_dword %input_view, %19
+  %pair = s_load_dwordx2 %input_view, %19 {offset = 8}
+  %24 = v_mov_b32_copy %value
+  %25 = v_mov_b32 42
+  %26 = slice %pair[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = v_mov_b32_copy %26
+  %28 = slice %pair[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = v_mov_b32_copy %28
+  %30 = concat(%27, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %joined = concat(%24, %25, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %32 = v_mov_b32 0
+  global_store_b128_saddr %32, %joined, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @mask_word(%condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %c0 = v_mov_b32 0
+  %c1 = v_mov_b32 1
+  %result = v_cndmask_b32 %c0, %c1, %condition
+  return %result
+}
+
+kernel.def target(@target) @uniform_helper_mask() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: index, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %condition = index.cmp sgt, %value, %c0 : index
+  %result = low.invoke @mask_word(%condition) : (i1) -> (vector<1xi32>)
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  vector.store %result, %view[%lane] : vector<1xi32>, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_helper_mask(%value: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0$18 = s_mov_b32 0
+  %condition = s_cmp_gt_i32 %value, %c0$18
+  %20 = s_mov_b64_exec_read
+  %21 = slice %20[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %20[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = s_cselect_b32 %21, %c0$18, %condition
+  %25 = s_cselect_b32 %22, %c0$18, %condition
+  %26 = concat(%24, %25) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %c0$2 = v_mov_b32 0
+  %c1 = v_mov_b32 1
+  %result = v_cndmask_b32 %c0$2, %c1, %26
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %28, %result, %view
+  return
+}

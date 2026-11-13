@@ -258,6 +258,36 @@ static bool loom_amdgpu_source_scalar_value_register_shape(
     return false;
   }
   *out_shape = mapping->default_shape;
+  if (mapping->policy ==
+          LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH &&
+      loom_amdgpu_source_address_value_needs_64bit(
+          module, fact_table, source_value_id, source_type)) {
+    out_shape->unit_count = 2;
+  }
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id)) {
+    const bool uniform = fact_table && loom_value_facts_is_subgroup_uniform(
+                                           loom_value_fact_table_lookup(
+                                               fact_table, source_value_id));
+    if (mapping->policy == LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1) {
+      *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+                                              uniform ? 1 : 2);
+    } else {
+      out_shape->class_id = uniform ? LOOM_AMDGPU_REG_CLASS_ID_SGPR
+                                    : LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+    }
+    return true;
+  }
+  // Native numeric results already have a declared bank. Keep the source
+  // payload width so call validation still rejects incompatible signatures.
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (mapping->policy != LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_I1 &&
+      loom_amdgpu_source_invoke_result_shape(
+          module, loom_module_value(module, source_value_id), &native_shape) &&
+      (native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+       native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
+    out_shape->class_id = native_shape.class_id;
+    return true;
+  }
   switch (mapping->policy) {
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED:
       return true;
@@ -274,19 +304,10 @@ static bool loom_amdgpu_source_scalar_value_register_shape(
       }
       return true;
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK:
-      if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
-              module, fact_table, view_regions, analysis, source_value_id)) {
-        out_shape->class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
-      }
-      return true;
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_OFFSET_WIDTH:
       if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
               module, fact_table, view_regions, analysis, source_value_id)) {
         out_shape->class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
-      }
-      if (loom_amdgpu_source_address_value_needs_64bit(
-              module, fact_table, source_value_id, source_type)) {
-        out_shape->unit_count = 2;
       }
       return true;
     case LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_NONE:
@@ -310,6 +331,24 @@ static bool loom_amdgpu_source_vector_value_register_shape(
   if (iree_any_bit_set(storage_flags,
                        LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK)) {
     *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+                                            vector_storage.register_count);
+    return true;
+  }
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id)) {
+    const bool uniform = fact_table && loom_value_facts_is_subgroup_uniform(
+                                           loom_value_fact_table_lookup(
+                                               fact_table, source_value_id));
+    *out_shape = loom_amdgpu_register_shape(
+        uniform ? LOOM_AMDGPU_REG_CLASS_ID_SGPR : LOOM_AMDGPU_REG_CLASS_ID_VGPR,
+        vector_storage.register_count);
+    return true;
+  }
+  loom_amdgpu_register_shape_t native_shape = {0};
+  if (loom_amdgpu_source_invoke_result_shape(
+          module, loom_module_value(module, source_value_id), &native_shape) &&
+      (native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+       native_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
+    *out_shape = loom_amdgpu_register_shape(native_shape.class_id,
                                             vector_storage.register_count);
     return true;
   }
@@ -376,6 +415,10 @@ static bool loom_amdgpu_source_buffer_value_register_shape(
 static bool loom_amdgpu_source_value_register_shape_needs_analysis(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t source_value_id, loom_type_t source_type) {
+  if (loom_amdgpu_source_value_is_entry_argument(module, source_value_id) &&
+      (loom_type_is_scalar(source_type) || loom_type_is_vector(source_type))) {
+    return false;
+  }
   // Varying non-predicate facts settle the use-sensitive bank preference
   // without source or memory analysis. Width, storage, and representation
   // belong to the mapping below; uniform or unknown facts do not prove a bank.

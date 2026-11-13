@@ -476,3 +476,138 @@ check.scenario @condition_lane_predicate_values {
   }
   check.return
 }
+
+// Each lane leaves at a different header visit. The broadcast runs before the
+// exit decision, including the final visit, so its last observation is that
+// lane's own ID. A partial outer region also exercises loop entry under a mask.
+kernel.def @condition_broadcast() {
+  %c1 = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%output: buffer, %active_count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %lane_word = index.cast %lane : index to i32
+  %not_first = index.cmp ne, %lane, %c0 : index
+  %active = index.cmp ult, %lane, %active_count : index
+  %result = scf.if %active -> (i32) {
+    %counter, %observed = scf.while(%before = %c0 : index) -> (index, i32) {
+      %broadcast = scf.if %not_first -> (i32) {
+        %first = kernel.subgroup.broadcast.first %lane_word : i32
+        scf.yield %first : i32
+      } else {
+        scf.yield %lane_word : i32
+      }
+      %more = index.cmp ult, %before, %lane : index
+      scf.condition %more, %before, %broadcast : i1, index, i32
+    } do(%iteration: index, %value: i32) {
+      %next = index.add %iteration, %c1 : index
+      scf.yield %next : index
+    }
+    scf.yield %observed : i32
+  } else {
+    scf.yield %lane_word : i32
+  }
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  view.store %result, %view[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// An inner varying loop reconverges before the outer header's broadcast and
+// exit decision. The inner count contributes to the final observable value.
+kernel.def @condition_nested_broadcast() {
+  %c1 = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%output: buffer, %active_count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %lane_word = index.cast %lane : index to i32
+  %inner_end = index.add %lane, %c1 : index
+  %active = index.cmp ult, %lane, %active_count : index
+  %result = scf.if %active -> (i32) {
+    %counter, %observed = scf.while(%before = %c0 : index) -> (index, i32) {
+      %inner_count = scf.for %inner = [%c0 to %inner_end step %c1](%count = %c0_i32 : i32) -> (i32) {
+        %next_count = scalar.addi %count, %c1_i32 : i32
+        scf.yield %next_count : i32
+      }
+      %first = kernel.subgroup.broadcast.first %lane_word : i32
+      %value = scalar.addi %first, %inner_count : i32
+      %more = index.cmp ult, %before, %lane : index
+      scf.condition %more, %before, %value : i1, index, i32
+    } do(%iteration: index, %value: i32) {
+      %next = index.add %iteration, %c1 : index
+      scf.yield %next : index
+    }
+    scf.yield %observed : i32
+  } else {
+    scf.yield %lane_word : i32
+  }
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  view.store %result, %view[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+func.def @condition_broadcast_oracle(%output: buffer, %active_count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %width = index.constant 64 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  scf.for %lane = [%c0 to %width step %c1] {
+    %value = index.cast %lane : index to i32
+    view.store %value, %view[%lane] : i32, view<64xi32>
+  }
+  func.return
+}
+
+func.def @condition_nested_broadcast_oracle(%output: buffer, %active_count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %width = index.constant 64 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  scf.for %lane = [%c0 to %width step %c1] {
+    %active = index.cmp ult, %lane, %active_count : index
+    %twice = index.add %lane, %lane : index
+    %counted = index.add %twice, %c1 : index
+    %selected = scf.select %active, %counted, %lane : index
+    %value = index.cast %selected : index to i32
+    view.store %value, %view[%lane] : i32, view<64xi32>
+  }
+  func.return
+}
+
+func.def @condition_active_count(%trial: index) -> (index) {
+  %stride = index.constant 17 : index
+  %width = index.constant 64 : index
+  %scaled = index.mul %trial, %stride : index
+  %count = index.min %scaled, %width : index
+  func.return %count : index
+}
+
+check.scenario @condition_broadcast_values {
+  check.trial[5](%trial: index, %entropy: check.entropy) {
+    %active_count = check.generate<@condition_active_count>(%trial) : (index) -> (index)
+    %storage = check.generate.fill value(-99) : tensor<72xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<72xi32> -> tensor<64xi32>
+    check.compare<@condition_broadcast, @condition_broadcast_oracle>(%output, %active_count) : (tensor<64xi32>, index) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<72xi32>
+    }
+  }
+  check.trial[5](%trial: index, %entropy: check.entropy) {
+    %active_count = check.generate<@condition_active_count>(%trial) : (index) -> (index)
+    %storage = check.generate.fill value(-99) : tensor<72xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<72xi32> -> tensor<64xi32>
+    check.compare<@condition_nested_broadcast, @condition_nested_broadcast_oracle>(%output, %active_count) : (tensor<64xi32>, index) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<72xi32>
+    }
+  }
+  check.return
+}

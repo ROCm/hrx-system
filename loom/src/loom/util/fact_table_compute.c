@@ -186,10 +186,6 @@ static iree_status_t loom_value_fact_table_seed_value_arg(
     facts = loom_value_facts_make_signed_bit_count_range(
         parameter_target->storage.snapshot.index_bitwidth);
   }
-  if (parameter_target &&
-      parameter_target->storage.snapshot.subgroup_size == 1) {
-    loom_value_facts_mark_subgroup_uniform(&facts);
-  }
   return loom_value_fact_table_define(
       table, value_id,
       loom_value_fact_table_clamp_scalar_type_domain(type, facts));
@@ -386,12 +382,19 @@ static iree_status_t loom_value_fact_table_seed_block_args(
                                             LOOM_REGION_GLOBAL_BUFFER_ARGS)
           ? LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL
           : LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN;
-  const bool has_workgroup_uniform_args =
-      region_descriptor && iree_any_bit_set(region_descriptor->flags,
-                                            LOOM_REGION_WORKGROUP_UNIFORM_ARGS);
-  const bool has_cluster_uniform_args =
-      region_descriptor && iree_any_bit_set(region_descriptor->flags,
-                                            LOOM_REGION_CLUSTER_UNIFORM_ARGS);
+  loom_value_fact_uniform_scope_t parameter_scope =
+      LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE;
+  if (region_descriptor && iree_any_bit_set(region_descriptor->flags,
+                                            LOOM_REGION_CLUSTER_UNIFORM_ARGS)) {
+    parameter_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER;
+  } else if (region_descriptor &&
+             iree_any_bit_set(region_descriptor->flags,
+                              LOOM_REGION_WORKGROUP_UNIFORM_ARGS)) {
+    parameter_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
+  } else if (parameter_target &&
+             parameter_target->storage.snapshot.subgroup_size == 1) {
+    parameter_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP;
+  }
   for (uint16_t i = 0; i < block->arg_count; ++i) {
     loom_value_id_t value_id = loom_block_arg_id(block, i);
     if (value_id >= module->values.count) {
@@ -414,15 +417,15 @@ static iree_status_t loom_value_fact_table_seed_block_args(
             table, module, value_id, parameter_target));
       }
     }
-    if (has_workgroup_uniform_args || has_cluster_uniform_args) {
+    if (parameter_scope != LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
       loom_value_facts_t facts = loom_value_fact_table_lookup(table, value_id);
-      if (has_cluster_uniform_args) {
-        loom_value_facts_mark_cluster_uniform(&facts);
-      } else {
-        loom_value_facts_mark_workgroup_uniform(&facts);
+      // Entry participation proves the same scope for every parameter type.
+      // Declaration and caller facts may already establish a wider scope.
+      if (!loom_value_facts_is_uniform_at_scope(facts, parameter_scope)) {
+        loom_value_facts_mark_uniform_at_scope(&facts, parameter_scope);
+        IREE_RETURN_IF_ERROR(
+            loom_value_fact_table_define(table, value_id, facts));
       }
-      IREE_RETURN_IF_ERROR(
-          loom_value_fact_table_define(table, value_id, facts));
     }
     if (loom_value_fact_table_has_extent_domain(module, value_id, type)) {
       IREE_RETURN_IF_ERROR(loom_value_fact_table_define(

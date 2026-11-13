@@ -290,8 +290,7 @@ static bool loom_amdgpu_low_type_can_materialize_as_vgpr_registers(
                                              LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
     return true;
   }
-  return unit_count <= LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES &&
-         loom_amdgpu_low_type_is_register_class(context, low_type,
+  return loom_amdgpu_low_type_is_register_class(context, low_type,
                                                 LOOM_AMDGPU_REG_CLASS_ID_SGPR);
 }
 
@@ -677,9 +676,9 @@ iree_status_t loom_amdgpu_lookup_or_materialize_sgpr_address(
       context, source_op, source_value, out_low_value);
 }
 
-// Materializes a subgroup-uniform scalar stored in one or two VGPRs as an
-// SGPR payload without changing its canonical source mapping.
-static iree_status_t loom_amdgpu_materialize_uniform_vgpr_scalar_as_sgpr(
+// Materializes every word of a subgroup-uniform VGPR payload in SGPRs
+// without changing its canonical source mapping.
+static iree_status_t loom_amdgpu_materialize_uniform_vgpr_payload_as_sgpr(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id) {
@@ -693,17 +692,17 @@ static iree_status_t loom_amdgpu_materialize_uniform_vgpr_scalar_as_sgpr(
 
   const uint32_t register_count =
       loom_low_register_type_unit_count(actual_type);
-  IREE_ASSERT_GE(register_count, 1);
-  IREE_ASSERT_LE(register_count, 2);
   const loom_type_t vgpr_type =
       loom_low_register_carrier_type_with_unit_count(actual_type, 1);
   const loom_type_t sgpr_type =
       loom_low_register_carrier_type_with_unit_count(required_low_type, 1);
-  // Scalar carriers contain at most two 32-bit register units.
-  loom_value_id_t sgpr_registers[2] = {
-      LOOM_VALUE_ID_INVALID,
-      LOOM_VALUE_ID_INVALID,
-  };
+  loom_value_id_t inline_registers[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+  loom_value_id_t* sgpr_registers = inline_registers;
+  if (register_count > IREE_ARRAYSIZE(inline_registers)) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+        context, register_count, sizeof(*sgpr_registers),
+        (void**)&sgpr_registers));
+  }
   for (uint32_t i = 0; i < register_count; ++i) {
     loom_value_id_t vgpr_register = low_value_id;
     if (register_count != 1) {
@@ -729,7 +728,7 @@ static iree_status_t loom_amdgpu_materialize_uniform_vgpr_scalar_as_sgpr(
                                               result_type, out_low_value_id);
 }
 
-iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
+iree_status_t loom_amdgpu_materialize_low_numeric_carrier(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id) {
@@ -756,7 +755,7 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
       context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (!requires_sgpr && !requires_vgpr) {
     IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar carrier selected non-register low type");
+        "AMDGPU numeric carrier selected non-register low type");
     IREE_BUILTIN_UNREACHABLE();
   }
 
@@ -769,7 +768,7 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
         context, source_op, *out_low_value_id, out_low_value_id));
     actual_type = loom_module_value_type(module, *out_low_value_id);
   } else if (requires_sgpr && actual_is_vgpr) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_vgpr_scalar_as_sgpr(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_vgpr_payload_as_sgpr(
         context, source_op, *out_low_value_id, required_low_type,
         out_low_value_id));
     actual_type = loom_module_value_type(module, *out_low_value_id);
@@ -786,7 +785,7 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
                         : LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (!actual_matches_required_class) {
     IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar carrier materialized wrong register class");
+        "AMDGPU numeric carrier materialized wrong register class");
     IREE_BUILTIN_UNREACHABLE();
   }
 
@@ -803,7 +802,7 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
   }
   if (actual_unit_count != 1 || required_unit_count != 2) {
     IREE_ASSERT_UNREACHABLE(
-        "AMDGPU scalar carrier materialized wrong register shape");
+        "AMDGPU numeric carrier materialized wrong register shape");
     IREE_BUILTIN_UNREACHABLE();
   }
 

@@ -38,11 +38,12 @@ iree_status_t loom_amdgpu_prepare_control_operand(
     *out_plan = &kNullBufferRecipe;
     return iree_ok_status();
   }
-  if (requires_sgpr && loom_type_is_scalar(source_type) &&
+  if (requires_sgpr &&
+      (loom_type_is_scalar(source_type) || loom_type_is_vector(source_type)) &&
       !loom_amdgpu_type_is_i1(source_type) &&
       loom_amdgpu_low_type_is_register_class(context, actual_type,
                                              LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
-    // Scalar destinations are selected from canonical distribution facts.
+    // Numeric SGPR destinations are selected from canonical distribution facts.
     // A producer may nevertheless use VGPR instructions (for example, a
     // collective); selecting one lane is valid only with that shared proof.
     IREE_ASSERT(
@@ -90,7 +91,7 @@ iree_status_t loom_amdgpu_emit_control_operand(
                         : LOOM_AMDGPU_REG_CLASS_ID_SGPR,
           *(const loom_amdgpu_integer_operand_form_t*)plan, out_low_value_id);
     }
-    return loom_amdgpu_materialize_low_scalar_carrier(
+    return loom_amdgpu_materialize_low_numeric_carrier(
         context, source_terminator, low_value_id, required_low_type,
         out_low_value_id);
   }
@@ -142,9 +143,10 @@ iree_status_t loom_amdgpu_emit_control_operand(
     return iree_ok_status();
   }
 
-  if (requires_sgpr && loom_type_is_scalar(source_type)) {
+  if (requires_sgpr &&
+      (loom_type_is_scalar(source_type) || loom_type_is_vector(source_type))) {
     // Preparation proved that selecting one active lane preserves this value.
-    return loom_amdgpu_materialize_low_scalar_carrier(
+    return loom_amdgpu_materialize_low_numeric_carrier(
         context, source_terminator, low_value_id, required_low_type,
         out_low_value_id);
   }
@@ -196,7 +198,7 @@ iree_status_t loom_amdgpu_materialize_structural_operand(
     if (loom_amdgpu_low_type_is_register_class(context, required_low_type,
                                                LOOM_AMDGPU_REG_CLASS_ID_SGPR) &&
         loom_low_register_type_unit_count(required_low_type) == 1) {
-      return loom_amdgpu_materialize_low_scalar_carrier(
+      return loom_amdgpu_materialize_low_numeric_carrier(
           context, source_op, low_value_id, required_low_type,
           out_low_value_id);
     }

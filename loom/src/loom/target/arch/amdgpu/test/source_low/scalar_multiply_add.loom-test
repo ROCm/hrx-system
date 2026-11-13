@@ -1,0 +1,331 @@
+// RUN: pass target-legalize{mode=final},dce,canonicalize,source-to-low,low-select-operand-forms,low-cse,low-dce
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @u24_inline_scale(%lanes: vector<2xi32>, %start: i32) -> (i32) {
+  %lane_input = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %lane = scalar.assume %lane_input [range(%lane_input, 0, 255)] : i32
+  %scale = scalar.constant 20 : i32
+  %product = scalar.muli %lane, %scale : i32
+  %result = scalar.addi %product, %start : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @u24_inline_scale(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_mad_u32_u24_src1_inline %lane, %start, 20
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @u24_inline_scale_all_vgpr(%lanes: vector<2xi32>) -> (i32) {
+  %value_input = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %value = scalar.assume %value_input [range(%value_input, 0, 255)] : i32
+  %addend = vector.extract %lanes[1] : vector<2xi32> -> i32
+  %scale = scalar.constant 20 : i32
+  %product = scalar.muli %value, %scale : i32
+  %result = scalar.addi %product, %addend : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @u24_inline_scale_all_vgpr(%lanes: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %value = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %addend = slice %lanes[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_mad_u32_u24_src1_inline %value, %addend, 20
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @commuted_inline_scale_with_uniform_value() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%value: i32, %lanes_buffer: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %lanes_view = buffer.view %lanes_buffer[%fixture_base] : buffer -> view<64x2xi32>
+  %lanes = vector.load %lanes_view[%fixture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
+  %bounded = scalar.assume %value [range(%value, 0, 255)] : i32
+  %lane = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %scale = scalar.constant 20 : i32
+  %product = scalar.muli %scale, %bounded : i32
+  %result = scalar.addi %product, %lane : i32
+  view.store %result, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @commuted_inline_scale_with_uniform_value(%bounded: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lanes_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  %lane = global_load_dword_saddr %21, %lanes_view : reg<amdgpu.vgpr>
+  %result = v_mad_u32_u24_src0_inline %bounded, %lane, 20
+  %24 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %24, %result, %result_view_0
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @uniform_u24_multiply_add() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%value: i32, %start: i32, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
+  %bounded = scalar.assume %value [range(%value, 0, 255)] : i32
+  %scale = scalar.constant 20 : i32
+  %product = scalar.muli %bounded, %scale : i32
+  %result = scalar.addi %product, %start : i32
+  view.store %result, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "value", arg1 = "start"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_u24_multiply_add(%bounded: reg<amdgpu.sgpr>, %start: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %bounded_copy = copy %bounded : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %product = s_mulk_i32 %bounded_copy, 20
+  %result = s_add_u32 %product, %start
+  %19 = v_mov_b32_copy %result
+  %20 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %20, %19, %result_view_0
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @commuted_u24_inline_scale(%lanes: vector<2xi32>, %start: i32) -> (i32) {
+  %lane_input = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %lane = scalar.assume %lane_input [range(%lane_input, 0, 255)] : i32
+  %scale = scalar.constant 20 : i32
+  %product = scalar.muli %scale, %lane : i32
+  %result = scalar.addi %start, %product : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @commuted_u24_inline_scale(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_mad_u32_u24_src0_inline %lane, %start, 20
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @power_of_two_scale(%lanes: vector<2xi32>, %start: i32) -> (i32) {
+  %lane = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %scale = scalar.constant 16 : i32
+  %product = scalar.muli %lane, %scale : i32
+  %result = scalar.addi %product, %start : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @power_of_two_scale(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_lshl_add_u32_shift_imm %lane, %start, 4
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @unit_scale_canonicalizes(%lanes: vector<2xi32>, %start: i32) -> (i32) {
+  %lane = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %scale = scalar.constant 1 : i32
+  %product = scalar.muli %lane, %scale : i32
+  %result = scalar.addi %product, %start : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @unit_scale_canonicalizes(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_add_u32 %lane, %start
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @power_of_two_scale_with_uniform_value() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%value: i32, %lanes_buffer: buffer, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %lanes_view = buffer.view %lanes_buffer[%fixture_base] : buffer -> view<64x2xi32>
+  %lanes = vector.load %lanes_view[%fixture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
+  %bounded = scalar.assume %value [range(%value, 0, 255)] : i32
+  %lane = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %scale = scalar.constant 16 : i32
+  %product = scalar.muli %scale, %bounded : i32
+  %result = scalar.addi %product, %lane : i32
+  view.store %result, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @power_of_two_scale_with_uniform_value(%bounded: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lanes_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  %lane = global_load_dword_saddr %21, %lanes_view : reg<amdgpu.vgpr>
+  %result = v_lshl_add_u32_shift_imm %bounded, %lane, 4
+  %24 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %24, %result, %result_view_0
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @non_inline_u24_scale(%lanes: vector<2xi32>, %start: i32) -> (i32) {
+  %lane_input = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %lane = scalar.assume %lane_input [range(%lane_input, 0, 255)] : i32
+  %scale = scalar.constant 80 : i32
+  %product = scalar.muli %lane, %scale : i32
+  %result = scalar.addi %product, %start : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @non_inline_u24_scale(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = v_mov_b32 80
+  %product = v_mul_lo_u32 %lane, %13
+  %result = v_add_u32 %product, %start
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @general_multiply_add(%lanes: vector<2xi32>, %factor: i32, %start: i32) -> (i32) {
+  %lane = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %product = scalar.muli %lane, %factor : i32
+  %result = scalar.addi %product, %start : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @general_multiply_add(%lanes: reg<amdgpu.vgpr x2>, %factor: reg<amdgpu.vgpr>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %product = v_mul_lo_u32 %lane, %factor
+  %result = v_add_u32 %product, %start
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @flagged_multiply(%lanes: vector<2xi32>, %start: i32) -> (i32) {
+  %lane_input = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %lane = scalar.assume %lane_input [range(%lane_input, 0, 255)] : i32
+  %scale = scalar.constant 20 : i32
+  %product = scalar.muli<nuw> %lane, %scale : i32
+  %result = scalar.addi %product, %start : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @flagged_multiply(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %product = v_mul_lo_u32_src1_inline %lane, 20
+  %result = v_add_u32 %product, %start
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @flagged_add(%lanes: vector<2xi32>, %start: i32) -> (i32) {
+  %lane_input = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %lane = scalar.assume %lane_input [range(%lane_input, 0, 255)] : i32
+  %scale = scalar.constant 20 : i32
+  %product = scalar.muli %lane, %scale : i32
+  %result = scalar.addi<nsw> %product, %start : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @flagged_add(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %product = v_mul_lo_u32_src1_inline %lane, 20
+  %result = v_add_u32 %product, %start
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @authored_general_multiply_add(%lanes: vector<2xi32>, %factor: i32, %start: i32) -> (i32) {
+  %lane = vector.extract %lanes[0] : vector<2xi32> -> i32
+  %result = scalar.fmai %lane, %factor, %start : i32
+  func.return %result : i32
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @authored_general_multiply_add(%lanes: reg<amdgpu.vgpr x2>, %factor: reg<amdgpu.vgpr>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = v_mul_lo_u32 %lane, %factor
+  %result = v_add_u32 %start, %13
+  return %result
+}

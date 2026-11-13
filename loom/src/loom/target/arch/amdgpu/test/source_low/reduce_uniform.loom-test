@@ -1,0 +1,34 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @i32_uniform_vector_reduce() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%value0: i32, %value1: i32, %value2: i32, %value3: i32, %result_buffer_0: buffer) {
+  %fixture_base = index.constant 0 : offset
+  %fixture_lane = kernel.workitem.id<x> : index
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
+  %values = vector.from_elements %value0, %value1, %value2, %value3 : vector<4xi32>
+  %init = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %values, %init : vector<4xi32>, i32
+  view.store %sum, %result_view_0[%fixture_lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 4, direct_arg_count = 4, direct_arg_names = {arg0 = "value0", arg1 = "value1", arg2 = "value2", arg3 = "value3"}, direct_arg_offsets = [0, 4, 8, 12], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [4, 4, 4, 4], parameter_count = 5, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_uniform_vector_reduce(%value0: reg<amdgpu.sgpr>, %value1: reg<amdgpu.sgpr>, %value2: reg<amdgpu.sgpr>, %value3: reg<amdgpu.sgpr>) asm {
+  %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = v_mov_b32_copy %value0
+  %20 = v_mov_b32_copy %value1
+  %21 = v_mov_b32_copy %value2
+  %22 = v_mov_b32_copy %value3
+  %26 = v_add_u32 %19, %20
+  %28 = v_add_u32 %26, %21
+  %sum = v_add_u32 %28, %22
+  %31 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %31, %sum, %result_view_0
+  return
+}

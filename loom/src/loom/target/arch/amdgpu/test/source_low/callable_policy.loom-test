@@ -12,12 +12,12 @@ func.def public target(@target) @callee_noinline(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def noinline target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def noinline target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   return %value
 }
 
-low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @callee_noinline(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %result = low.func.call pure @callee(%value) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @callee_noinline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = low.func.call pure @callee(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   return %result
 }
 
@@ -35,12 +35,12 @@ func.def public target(@target) @call_noinline(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   return %value
 }
 
-low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_noinline(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %result = low.func.call pure noinline @callee(%value) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_noinline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = low.func.call pure noinline @callee(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   return %result
 }
 
@@ -163,16 +163,9 @@ low.func.def noinline target<amdgpu.gfx11.generic.core> @select_vector(%value: r
   return %selected
 }
 
-low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_select_vector(%value: reg<amdgpu.vgpr>, %flag: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %c0 = s_mov_b32 0
-  %condition = s_cmp_lg_i32 %flag, %c0
-  %23 = s_mov_b64_exec_read
-  %24 = slice %23[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %25 = slice %23[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %27 = s_cselect_b32 %24, %c0, %condition
-  %28 = s_cselect_b32 %25, %c0, %condition
-  %29 = concat(%27, %28) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = low.func.call pure @select_vector(%value, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_select_vector(%value: reg<amdgpu.vgpr>, %flag: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %condition = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
+  %selected = low.func.call pure @select_vector(%value, %condition) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
   return %selected
 }
 
@@ -209,20 +202,10 @@ low.func.def noinline target<amdgpu.gfx11.generic.core> @select_vector(%value: r
   return %selected
 }
 
-low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @condition_across_call(%value: reg<amdgpu.vgpr>, %flag: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %c0 = s_mov_b32 0
-  %27 = s_cmp_lg_i32 %flag, %c0
-  %29 = s_mov_b32 1
-  %condition = s_cselect_b32 %29, %c0, %27
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @condition_across_call(%value: reg<amdgpu.vgpr>, %flag: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %condition = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
   %forwarded = low.func.call pure @identity(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
-  %32 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
-  %33 = s_mov_b64_exec_read
-  %34 = slice %33[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %35 = slice %33[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %37 = s_cselect_b32 %34, %c0, %32
-  %38 = s_cselect_b32 %35, %c0, %32
-  %39 = concat(%37, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = low.func.call pure @select_vector(%forwarded, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+  %selected = low.func.call pure @select_vector(%forwarded, %condition) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
   return %selected
 }
 
@@ -251,26 +234,28 @@ func.def public target(@target) @caller(%configuration: i64) -> (i32) {
 }
 
 // ----
-low.func.def noinline target<amdgpu.gfx11.generic.core> @increment(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def noinline target<amdgpu.gfx11.generic.core> @increment(%position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %step = s_mov_b32 1
-  %result = s_add_u32 %position, %step
+  %result = v_add_u32 %step, %position
   return %result
 }
 
-low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @caller(%configuration: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @caller(%configuration: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %23 = s_mov_b32 3
-  %shifted = s_lshr_b64 %configuration, %23
+  %shifted = v_lshrrev_b64 %23, %configuration
   %28 = s_mov_b32 7
   %29 = s_mov_b32 0
-  %mask = concat(%28, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selector = s_and_b64 %shifted, %mask
-  %32 = s_mov_b32 5
-  %35 = slice %selector[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %36 = slice %selector[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %39 = s_cmp_lt_u32 %35, %32
-  %40, %41 = s_subb_u32 %36, %29, %39
-  %44 = s_cselect_b32 %35, %32, %41
-  %value = low.func.call pure @increment(%44) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+  %32 = slice %shifted[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %33 = v_and_b32 %28, %32
+  %35 = slice %shifted[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = v_and_b32 %29, %35
+  %selector = concat(%33, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = s_mov_b32 5
+  %limit = concat(%38, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %41 = v_cmp_lt_u64 %selector, %limit
+  %44 = v_mov_b32_copy %38
+  %45 = v_cndmask_b32 %44, %33, %41
+  %value = low.func.call pure @increment(%45) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   return %value
 }
 
