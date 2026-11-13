@@ -8,6 +8,7 @@
 #define LOOM_TARGET_ARCH_VM_REFERENCE_PLAN_H_
 
 #include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/intern_table.h"
 #include "loom/target/arch/vm/types.h"
 #include "loom/util/segmented_storage.h"
@@ -53,12 +54,16 @@ typedef struct loom_vm_reference_plan_t {
 } loom_vm_reference_plan_t;
 
 // Resolves a source type binding once and returns its provisional key ordinal.
-// |type| is a supported reference signature type. Allocation, undeclared
-// external identity, and image ordinal exhaustion can fail binding.
+// |type| is a supported reference signature type. An undeclared external
+// identity or image ordinal exhaustion emits a diagnostic at |op| and leaves
+// |out_bound| false, including with no diagnostic callback. Status is reserved
+// for allocation and diagnostic sink failures.
 iree_status_t loom_vm_reference_plan_bind(loom_vm_reference_plan_t* plan,
                                           const loom_module_t* module,
                                           loom_type_t type,
                                           iree_arena_allocator_t* arena,
+                                          iree_diagnostic_emitter_t emitter,
+                                          const loom_op_t* op, bool* out_bound,
                                           uint16_t* out_ordinal);
 
 // Sorts canonical keys and establishes namespace counts and the ordinal map.

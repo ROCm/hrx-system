@@ -14,6 +14,7 @@
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/registers.h"
 #include "loom/target/arch/spirv/scalar_types.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/spirv/binary_format.h"
 #include "loom/target/emit/spirv/module_instructions.h"
 #include "loom/target/registers.h"
@@ -52,27 +53,28 @@ static iree_string_view_t loom_spirv_module_abi_string_or_empty(
 }
 
 static iree_status_t loom_spirv_module_abi_op_name(
-    loom_spirv_module_abi_context_t* context, uint32_t id,
-    iree_string_view_t name) {
+    loom_spirv_module_abi_context_t* context, const loom_op_t* source_op,
+    uint32_t id, iree_string_view_t name) {
   if (id == 0 || iree_string_view_is_empty(name)) {
     return iree_ok_status();
   }
   const uint32_t prefix_operands[] = {id};
-  return loom_spirv_binary_write_string_instruction(
-      loom_spirv_module_abi_section(context, LOOM_SPIRV_MODULE_SECTION_DEBUG),
-      LOOM_SPIRV_OP_NAME, prefix_operands, IREE_ARRAYSIZE(prefix_operands),
-      name, NULL, 0);
+  return loom_spirv_module_builder_emit_string(
+      context->builder, LOOM_SPIRV_MODULE_SECTION_DEBUG, LOOM_SPIRV_OP_NAME,
+      prefix_operands, IREE_ARRAYSIZE(prefix_operands), name, NULL, 0,
+      context->diagnostic_emitter, source_op, context->accepted);
 }
 
 static iree_status_t loom_spirv_module_abi_value_name(
     loom_spirv_module_abi_context_t* context, loom_value_id_t value_id,
     uint32_t id) {
-  if (value_id >= context->module->values.count) {
-    return iree_ok_status();
-  }
   const loom_value_t* value = loom_module_value(context->module, value_id);
   return loom_spirv_module_abi_op_name(
-      context, id,
+      context,
+      loom_value_is_block_arg(value)
+          ? loom_value_def_block(value)->parent_region->parent_op
+          : loom_value_def_op(value),
+      id,
       loom_spirv_module_abi_string_or_empty(context->module, value->name_id));
 }
 
@@ -166,10 +168,10 @@ static uint16_t loom_spirv_module_abi_bda_resource_binding_ordinal(
 
 static iree_status_t loom_spirv_module_abi_module_processed(
     loom_spirv_module_abi_context_t* context, iree_string_view_t value) {
-  return loom_spirv_binary_write_string_instruction(
-      loom_spirv_module_abi_section(context,
-                                    LOOM_SPIRV_MODULE_SECTION_MODULE_PROCESSED),
-      LOOM_SPIRV_OP_MODULE_PROCESSED, NULL, 0, value, NULL, 0);
+  return loom_spirv_module_builder_emit_string(
+      context->builder, LOOM_SPIRV_MODULE_SECTION_MODULE_PROCESSED,
+      LOOM_SPIRV_OP_MODULE_PROCESSED, NULL, 0, value, NULL, 0,
+      context->diagnostic_emitter, context->function_op, context->accepted);
 }
 
 static iree_status_t loom_spirv_module_abi_bda_metadata_field(
@@ -1068,19 +1070,22 @@ iree_status_t loom_spirv_module_abi_emit_entry_metadata(
   if (plan->kind != LOOM_SPIRV_MODULE_ABI_PLAN_HAL_KERNEL_RAW_BDA) {
     return iree_ok_status();
   }
+  if (entry_name.size > (UINT16_MAX - 1u) * 4u - 1u) {
+    *context->accepted = false;
+    return loom_target_artifact_emit_limit(
+        context->diagnostic_emitter, context->function_op, IREE_SV("SPIR-V"),
+        IREE_SV("instruction string bytes"), entry_name.size,
+        (UINT16_MAX - 1u) * 4u - 1u);
+  }
   // One scratch buffer holds the entry name, numeric fields, and the compact
   // logical parameter table. Each parameter token needs at most 15 bytes.
-  iree_host_size_t text_capacity = 0;
-  if (!iree_host_size_checked_mul(
-          context->function_plan->logical_signature
-              ? context->function_plan->logical_signature->arg_count
-              : 0,
-          15, &text_capacity) ||
-      !iree_host_size_checked_add(text_capacity, entry_name.size + 80,
-                                  &text_capacity)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "SPIR-V BDA metadata text size overflows");
-  }
+  // The signature count is u16 and the entry name is bounded above.
+  const uint16_t argument_count =
+      context->function_plan->logical_signature
+          ? context->function_plan->logical_signature->arg_count
+          : 0;
+  const iree_host_size_t text_capacity =
+      argument_count * 15u + entry_name.size + 80u;
   char* text_storage = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       context->scratch_arena, text_capacity, (void**)&text_storage));

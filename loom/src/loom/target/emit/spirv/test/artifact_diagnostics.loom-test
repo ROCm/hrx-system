@@ -1,0 +1,38 @@
+// RUN: emit spirv-dis
+// REQUIRES: spirv-dis
+
+spirv.target<vulkan1_3> @target
+
+low.func.decl target<spirv.logical.core>(@target) @external()
+
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @caller() asm {
+  // ERROR@+1: BACKEND/059 {export="caller", function_name="caller", callee_name="external", target_key="spirv.logical.core"}
+  low.func.call @external() : ()
+  return
+}
+
+// ====
+
+// RUN: emit spirv-dis @wrong_abi target=spirv:vulkan1.3+bda
+
+// ERROR@+1: BACKEND/055 {export="wrong_abi", format="SPIR-V", constraint="a shader entry point or HAL kernel ABI"}
+low.func.def public target<spirv.logical.core> abi(wasm_function) @wrong_abi() asm {
+  return
+}
+
+// ====
+
+// RUN: emit spirv-dis
+
+spirv.target<vulkan1_3> @target
+
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @entry_callee() -> (reg<spirv.id : i32>) asm {
+  %value = OpConstant.i32 1
+  return %value
+}
+
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @entry_caller() asm {
+  // ERROR@+1: BACKEND/057 {export="entry_caller", format="SPIR-V", symbol_name="entry_callee", constraint="an internal function callee instead of an entry point"}
+  %value = low.func.call @entry_callee() : () -> (reg<spirv.id : i32>)
+  return
+}

@@ -15,6 +15,7 @@
 #define LOOM_TARGET_EMIT_WASM_MODULE_BINARY_H_
 
 #include "iree/base/api.h"
+#include "loom/error/emitter.h"
 #include "loom/target/emit/wasm/program.h"
 
 #ifdef __cplusplus
@@ -45,12 +46,13 @@ void loom_wasm_module_binary_deinitialize(loom_wasm_module_binary_t* module,
 
 // Emits one complete WebAssembly binary from a compiler-planned physical
 // program. The writer preserves planned function/type/local indices and walks
-// trusted structured Low bodies in source order. Allocation, target resolution,
-// diagnostics, and semantic rejection belong to program planning and are
-// not accepted by this interface.
+// trusted structured Low bodies in source order. Allocation and target
+// resolution belong to program planning. Encoding rejection emits structured
+// diagnostics and leaves |out_accepted| false without publishing partial bytes.
 iree_status_t loom_wasm_program_emit_binary(
-    const loom_wasm_program_plan_t* plan, iree_allocator_t allocator,
-    loom_wasm_module_binary_t* out_module);
+    const loom_wasm_program_plan_t* plan,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_allocator_t allocator,
+    bool* out_accepted, loom_wasm_module_binary_t* out_module);
 
 #ifdef __cplusplus
 }  // extern "C"

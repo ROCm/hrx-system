@@ -12,7 +12,9 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/function.h"
 #include "loom/codegen/low/text_asm.h"
+#include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -20,6 +22,7 @@
 #include "loom/ops/op_registry.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/features.h"
+#include "loom/target/arch/spirv/provider.h"
 #include "loom/target/arch/spirv/records/target_records.h"
 #include "loom/target/facts_builder.h"
 #include "loom/target/function_version.h"
@@ -64,6 +67,33 @@ static bool SpirvModuleHasCapability(const loom_spirv_module_binary_t& module,
   return false;
 }
 
+struct EncodingDiagnostic {
+  // First source operation rejected during emission.
+  const loom_op_t* op = nullptr;
+  // First structured rejection code.
+  const loom_error_def_t* error = nullptr;
+  // Original export context forwarded to the sink.
+  std::string export_name;
+  // Number of emissions delivered to this sink.
+  size_t count = 0;
+
+  static iree_status_t Emit(void* user_data,
+                            const loom_diagnostic_emission_t* emission) {
+    auto* self = static_cast<EncodingDiagnostic*>(user_data);
+    if (self->count++ == 0) {
+      self->op = emission->op;
+      self->error = emission->error;
+      if (!iree_string_view_is_empty(emission->export_name)) {
+        self->export_name.assign(emission->export_name.data,
+                                 emission->export_name.size);
+      }
+    }
+    return iree_ok_status();
+  }
+
+  iree_diagnostic_emitter_t emitter() { return {Emit, this}; }
+};
+
 class SpirvModuleCompilerTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -72,6 +102,7 @@ class SpirvModuleCompilerTest : public ::testing::Test {
     iree_arena_initialize(&block_pool_, &arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
+    IREE_ASSERT_OK(loom_spirv_target_provider.register_context(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     static const loom_low_descriptor_set_provider_t kDescriptorSetProviders[] =
         {
@@ -132,6 +163,269 @@ class SpirvModuleCompilerTest : public ::testing::Test {
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t low_registry_ = {};
 };
+
+TEST_F(SpirvModuleCompilerTest, ValueNameInstructionLimit) {
+  // OpName's header and target ID leave 65533 words for its NUL-padded name.
+  constexpr size_t kMaximumNameLength = (UINT16_MAX - 2u) * 4u - 1u;
+  for (bool argument : {false, true}) {
+    for (size_t length : {kMaximumNameLength, kMaximumNameLength + 1}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "argument=" << argument << " length=" << length);
+      std::string name(length, 'a');
+      std::string source =
+          "spirv.target<vulkan1_3> @target\n"
+          "low.func.def public target<spirv.logical.core>(@target) "
+          "abi(shader_entry_point) @entry(";
+      if (argument) {
+        source += "%" + name + ": reg<spirv.id : i32>";
+      }
+      source += ") asm {\n";
+      if (!argument) {
+        source += "  %" + name + " = OpConstant.i32 1\n";
+      }
+      source += "  return\n}\n";
+      ModulePtr module =
+          ParseModule(iree_make_string_view(source.data(), source.size()));
+      const loom_op_t* function_op =
+          module->symbols.entries[FindSymbol(module.get(), IREE_SV("entry"))]
+              .defining_op;
+      const loom_op_t* expected_op =
+          argument ? function_op
+                   : loom_region_const_entry_block(
+                         loom_low_function_const_body(function_op))
+                         ->first_op;
+      for (bool capture : {false, true}) {
+        EncodingDiagnostic diagnostic;
+        loom_spirv_module_binary_t binary = {};
+        bool emitted = false;
+        IREE_ASSERT_OK(loom_spirv_compile_module_binary(
+            module.get(), &low_registry_.registry,
+            capture ? diagnostic.emitter() : iree_diagnostic_emitter_t{},
+            &arena_, nullptr, iree_allocator_system(), &emitted, &binary));
+        EXPECT_EQ(emitted, length == kMaximumNameLength);
+        if (!emitted) {
+          EXPECT_EQ(binary.words, nullptr);
+          EXPECT_EQ(binary.word_count, 0u);
+          if (capture) {
+            EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_060);
+            EXPECT_EQ(diagnostic.op, expected_op);
+            EXPECT_NE(diagnostic.op->location, 0u);
+            EXPECT_EQ(diagnostic.export_name, "entry");
+          }
+        } else {
+          EXPECT_EQ(diagnostic.count, 0u);
+        }
+        loom_spirv_module_binary_deinitialize(&binary, iree_allocator_system());
+      }
+    }
+  }
+}
+
+TEST_F(SpirvModuleCompilerTest, EntryNameAndMetadataInstructionLimits) {
+  constexpr size_t kMaximumEntryNameLength = (UINT16_MAX - 3u) * 4u - 1u;
+  for (bool hal_kernel : {false, true}) {
+    for (size_t length :
+         {kMaximumEntryNameLength, kMaximumEntryNameLength + 1}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "hal_kernel=" << hal_kernel << " length=" << length);
+      ModulePtr module = ParseModule(IREE_SV(R"(
+low.func.def target<spirv.logical.core> @entry() asm {
+  return
+}
+)"));
+      std::string name(length, 'e');
+      loom_target_facts_t facts = {};
+      InitializeTargetFacts(&loom_spirv_low_target_bundle_vulkan1_3, &facts);
+      facts.storage.export_plan.name = IREE_SV("source_entry");
+      facts.storage.export_plan.export_symbol =
+          iree_make_string_view(name.data(), name.size());
+      facts.storage.export_plan.abi_kind =
+          hal_kernel ? LOOM_TARGET_ABI_HAL_KERNEL
+                     : LOOM_TARGET_ABI_SHADER_ENTRY_POINT;
+      loom_target_function_version_t version =
+          MakeFunctionVersion(module.get(), IREE_SV("entry"), &facts);
+      loom_function_version_t* version_values[] = {&version.base};
+      loom_function_version_list_t versions = {version_values, 1};
+      loom_spirv_compile_options_t options = {.function_versions = &versions};
+      EncodingDiagnostic diagnostic;
+      loom_spirv_module_binary_t binary = {};
+      bool emitted = false;
+      IREE_ASSERT_OK(loom_spirv_compile_module_binary(
+          module.get(), &low_registry_.registry, diagnostic.emitter(), &arena_,
+          &options, iree_allocator_system(), &emitted, &binary));
+      // HAL metadata includes the entry name plus its parameter-key syntax,
+      // so it can exceed the encoding even while OpEntryPoint itself fits.
+      EXPECT_EQ(emitted, !hal_kernel && length == kMaximumEntryNameLength);
+      if (!emitted) {
+        EXPECT_EQ(binary.words, nullptr);
+        EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_060);
+        EXPECT_EQ(diagnostic.op, version.base.function.op);
+        EXPECT_EQ(diagnostic.export_name, "source_entry");
+      }
+      loom_spirv_module_binary_deinitialize(&binary, iree_allocator_system());
+    }
+  }
+}
+
+TEST_F(SpirvModuleCompilerTest, InternalSignatureInstructionLimits) {
+  const std::string type = "reg<spirv.id : i32>";
+  for (bool parameters : {false, true}) {
+    const size_t maximum = UINT16_MAX - (parameters ? 4u : 3u);
+    for (size_t count : {maximum, maximum + 1}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "parameters=" << parameters << " count=" << count);
+      std::string names;
+      std::string types;
+      std::string declarations;
+      std::string repeated_values;
+      for (size_t i = 0; i < count; ++i) {
+        if (i != 0) {
+          names += ", ";
+          types += ", ";
+          declarations += ", ";
+          repeated_values += ", ";
+        }
+        const std::string name = "%p" + std::to_string(i);
+        names += name;
+        types += type;
+        declarations += name + ": " + type;
+        repeated_values += "%value";
+      }
+      std::string source =
+          "spirv.target<vulkan1_3> @target\n"
+          "low.func.def target<spirv.logical.core>(@target) @helper(";
+      if (parameters) {
+        source += declarations;
+      }
+      source += ")";
+      if (!parameters) {
+        source += " -> (" + types + ")";
+      }
+      source += " asm {\n";
+      if (!parameters) {
+        source += "  %value = OpConstant.i32 1\n";
+      }
+      source += "  return";
+      if (!parameters) {
+        source += " " + repeated_values;
+      }
+      source +=
+          "\n}\nlow.func.def public target<spirv.logical.core>(@target) "
+          "abi(shader_entry_point) @entry() asm {\n";
+      if (parameters) {
+        source += "  %value = OpConstant.i32 1\n";
+      }
+      source += "  ";
+      if (!parameters) {
+        source += names + " = ";
+      }
+      source += "low.func.call @helper(";
+      if (parameters) {
+        source += repeated_values;
+      }
+      source += ") : (";
+      if (parameters) {
+        source += types;
+      }
+      source += ")";
+      if (!parameters) {
+        source += " -> (" + types + ")";
+      }
+      source += "\n  return\n}\n";
+      ModulePtr module =
+          ParseModule(iree_make_string_view(source.data(), source.size()));
+      loom_target_facts_t facts = {};
+      InitializeTargetFacts(&loom_spirv_low_target_bundle_vulkan1_3, &facts);
+      facts.storage.export_plan.name = IREE_SV("entry");
+      const loom_spirv_compile_entry_t entry = {
+          .function_op =
+              module->symbols
+                  .entries[FindSymbol(module.get(), IREE_SV("entry"))]
+                  .defining_op,
+          .target_facts = &facts,
+      };
+      const loom_spirv_compile_options_t options = {
+          .entries = &entry,
+          .entry_count = 1,
+      };
+      EncodingDiagnostic diagnostic;
+      loom_spirv_module_binary_t binary = {};
+      bool emitted = false;
+      IREE_ASSERT_OK(loom_spirv_compile_module_binary(
+          module.get(), &low_registry_.registry, diagnostic.emitter(), &arena_,
+          &options, iree_allocator_system(), &emitted, &binary));
+      EXPECT_EQ(emitted, count == maximum);
+      if (!emitted) {
+        EXPECT_EQ(binary.words, nullptr);
+        EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_060);
+        EXPECT_EQ(
+            diagnostic.op,
+            module->symbols.entries[FindSymbol(module.get(), IREE_SV("helper"))]
+                .defining_op);
+      }
+      loom_spirv_module_binary_deinitialize(&binary, iree_allocator_system());
+    }
+  }
+}
+
+TEST_F(SpirvModuleCompilerTest, TargetEncodingRequirementsAreDiagnostics) {
+  for (int rejection = 0; rejection < 3; ++rejection) {
+    SCOPED_TRACE(rejection);
+    ModulePtr module = ParseModule(IREE_SV(R"(
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @entry() asm {
+  return
+}
+)"));
+    loom_target_facts_t facts = {};
+    InitializeTargetFacts(&loom_spirv_low_target_bundle_vulkan1_3, &facts);
+    facts.storage.export_plan.name = IREE_SV("source_entry");
+    if (rejection == 2) {
+      facts.storage.config.contract_feature_bits = 0;
+    } else if (rejection == 1) {
+      facts.storage.config.contract_feature_bits |= UINT64_C(1) << 63;
+    } else {
+      facts.storage.snapshot.artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
+    }
+    loom_target_function_version_t version =
+        MakeFunctionVersion(module.get(), IREE_SV("entry"), &facts);
+    loom_function_version_t* version_values[] = {&version.base};
+    loom_function_version_list_t versions = {version_values, 1};
+    loom_spirv_compile_options_t options = {.function_versions = &versions};
+    EncodingDiagnostic diagnostic;
+    loom_spirv_module_binary_t binary = {};
+    bool emitted = true;
+    IREE_ASSERT_OK(loom_spirv_compile_module_binary(
+        module.get(), &low_registry_.registry, diagnostic.emitter(), &arena_,
+        &options, iree_allocator_system(), &emitted, &binary));
+    EXPECT_FALSE(emitted);
+    EXPECT_EQ(binary.words, nullptr);
+    EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_055);
+    EXPECT_EQ(diagnostic.op,
+              rejection == 2 ? nullptr : version.base.function.op);
+    EXPECT_EQ(diagnostic.export_name, rejection == 2 ? "" : "source_entry");
+    loom_spirv_module_binary_deinitialize(&binary, iree_allocator_system());
+  }
+}
+
+TEST_F(SpirvModuleCompilerTest, UnboundCallRejectsWithoutDiagnosticSink) {
+  ModulePtr module = ParseModule(IREE_SV(R"(
+spirv.target<vulkan1_3> @target
+low.func.decl target<spirv.logical.core>(@target) @external()
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @caller() asm {
+  low.func.call @external() : ()
+  return
+}
+)"));
+  loom_spirv_module_binary_t binary = {};
+  bool emitted = true;
+  IREE_ASSERT_OK(loom_spirv_compile_module_binary(
+      module.get(), &low_registry_.registry, iree_diagnostic_emitter_t{},
+      &arena_, nullptr, iree_allocator_system(), &emitted, &binary));
+  EXPECT_FALSE(emitted);
+  EXPECT_EQ(binary.words, nullptr);
+  EXPECT_EQ(binary.word_count, 0u);
+  loom_spirv_module_binary_deinitialize(&binary, iree_allocator_system());
+}
 
 TEST_F(SpirvModuleCompilerTest,
        FunctionTargetFactsSelectCapabilitiesWithoutMutatingIR) {

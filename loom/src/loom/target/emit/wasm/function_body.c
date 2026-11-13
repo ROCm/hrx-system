@@ -6,15 +6,17 @@
 
 #include "loom/target/emit/wasm/function_body.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 #include "loom/codegen/low/representation_binding.h"
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/wasm/descriptors/descriptors.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/wasm/binary_writer.h"
 #include "loom/target/emit/wasm/types.h"
 
@@ -143,6 +145,10 @@ typedef struct loom_wasm_emit_state_t {
   const loom_wasm_program_plan_t* program;
   // Prepared function being emitted.
   const loom_wasm_function_plan_t* function;
+  // Source-scoped sink for program and format rejection.
+  iree_diagnostic_emitter_t diagnostic_emitter;
+  // False after rejection, independently of diagnostic-sink success.
+  bool accepted;
   // Mutable copy of the prepared local namespace.
   loom_wasm_local_layout_t locals;
   // Mutable body payload writer.
@@ -158,11 +164,6 @@ static iree_status_t loom_wasm_write_opcode(loom_wasm_binary_writer_t* writer,
   }
   const uint32_t prefix = encoding_id >> 8;
   const uint32_t subopcode = encoding_id & 0xFFu;
-  if (prefix != LOOM_WASM_OPCODE_SIMD_PREFIX) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "unsupported Wasm opcode prefix 0x%02" PRIx32,
-                            prefix);
-  }
   IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u8(writer, (uint8_t)prefix));
   return loom_wasm_binary_write_u32_leb(writer, subopcode);
 }
@@ -197,11 +198,14 @@ static iree_status_t loom_wasm_local_layout_reserve_types(
 }
 
 static iree_status_t loom_wasm_local_layout_append_type(
-    loom_wasm_local_layout_t* layout, loom_wasm_value_type_t value_type,
-    uint32_t* out_local_index) {
+    loom_wasm_emit_state_t* state, const loom_op_t* op,
+    loom_wasm_value_type_t value_type, uint32_t* out_local_index) {
+  loom_wasm_local_layout_t* layout = &state->locals;
   if (layout->local_type_count >= UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm local index exceeds u32");
+    state->accepted = false;
+    return loom_target_artifact_emit_limit(
+        state->diagnostic_emitter, op, IREE_SV("Wasm"), IREE_SV("local count"),
+        (uint64_t)layout->local_type_count + 1, UINT32_MAX);
   }
   IREE_RETURN_IF_ERROR(loom_wasm_local_layout_reserve_types(
       layout, layout->local_type_count + 1));
@@ -638,29 +642,32 @@ static iree_status_t loom_wasm_emit_descriptor_packet(
       iree_string_view_t key = loom_low_descriptor_set_string(
           descriptor_set,
           loom_low_descriptor_key_string_ref(descriptor_set, descriptor));
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "Wasm descriptor '%.*s' is unsupported",
-                              (int)key.size, key.data);
+      state->accepted = false;
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(state->function->name),
+          loom_param_string(key),
+          loom_param_string(IREE_SV("wasm.core.simd128")),
+          loom_param_string(IREE_SV("wasm-binary")),
+      };
+      return iree_diagnostic_emit(
+          state->diagnostic_emitter,
+          &(loom_diagnostic_emission_t){.op = op,
+                                        .error = LOOM_ERR_TARGET_053,
+                                        .params = params,
+                                        .param_count = IREE_ARRAYSIZE(params)});
     }
   }
   return loom_wasm_emit_lane_stack_op(state, op, descriptor, lane);
 }
 
-static iree_status_t loom_wasm_record_descriptor_flags(
+static void loom_wasm_record_descriptor_flags(
     loom_wasm_emit_state_t* state, const loom_low_descriptor_t* descriptor) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_wasm_core_simd128_descriptor_set();
   const loom_low_descriptor_view_t* descriptor_view =
       loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor);
   if (descriptor_view->schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
-    return iree_ok_status();
-  }
-  const uint16_t schedule_class_id = descriptor_view->schedule_class_id;
-  if (schedule_class_id >= descriptor_set->schedule_class_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "Wasm descriptor references invalid schedule class %" PRIu16,
-        schedule_class_id);
+    return;
   }
   const loom_low_schedule_class_t* schedule_class =
       loom_low_schedule_model_schedule_class(state->function->schedule_model,
@@ -671,7 +678,6 @@ static iree_status_t loom_wasm_record_descriptor_flags(
   if (iree_any_bit_set(schedule_class->flags, memory_flags)) {
     state->flags |= LOOM_WASM_FUNCTION_BODY_FLAG_USES_MEMORY;
   }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_wasm_emit_low_transfer(loom_wasm_emit_state_t* state,
@@ -734,10 +740,10 @@ static iree_status_t loom_wasm_emit_structured_region_before_terminator(
 
   const loom_block_t* block = loom_region_const_entry_block(region);
   const loom_op_t* op = block->first_op;
-  for (; op && op != terminator; op = op->next_op) {
+  for (; op && op != terminator && state->accepted; op = op->next_op) {
     IREE_RETURN_IF_ERROR(loom_wasm_emit_op(state, op));
   }
-  IREE_ASSERT(op == terminator,
+  IREE_ASSERT(!state->accepted || op == terminator,
               "verified Wasm terminator must belong to its region");
   return iree_ok_status();
 }
@@ -758,6 +764,9 @@ static iree_status_t loom_wasm_emit_low_func_exit(loom_wasm_emit_state_t* state,
       loom_wasm_binary_write_u8(&state->writer, LOOM_WASM_BLOCK_TYPE_EMPTY));
   IREE_RETURN_IF_ERROR(loom_wasm_emit_structured_region_before_terminator(
       state, body, return_op));
+  if (!state->accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_wasm_emit_low_return(state, return_op));
   return loom_wasm_binary_write_u8(&state->writer, LOOM_WASM_OPCODE_END);
 }
@@ -861,6 +870,9 @@ static iree_status_t loom_wasm_emit_low_scf_if(loom_wasm_emit_state_t* state,
 
   IREE_RETURN_IF_ERROR(loom_wasm_emit_structured_region_before_terminator(
       state, then_region, then_yield));
+  if (!state->accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_wasm_emit_low_scf_yield_to_results(
       state, then_yield, results.values, results.count));
 
@@ -871,6 +883,9 @@ static iree_status_t loom_wasm_emit_low_scf_if(loom_wasm_emit_state_t* state,
         loom_wasm_binary_write_u8(&state->writer, LOOM_WASM_OPCODE_ELSE));
     IREE_RETURN_IF_ERROR(loom_wasm_emit_structured_region_before_terminator(
         state, else_region, else_yield));
+    if (!state->accepted) {
+      return iree_ok_status();
+    }
     IREE_RETURN_IF_ERROR(loom_wasm_emit_low_scf_yield_to_results(
         state, else_yield, results.values, results.count));
   }
@@ -918,7 +933,10 @@ static iree_status_t loom_wasm_emit_low_scf_for(loom_wasm_emit_state_t* state,
   // threshold is representable and the loop can test before incrementing.
   uint32_t threshold_local = 0;
   IREE_RETURN_IF_ERROR(loom_wasm_local_layout_append_type(
-      &state->locals, LOOM_WASM_VALUE_TYPE_I32, &threshold_local));
+      state, op, LOOM_WASM_VALUE_TYPE_I32, &threshold_local));
+  if (!state->accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get(state, upper_bound));
   IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get(state, step));
   IREE_RETURN_IF_ERROR(
@@ -979,6 +997,9 @@ static iree_status_t loom_wasm_emit_low_scf_for(loom_wasm_emit_state_t* state,
 
   IREE_RETURN_IF_ERROR(loom_wasm_emit_structured_region_before_terminator(
       state, body_region, yield));
+  if (!state->accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get(state, iv_value));
   IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get_index(state, threshold_local));
   IREE_RETURN_IF_ERROR(
@@ -1059,6 +1080,9 @@ static iree_status_t loom_wasm_emit_low_scf_while(loom_wasm_emit_state_t* state,
 
   IREE_RETURN_IF_ERROR(loom_wasm_emit_structured_region_before_terminator(
       state, before_region, condition));
+  if (!state->accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_wasm_emit_local_get(
       state, loom_low_scf_condition_condition(condition)));
   IREE_RETURN_IF_ERROR(
@@ -1079,6 +1103,9 @@ static iree_status_t loom_wasm_emit_low_scf_while(loom_wasm_emit_state_t* state,
 
   IREE_RETURN_IF_ERROR(loom_wasm_emit_structured_region_before_terminator(
       state, after_region, yield));
+  if (!state->accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_wasm_emit_value_moves(
       state, yielded.values, before_block->arg_ids, yielded.count));
   IREE_RETURN_IF_ERROR(
@@ -1120,11 +1147,10 @@ static iree_status_t loom_wasm_emit_structural_op(loom_wasm_emit_state_t* state,
   if (loom_low_scf_while_isa(op)) {
     return loom_wasm_emit_low_scf_while(state, op);
   }
-  iree_string_view_t op_name = loom_op_name(state->program->module, op);
-  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                          "verified Wasm low function contains unsupported "
-                          "structural op '%.*s'",
-                          (int)op_name.size, op_name.data);
+  state->accepted = false;
+  return loom_target_artifact_emit_requirement(
+      state->diagnostic_emitter, op, IREE_SV("Wasm"),
+      IREE_SV("an operation supported by Wasm instruction emission"));
 }
 
 static iree_status_t loom_wasm_emit_op(loom_wasm_emit_state_t* state,
@@ -1138,8 +1164,7 @@ static iree_status_t loom_wasm_emit_op(loom_wasm_emit_state_t* state,
   if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return loom_wasm_emit_structural_op(state, op);
   }
-  IREE_RETURN_IF_ERROR(
-      loom_wasm_record_descriptor_flags(state, packet.descriptor));
+  loom_wasm_record_descriptor_flags(state, packet.descriptor);
   return loom_wasm_emit_descriptor_packet(state, op, packet.descriptor);
 }
 
@@ -1176,7 +1201,8 @@ static iree_status_t loom_wasm_emit_local_declarations(
 static iree_status_t loom_wasm_emit_region(loom_wasm_emit_state_t* state,
                                            const loom_region_t* region) {
   const loom_block_t* block = loom_region_const_entry_block(region);
-  for (const loom_op_t* op = block->first_op; op; op = op->next_op) {
+  for (const loom_op_t* op = block->first_op; op && state->accepted;
+       op = op->next_op) {
     IREE_RETURN_IF_ERROR(loom_wasm_emit_op(state, op));
   }
   return iree_ok_status();
@@ -1185,6 +1211,9 @@ static iree_status_t loom_wasm_emit_region(loom_wasm_emit_state_t* state,
 static iree_status_t loom_wasm_emit_function_body_payload(
     loom_wasm_emit_state_t* state) {
   IREE_RETURN_IF_ERROR(loom_wasm_emit_region(state, state->function->body));
+  if (!state->accepted) {
+    return iree_ok_status();
+  }
   return loom_wasm_binary_write_u8(&state->writer, LOOM_WASM_OPCODE_END);
 }
 
@@ -1199,16 +1228,24 @@ void loom_wasm_function_body_deinitialize(loom_wasm_function_body_t* body,
 
 iree_status_t loom_wasm_emit_function_body(
     const loom_wasm_program_plan_t* program,
-    const loom_wasm_function_plan_t* function, iree_allocator_t allocator,
-    loom_wasm_function_body_t* out_body) {
+    const loom_wasm_function_plan_t* function,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_allocator_t allocator,
+    bool* out_accepted, loom_wasm_function_body_t* out_body) {
   IREE_ASSERT_ARGUMENT(program);
   IREE_ASSERT_ARGUMENT(function);
   IREE_ASSERT_ARGUMENT(out_body);
+  *out_accepted = false;
   *out_body = (loom_wasm_function_body_t){0};
-
+  loom_diagnostic_export_scope_t diagnostic_scope = {
+      .export_name = function->source_export_name,
+      .target = diagnostic_emitter,
+  };
   loom_wasm_emit_state_t state = {
       .program = program,
       .function = function,
+      .diagnostic_emitter =
+          loom_diagnostic_export_scope_emitter(&diagnostic_scope),
+      .accepted = true,
   };
   loom_wasm_value_ordinals_acquire(&state);
   loom_wasm_binary_writer_initialize(allocator, &state.writer);
@@ -1221,34 +1258,33 @@ iree_status_t loom_wasm_emit_function_body(
   // after the instructions so that the complete local namespace is known,
   // then serialize the two spans in Wasm's required declarations-first order.
   const iree_host_size_t instruction_length = state.writer.length;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && state.accepted) {
     status = loom_wasm_emit_local_declarations(&state);
   }
 
   loom_wasm_binary_writer_t output_writer;
   loom_wasm_binary_writer_initialize(allocator, &output_writer);
-  if (iree_status_is_ok(status) && state.writer.length > UINT32_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "Wasm function body exceeds u32 size");
+  if (iree_status_is_ok(status) && state.accepted &&
+      state.writer.length > UINT32_MAX) {
+    state.accepted = false;
+    status = loom_target_artifact_emit_limit(
+        state.diagnostic_emitter, function->body->parent_op, IREE_SV("Wasm"),
+        IREE_SV("function body byte length"), state.writer.length, UINT32_MAX);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && state.accepted) {
     status = loom_wasm_binary_write_u32_leb(&output_writer,
                                             (uint32_t)state.writer.length);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && state.accepted) {
     status = loom_wasm_binary_write_bytes(
         &output_writer, state.writer.data + instruction_length,
         state.writer.length - instruction_length);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && state.accepted) {
     status = loom_wasm_binary_write_bytes(&output_writer, state.writer.data,
                                           instruction_length);
   }
-  if (iree_status_is_ok(status) && state.locals.local_type_count > UINT32_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "Wasm local count exceeds u32");
-  }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && state.accepted) {
     *out_body = (loom_wasm_function_body_t){
         .data = output_writer.data,
         .data_length = output_writer.length,
@@ -1258,6 +1294,7 @@ iree_status_t loom_wasm_emit_function_body(
         .flags = state.flags,
     };
     output_writer.data = NULL;
+    *out_accepted = true;
   }
 
   loom_wasm_binary_writer_deinitialize(&output_writer);

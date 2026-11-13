@@ -352,7 +352,7 @@
           "stderr": {
             "contains": [
               "unexpected error at line 0:",
-              "SPIRV/PROFILE",
+              "SPIRV/035",
               "SPIR-V feature 'spirv.physical_storage_buffer' has contradictory facts",
               "'spirv:vulkan1.3+bda+hal' says true",
               "'SPIR-V checker features option' says false"
@@ -361,7 +361,7 @@
           "stdout": {
             "contains": [
               "\"detail\":\"unexpected error at line 0:",
-              "\"diagnostic_code\":\"SPIRV/PROFILE\""
+              "\"domain\":\"SPIRV\",\"code\":35"
             ]
           }
         }

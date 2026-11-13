@@ -8,7 +8,8 @@
 //
 // This stage writes already-selected and target-bound Low functions. It does
 // not perform entry selection, target resolution, descriptor-set binding,
-// verification, diagnostics, scheduling, or allocation. The mutable module in
+// verification, scheduling, or allocation. Format encoding limits are diagnosed
+// at their source-owned producers. The mutable module in
 // the program plan is used only for function-local value-domain scratch.
 
 #ifndef LOOM_TARGET_EMIT_SPIRV_MODULE_EMITTER_H_
@@ -30,8 +31,9 @@ extern "C" {
 // state and is not revalidated during emission.
 iree_status_t loom_spirv_program_emit_binary(
     const loom_spirv_program_plan_t* program,
+    iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena, iree_allocator_t allocator,
-    loom_spirv_module_binary_t* out_module);
+    bool* out_accepted, loom_spirv_module_binary_t* out_module);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1268,27 +1268,34 @@ ERR_BACKEND_055 = ErrorDef(
     domain=ErrorDomain.BACKEND,
     code=55,
     severity=Severity.ERROR,
-    summary="Native artifact contract is not satisfied.",
-    message="native artifact requires {constraint}",
-    params=(ErrorParam("constraint", ParamKind.STRING),),
+    summary="Artifact contract is not satisfied.",
+    message="{format} artifact requires {constraint}",
+    params=(
+        ErrorParam("format", ParamKind.STRING),
+        ErrorParam("constraint", ParamKind.STRING),
+    ),
 )
 
 ERR_BACKEND_056 = ErrorDef(
     domain=ErrorDomain.BACKEND,
     code=56,
     severity=Severity.ERROR,
-    summary="Native exports have the same external name.",
-    message="duplicate native export '{symbol_name}'",
-    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+    summary="Artifact exports have the same external name.",
+    message="duplicate {format} export '{symbol_name}'",
+    params=(
+        ErrorParam("format", ParamKind.STRING),
+        ErrorParam("symbol_name", ParamKind.STRING),
+    ),
 )
 
 ERR_BACKEND_057 = ErrorDef(
     domain=ErrorDomain.BACKEND,
     code=57,
     severity=Severity.ERROR,
-    summary="A native symbol does not satisfy the artifact contract.",
-    message="native symbol '{symbol_name}' requires {constraint}",
+    summary="A symbol does not satisfy the artifact contract.",
+    message="{format} symbol '{symbol_name}' requires {constraint}",
     params=(
+        ErrorParam("format", ParamKind.STRING),
         ErrorParam("symbol_name", ParamKind.STRING),
         ErrorParam("constraint", ParamKind.STRING),
     ),
@@ -1330,6 +1337,20 @@ ERR_BACKEND_059 = ErrorDef(
     fix_hint=(
         "Provide a compatible function definition or an import supported by "
         "the selected target"
+    ),
+)
+
+ERR_BACKEND_060 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=60,
+    severity=Severity.ERROR,
+    summary="Artifact extent exceeds its format limit.",
+    message="{format} {quantity} is {actual}, exceeding the format limit {maximum}",
+    params=(
+        ErrorParam("format", ParamKind.STRING),
+        ErrorParam("quantity", ParamKind.STRING),
+        ErrorParam("actual", ParamKind.U64),
+        ErrorParam("maximum", ParamKind.U64),
     ),
 )
 
@@ -1384,4 +1405,5 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_057,
     ERR_BACKEND_058,
     ERR_BACKEND_059,
+    ERR_BACKEND_060,
 )

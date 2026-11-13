@@ -55,9 +55,9 @@ class SpirvModuleValueTableTest : public ::testing::Test {
     body_builder_.ip.parent_op = func_op;
 
     iree_arena_initialize(&block_pool_, &scratch_arena_);
-    IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
+    loom_spirv_module_builder_initialize(
         &loom_spirv_low_target_bundle_vulkan1_3, iree_allocator_system(),
-        &spirv_builder_));
+        &spirv_builder_);
   }
 
   void TearDown() override {

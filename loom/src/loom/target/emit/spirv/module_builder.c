@@ -6,6 +6,7 @@
 
 #include "loom/target/emit/spirv/module_builder.h"
 
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/spirv/binary_format.h"
 
 void loom_spirv_module_binary_deinitialize(loom_spirv_module_binary_t* module,
@@ -13,40 +14,6 @@ void loom_spirv_module_binary_deinitialize(loom_spirv_module_binary_t* module,
   IREE_ASSERT_ARGUMENT(module);
   iree_allocator_free(allocator, module->words);
   *module = (loom_spirv_module_binary_t){0};
-}
-
-static iree_status_t loom_spirv_module_builder_validate_target(
-    const loom_target_bundle_t* target) {
-  if (target->snapshot->codegen_format != LOOM_TARGET_CODEGEN_FORMAT_SPIRV) {
-    iree_string_view_t actual =
-        loom_target_codegen_format_name(target->snapshot->codegen_format);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "target '%.*s' uses codegen format '%.*s', "
-                            "expected 'spirv'",
-                            (int)target->name.size, target->name.data,
-                            (int)actual.size, actual.data);
-  }
-  if (target->snapshot->artifact_format !=
-      LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY) {
-    iree_string_view_t actual =
-        loom_target_artifact_format_name(target->snapshot->artifact_format);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "target '%.*s' emits artifact format '%.*s', "
-                            "expected 'spirv_binary'",
-                            (int)target->name.size, target->name.data,
-                            (int)actual.size, actual.data);
-  }
-  if (target->export_plan->abi_kind != LOOM_TARGET_ABI_SHADER_ENTRY_POINT &&
-      target->export_plan->abi_kind != LOOM_TARGET_ABI_HAL_KERNEL) {
-    iree_string_view_t actual =
-        loom_target_abi_kind_name(target->export_plan->abi_kind);
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "target '%.*s' uses export ABI '%.*s', expected "
-                            "'shader_entry_point' or 'hal_kernel'",
-                            (int)target->name.size, target->name.data,
-                            (int)actual.size, actual.data);
-  }
-  return iree_ok_status();
 }
 
 static bool loom_spirv_module_builder_uses_raw_bda_abi(
@@ -127,13 +94,6 @@ static loom_spirv_feature_bits_t loom_spirv_module_builder_base_feature_bits(
 
 static iree_status_t loom_spirv_module_builder_emit_feature_preamble(
     loom_spirv_module_builder_t* builder) {
-  if (!loom_spirv_feature_set_has_atom(&builder->feature_set,
-                                       LOOM_SPIRV_FEATURE_ATOM_VULKAN_SHADER)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "SPIR-V shader module emission requires the Vulkan shader feature");
-  }
-
   loom_spirv_binary_writer_t* capability_writer =
       &builder->sections[LOOM_SPIRV_MODULE_SECTION_CAPABILITY];
   for (uint8_t i = 0; i < builder->feature_set.capability_count; ++i) {
@@ -174,17 +134,14 @@ static iree_status_t loom_spirv_module_builder_emit_feature_preamble(
       IREE_ARRAYSIZE(memory_model_operands));
 }
 
-iree_status_t loom_spirv_module_builder_initialize(
+void loom_spirv_module_builder_initialize(
     const loom_target_bundle_t* target, iree_allocator_t allocator,
     loom_spirv_module_builder_t* out_builder) {
   IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(out_builder);
 
-  IREE_RETURN_IF_ERROR(loom_spirv_module_builder_validate_target(target));
-
   *out_builder = (loom_spirv_module_builder_t){
       .allocator = allocator,
-      .target_name = target->name,
       .abi_kind = target->export_plan->abi_kind,
       .required_feature_bits =
           loom_spirv_module_builder_base_feature_bits(target),
@@ -193,7 +150,6 @@ iree_status_t loom_spirv_module_builder_initialize(
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(out_builder->sections); ++i) {
     loom_spirv_binary_writer_initialize(allocator, &out_builder->sections[i]);
   }
-  return iree_ok_status();
 }
 
 void loom_spirv_module_builder_deinitialize(
@@ -275,17 +231,46 @@ static iree_status_t loom_spirv_module_builder_write_header(
                                        IREE_ARRAYSIZE(header));
 }
 
+iree_status_t loom_spirv_module_builder_emit_string(
+    loom_spirv_module_builder_t* builder, loom_spirv_module_section_t section,
+    uint16_t opcode, const uint32_t* prefix_operands,
+    iree_host_size_t prefix_operand_count, iree_string_view_t string,
+    const uint32_t* suffix_operands, iree_host_size_t suffix_operand_count,
+    iree_diagnostic_emitter_t diagnostic_emitter, const loom_op_t* source_op,
+    bool* accepted) {
+  // The header and fixed operands leave the remaining words for a NUL-padded
+  // string. All fixed operand spans are bounded by their instruction schema.
+  const iree_host_size_t maximum_length =
+      (UINT16_MAX - 1u - prefix_operand_count - suffix_operand_count) * 4u - 1u;
+  if (string.size > maximum_length) {
+    *accepted = false;
+    return loom_target_artifact_emit_limit(
+        diagnostic_emitter, source_op, IREE_SV("SPIR-V"),
+        IREE_SV("instruction string bytes"), string.size, maximum_length);
+  }
+  return loom_spirv_binary_write_string_instruction(
+      loom_spirv_module_builder_section(builder, section), opcode,
+      prefix_operands, prefix_operand_count, string, suffix_operands,
+      suffix_operand_count);
+}
+
 iree_status_t loom_spirv_module_builder_finalize(
     loom_spirv_module_builder_t* builder,
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_accepted,
     loom_spirv_module_binary_t* out_module) {
   IREE_ASSERT_ARGUMENT(builder);
   IREE_ASSERT_ARGUMENT(out_module);
 
   *out_module = (loom_spirv_module_binary_t){0};
-  const loom_spirv_feature_bits_t closed_feature_bits =
-      loom_spirv_feature_bits_with_dependencies(builder->required_feature_bits);
-  IREE_RETURN_IF_ERROR(loom_spirv_feature_set_prepare(
-      builder->target_name, closed_feature_bits, &builder->feature_set));
+  *out_accepted = false;
+  loom_spirv_feature_set_prepare(builder->required_feature_bits,
+                                 &builder->feature_set);
+  if (!loom_spirv_feature_set_has_atom(&builder->feature_set,
+                                       LOOM_SPIRV_FEATURE_ATOM_VULKAN_SHADER)) {
+    return loom_target_artifact_emit_requirement(
+        diagnostic_emitter, NULL, IREE_SV("SPIR-V"),
+        IREE_SV("the Vulkan shader feature"));
+  }
   IREE_RETURN_IF_ERROR(
       loom_spirv_module_builder_emit_feature_preamble(builder));
 
@@ -301,6 +286,7 @@ iree_status_t loom_spirv_module_builder_finalize(
                                            builder->sections[i].word_count);
   }
   if (iree_status_is_ok(status)) {
+    *out_accepted = true;
     loom_spirv_binary_writer_steal_words(&module_writer, &out_module->words,
                                          &out_module->word_count);
   }

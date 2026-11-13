@@ -6,26 +6,10 @@
 
 #include "loom/target/arch/spirv/features.h"
 
-#include <string>
-
 #include "iree/testing/gtest.h"
-#include "iree/testing/status_matchers.h"
 #include "loom/target/arch/spirv/records/target_records.h"
 
 namespace {
-
-std::string StatusToStringAndFree(iree_status_t status) {
-  iree_allocator_t allocator = iree_allocator_system();
-  char* buffer = nullptr;
-  iree_host_size_t buffer_length = 0;
-  std::string result = iree_status_code_string(iree_status_code(status));
-  if (iree_status_to_string(status, &allocator, &buffer, &buffer_length)) {
-    result.assign(buffer, buffer_length);
-    iree_allocator_free(allocator, buffer);
-  }
-  iree_status_free(status);
-  return result;
-}
 
 bool ContainsExtension(const loom_spirv_feature_set_t& feature_set,
                        iree_string_view_t extension_name) {
@@ -118,9 +102,8 @@ TEST(SpirvFeaturesTest, KnownAtomsHaveDirectBitsAndDescriptors) {
 
 TEST(SpirvFeaturesTest, PreparesVulkanBdaProfile) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.vulkan1_3_bda"), LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
-      &feature_set));
+  loom_spirv_feature_set_prepare(LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
+                                 &feature_set);
 
   EXPECT_TRUE(loom_spirv_feature_set_has_atom(
       &feature_set, LOOM_SPIRV_FEATURE_ATOM_VULKAN_SHADER));
@@ -152,11 +135,10 @@ TEST(SpirvFeaturesTest, PreparesVulkanBdaProfile) {
 
 TEST(SpirvFeaturesTest, PreparesSubgroupBallotCapability) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.subgroup_ballot"),
+  loom_spirv_feature_set_prepare(
       LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA |
           LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_BALLOT,
-      &feature_set));
+      &feature_set);
 
   EXPECT_TRUE(ContainsCapability(
       feature_set, LOOM_SPIRV_CAPABILITY_GROUP_NON_UNIFORM_BALLOT));
@@ -166,11 +148,9 @@ TEST(SpirvFeaturesTest, PreparesSubgroupBallotCapability) {
 
 TEST(SpirvFeaturesTest, PreparesSubgroupVotes) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.subgroup_vote"),
-      LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA |
-          LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_VOTE,
-      &feature_set));
+  loom_spirv_feature_set_prepare(LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA |
+                                     LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_VOTE,
+                                 &feature_set);
   EXPECT_TRUE(ContainsCapability(feature_set,
                                  LOOM_SPIRV_CAPABILITY_GROUP_NON_UNIFORM_VOTE));
   EXPECT_TRUE(ContainsOpcode(feature_set, LOOM_SPIRV_OP_GROUP_NON_UNIFORM_ALL));
@@ -184,12 +164,11 @@ TEST(SpirvFeaturesTest, PreparesSubgroupVotes) {
 
 TEST(SpirvFeaturesTest, PreparesSubgroupShuffleCapabilities) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.subgroup_shuffle"),
+  loom_spirv_feature_set_prepare(
       LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA |
           LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_SHUFFLE |
           LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_SHUFFLE_RELATIVE,
-      &feature_set));
+      &feature_set);
 
   EXPECT_TRUE(ContainsCapability(
       feature_set, LOOM_SPIRV_CAPABILITY_GROUP_NON_UNIFORM_SHUFFLE));
@@ -215,9 +194,7 @@ TEST(SpirvFeaturesTest, ClosesTransitiveSubgroupBallotDependencies) {
 
 TEST(SpirvFeaturesTest, PreparesAllFloatControlFeatures) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(IREE_SV("test.all_features"),
-                                                LOOM_SPIRV_FEATURE_KNOWN_BITS,
-                                                &feature_set));
+  loom_spirv_feature_set_prepare(LOOM_SPIRV_FEATURE_KNOWN_BITS, &feature_set);
   EXPECT_TRUE(loom_spirv_feature_set_has_atom(
       &feature_set, LOOM_SPIRV_FEATURE_ATOM_FLOAT32_DENORM_PRESERVE));
   EXPECT_TRUE(loom_spirv_feature_set_has_atom(
@@ -249,12 +226,10 @@ TEST(SpirvFeaturesTest, PreparesAllFloatControlFeatures) {
 
 TEST(SpirvFeaturesTest, PreparesCooperativeFeatureAtomsWithoutBda) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.cooperative"),
-      LOOM_SPIRV_FEATURE_VULKAN_SHADER |
-          LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR |
-          LOOM_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV,
-      &feature_set));
+  loom_spirv_feature_set_prepare(LOOM_SPIRV_FEATURE_VULKAN_SHADER |
+                                     LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR |
+                                     LOOM_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV,
+                                 &feature_set);
 
   EXPECT_EQ(feature_set.addressing_model, LOOM_SPIRV_ADDRESSING_MODEL_LOGICAL);
   EXPECT_EQ(feature_set.memory_model, LOOM_SPIRV_MEMORY_MODEL_VULKAN);
@@ -279,12 +254,11 @@ TEST(SpirvFeaturesTest, PreparesCooperativeFeatureAtomsWithoutBda) {
 
 TEST(SpirvFeaturesTest, PreparesCooperativeVectorTrainingAtom) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.cooperative_vector_training"),
+  loom_spirv_feature_set_prepare(
       LOOM_SPIRV_FEATURE_VULKAN_SHADER |
           LOOM_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV |
           LOOM_SPIRV_FEATURE_COOPERATIVE_VECTOR_TRAINING_NV,
-      &feature_set));
+      &feature_set);
 
   EXPECT_TRUE(ContainsCapability(feature_set,
                                  LOOM_SPIRV_CAPABILITY_COOPERATIVE_VECTOR_NV));
@@ -299,10 +273,9 @@ TEST(SpirvFeaturesTest, PreparesCooperativeVectorTrainingAtom) {
 
 TEST(SpirvFeaturesTest, PreparesBfloat16TypeAtom) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.bfloat16_type"),
+  loom_spirv_feature_set_prepare(
       LOOM_SPIRV_FEATURE_VULKAN_SHADER | LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR,
-      &feature_set));
+      &feature_set);
 
   EXPECT_TRUE(loom_spirv_feature_set_has_atom(
       &feature_set, LOOM_SPIRV_FEATURE_ATOM_BFLOAT16_TYPE_KHR));
@@ -313,13 +286,12 @@ TEST(SpirvFeaturesTest, PreparesBfloat16TypeAtom) {
 
 TEST(SpirvFeaturesTest, PreparesBfloat16CooperativeMatrixAtom) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.bfloat16_cooperative_matrix"),
+  loom_spirv_feature_set_prepare(
       LOOM_SPIRV_FEATURE_VULKAN_SHADER |
           LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR |
           LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR |
           LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR,
-      &feature_set));
+      &feature_set);
 
   EXPECT_TRUE(
       ContainsExtension(feature_set, IREE_SV("SPV_KHR_cooperative_matrix")));
@@ -334,11 +306,10 @@ TEST(SpirvFeaturesTest, PreparesBfloat16CooperativeMatrixAtom) {
 
 TEST(SpirvFeaturesTest, PreparesBfloat16DotProductAtom) {
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      IREE_SV("test.bfloat16_dot_product"),
+  loom_spirv_feature_set_prepare(
       LOOM_SPIRV_FEATURE_VULKAN_SHADER | LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR |
           LOOM_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR,
-      &feature_set));
+      &feature_set);
 
   EXPECT_TRUE(ContainsExtension(feature_set, IREE_SV("SPV_KHR_bfloat16")));
   EXPECT_TRUE(ContainsCapability(feature_set,
@@ -347,48 +318,17 @@ TEST(SpirvFeaturesTest, PreparesBfloat16DotProductAtom) {
       feature_set, LOOM_SPIRV_CAPABILITY_B_FLOAT16_DOT_PRODUCT_KHR));
 }
 
-TEST(SpirvFeaturesTest, RejectsMissingAtomDependency) {
+TEST(SpirvFeaturesTest, ClosesTransitiveDependencies) {
   loom_spirv_feature_set_t feature_set;
-  iree_status_t status = loom_spirv_feature_set_prepare(
-      IREE_SV("test.bda_without_vulkan"),
-      LOOM_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER, &feature_set);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_FAILED_PRECONDITION);
-  std::string diagnostic = StatusToStringAndFree(status);
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("test.bda_without_vulkan"));
-  EXPECT_THAT(diagnostic,
-              ::testing::HasSubstr("spirv.physical_storage_buffer"));
-  EXPECT_THAT(diagnostic,
-              ::testing::HasSubstr("SPV_KHR_physical_storage_buffer"));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("5347"));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("spirv.vulkan.shader"));
-}
-
-TEST(SpirvFeaturesTest, RejectsMissingBfloat16TypeDependency) {
-  loom_spirv_feature_set_t feature_set;
-  iree_status_t status = loom_spirv_feature_set_prepare(
-      IREE_SV("test.bfloat16_cooperative_without_type"),
-      LOOM_SPIRV_FEATURE_VULKAN_SHADER |
-          LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR |
-          LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR,
-      &feature_set);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_FAILED_PRECONDITION);
-  std::string diagnostic = StatusToStringAndFree(status);
-  EXPECT_THAT(diagnostic,
-              ::testing::HasSubstr("spirv.bfloat16.cooperative_matrix.khr"));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("SPV_KHR_bfloat16"));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("5118"));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("spirv.bfloat16.type.khr"));
-}
-
-TEST(SpirvFeaturesTest, RejectsUnknownBits) {
-  loom_spirv_feature_set_t feature_set;
-  iree_status_t status = loom_spirv_feature_set_prepare(
-      IREE_SV("test.unknown_bits"),
-      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_COUNT, &feature_set);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  std::string diagnostic = StatusToStringAndFree(status);
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("test.unknown_bits"));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("unknown feature bits"));
+  loom_spirv_feature_set_prepare(
+      LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR, &feature_set);
+  EXPECT_TRUE(loom_spirv_feature_set_has_atom(
+      &feature_set, LOOM_SPIRV_FEATURE_ATOM_VULKAN_SHADER));
+  EXPECT_TRUE(loom_spirv_feature_set_has_atom(
+      &feature_set, LOOM_SPIRV_FEATURE_ATOM_BFLOAT16_TYPE_KHR));
+  EXPECT_TRUE(ContainsExtension(feature_set, IREE_SV("SPV_KHR_bfloat16")));
+  EXPECT_TRUE(ContainsCapability(feature_set,
+                                 LOOM_SPIRV_CAPABILITY_COOPERATIVE_MATRIX_KHR));
 }
 
 TEST(SpirvFeaturesTest, TargetRecordSelectsPreparedVulkanBdaProfile) {
@@ -398,8 +338,8 @@ TEST(SpirvFeaturesTest, TargetRecordSelectsPreparedVulkanBdaProfile) {
             LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA);
 
   loom_spirv_feature_set_t feature_set;
-  IREE_ASSERT_OK(loom_spirv_feature_set_prepare(
-      target.name, target.config->contract_feature_bits, &feature_set));
+  loom_spirv_feature_set_prepare(target.config->contract_feature_bits,
+                                 &feature_set);
   EXPECT_EQ(feature_set.addressing_model,
             LOOM_SPIRV_ADDRESSING_MODEL_PHYSICAL_STORAGE_BUFFER64);
 }

@@ -7,7 +7,9 @@
 #include "profile_rows.h"
 
 #include "diagnostic.h"
+#include "loom/target/arch/spirv/error_catalog.h"
 #include "loomc/iree.h"
+#include "result.h"
 
 static loomc_status_t loomc_spirv_rows_validate_string_view(
     loomc_string_view_t value) {
@@ -16,10 +18,6 @@ static loomc_status_t loomc_spirv_rows_validate_string_view(
                              "string view has length but no data");
   }
   return loomc_ok_status();
-}
-
-static const char* loomc_spirv_rows_string_data(loomc_string_view_t value) {
-  return value.data != NULL ? value.data : "";
 }
 
 loom_spirv_feature_atom_t loomc_spirv_feature_atom_from_public(
@@ -746,11 +744,19 @@ static bool loomc_spirv_rows_vector_row_keys_equal(
          lhs->flags == rhs->flags;
 }
 
-static loomc_status_t loomc_spirv_rows_fail_status(loomc_result_t* result,
-                                                   loomc_status_t status) {
-  return loomc_result_fail_status_diagnostic_consume(
-      result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
-      loomc_make_cstring_view("SPIRV/PROFILE"), status);
+static loomc_status_t loomc_spirv_rows_emit_diagnostic(
+    loomc_result_t* result, const loom_error_def_t* error,
+    const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
+  const loom_diagnostic_emission_t emission = {
+      .error = error,
+      .params = params,
+      .param_count = param_count,
+  };
+  LOOMC_RETURN_IF_ERROR(loomc_result_add_loom_diagnostic_emission(
+      result, NULL, (loom_source_resolver_t){0}, LOOM_EMITTER_VERIFIER,
+      &emission, NULL));
+  loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
+  return loomc_ok_status();
 }
 
 static loomc_status_t loomc_spirv_rows_fail_row_contradiction(
@@ -758,30 +764,30 @@ static loomc_status_t loomc_spirv_rows_fail_row_contradiction(
     loomc_string_view_t lhs_provenance, loomc_target_fact_state_t lhs_state,
     loomc_string_view_t rhs_name, loomc_string_view_t rhs_provenance,
     loomc_target_fact_state_t rhs_state) {
-  iree_status_t status = iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "SPIR-V profile has contradictory cooperative %s row facts: '%.*s' from "
-      "'%.*s' says %s while '%.*s' from '%.*s' says %s",
-      row_kind, (int)lhs_name.size, loomc_spirv_rows_string_data(lhs_name),
-      (int)lhs_provenance.size, loomc_spirv_rows_string_data(lhs_provenance),
-      lhs_state == LOOMC_TARGET_FACT_STATE_TRUE ? "true" : "false",
-      (int)rhs_name.size, loomc_spirv_rows_string_data(rhs_name),
-      (int)rhs_provenance.size, loomc_spirv_rows_string_data(rhs_provenance),
-      rhs_state == LOOMC_TARGET_FACT_STATE_TRUE ? "true" : "false");
-  return loomc_spirv_rows_fail_status(result, loomc_status_from_iree(status));
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(iree_make_cstring_view(row_kind)),
+      loom_param_string(iree_string_view_from_loomc(lhs_name)),
+      loom_param_string(iree_string_view_from_loomc(lhs_provenance)),
+      loom_param_bool(lhs_state == LOOMC_TARGET_FACT_STATE_TRUE),
+      loom_param_string(iree_string_view_from_loomc(rhs_name)),
+      loom_param_string(iree_string_view_from_loomc(rhs_provenance)),
+      loom_param_bool(rhs_state == LOOMC_TARGET_FACT_STATE_TRUE),
+  };
+  return loomc_spirv_rows_emit_diagnostic(result, LOOM_ERR_SPIRV_041, params,
+                                          IREE_ARRAYSIZE(params));
 }
 
 static loomc_status_t loomc_spirv_rows_fail_row_name_contradiction(
     loomc_result_t* result, const char* row_kind, loomc_string_view_t name,
     loomc_string_view_t lhs_provenance, loomc_string_view_t rhs_provenance) {
-  iree_status_t status = iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "SPIR-V profile has contradictory cooperative %s row definitions for "
-      "name '%.*s': '%.*s' and '%.*s' describe different rows",
-      row_kind, (int)name.size, loomc_spirv_rows_string_data(name),
-      (int)lhs_provenance.size, loomc_spirv_rows_string_data(lhs_provenance),
-      (int)rhs_provenance.size, loomc_spirv_rows_string_data(rhs_provenance));
-  return loomc_spirv_rows_fail_status(result, loomc_status_from_iree(status));
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(iree_make_cstring_view(row_kind)),
+      loom_param_string(iree_string_view_from_loomc(name)),
+      loom_param_string(iree_string_view_from_loomc(lhs_provenance)),
+      loom_param_string(iree_string_view_from_loomc(rhs_provenance)),
+  };
+  return loomc_spirv_rows_emit_diagnostic(result, LOOM_ERR_SPIRV_042, params,
+                                          IREE_ARRAYSIZE(params));
 }
 
 static void loomc_spirv_rows_deinitialize_matrix_row(

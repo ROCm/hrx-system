@@ -94,6 +94,10 @@ typedef struct loom_spirv_module_abi_context_t {
   const loom_op_t* function_op;
   // Prepared target and representation binding for |function_op|.
   const loom_spirv_function_plan_t* function_plan;
+  // Source-scoped diagnostic sink for this function's encoding failures.
+  iree_diagnostic_emitter_t diagnostic_emitter;
+  // Borrowed module acceptance cell, cleared by a rejected encoding.
+  bool* accepted;
   // Function scratch arena used for transient ABI plans.
   iree_arena_allocator_t* scratch_arena;
   // Sectioned SPIR-V module builder.

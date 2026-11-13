@@ -1,0 +1,161 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+// ERROR@+1: BACKEND/055 {format="VM", export="untyped", constraint="signature fields carrying scalar or managed reference types"}
+low.func.def public target<vm.core>(@target) @untyped(%value: reg<vm.value>) -> (reg<vm.value>) asm {
+  return %value
+}
+
+// ====
+
+vm.target<core> @target
+
+// Collision provenance follows definition order, not IR symbol spelling.
+func.def public target(@target) export("same") @z_first() {
+  func.return
+}
+
+// ERROR@+1: BACKEND/056 {format="VM", symbol_name="same"}
+func.def public target(@target) export("same") @a_second() {
+  func.return
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: BACKEND/055 {format="VM", constraint="native callable imports with a module namespace"}
+low.func.decl import(native, "external") target<vm.core>(@target) @external()
+
+low.func.def public target<vm.core>(@target) @caller() asm {
+  low.func.call @external() : ()
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: BACKEND/055 {format="VM", export="large_frame", constraint="at most 65535 bytes of local storage including call packets"}
+low.func.def public target<vm.core>(@target) @large_frame() asm {
+  %storage = storage {byte_alignment = 8, byte_length = 65536} : low.storage<stack>
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: BACKEND/060 {format="VM", export="large_reference_frame", quantity="local reference count", actual="65537", maximum="65536"}
+low.func.def public target<vm.core>(@target) @large_reference_frame() asm {
+  %storage = storage {byte_alignment = 16, byte_length = 1048592} : low.storage<private>
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+low.func.def public target<vm.core>(@target) @short_cell(%value: reg<vm.value : i8>) asm {
+  %storage = storage {byte_alignment = 1, byte_length = 1} : low.storage<stack>
+  // ERROR@+1: BACKEND/055 {export="short_cell", constraint="a register transfer that fits within its storage span"}
+  low.spill %value, %storage : reg<vm.value : i8>, low.storage<stack>
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+// A boundary-folded store keeps its source operation for diagnostics.
+low.func.def public target<vm.core>(@target) @folded_value(%value: reg<vm.value : i32>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  // ERROR@+1: BACKEND/055 {export="folded_value", constraint="private storage for references and stack storage for values"}
+  low.spill %value, %storage : reg<vm.value : i32>, low.storage<private>
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+// Multiple writers keep this transfer in ordinary instruction emission.
+low.func.def public target<vm.core>(@target) @emitted_value(%value: reg<vm.value : i32>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  // ERROR@+1: BACKEND/055 {export="emitted_value", constraint="private storage for references and stack storage for values"}
+  low.spill %value, %storage : reg<vm.value : i32>, low.storage<private>
+  low.spill %value, %storage : reg<vm.value : i32>, low.storage<private>
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+type.decl import("provider", "object") @Object
+
+low.func.def public target<vm.core>(@target) @folded_reference(%value: reg<vm.ref : ptr<@Object>>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 16} : low.storage<stack>
+  // ERROR@+1: BACKEND/055 {export="folded_reference", constraint="private storage for references and stack storage for values"}
+  low.spill.move %value, %storage : reg<vm.ref : ptr<@Object>>, low.storage<stack>
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+type.decl import("provider", "object") @Object
+
+low.func.def public target<vm.core>(@target) @unaligned_reference() -> (reg<vm.ref : ptr<@Object>>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 17} : low.storage<private>
+  %view = storage_view %storage {byte_length = 16, offset = 1} : low.storage<private> -> low.storage<private>
+  // ERROR@+1: BACKEND/055 {export="unaligned_reference", constraint="cell-aligned reference storage offsets"}
+  %result = low.reload.move %view : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+
+low.func.def public target<vm.core>(@target) @missing_data() -> (reg<vm.ref : buffer>) asm {
+  // ERROR@+1: BACKEND/060 {export="missing_data", quantity="required read-only data declaration count", actual="1", maximum="0"}
+  %result = buffer.rodata.load 0 : reg<vm.ref : buffer>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: BACKEND/060 {export="data_alignment", quantity="read-only data alignment", actual="4294967296", maximum="4294967295"}
+global.rodata.def @data = align(4294967296) bytes("00")
+
+low.func.def public target<vm.core>(@target) @data_alignment() -> (reg<vm.ref : buffer>) asm {
+  %result = buffer.rodata.load @data : reg<vm.ref : buffer>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+
+low.func.def public target<vm.core>(@target) @storage_address() -> (reg<vm.value : i64>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<stack>
+  // ERROR@+1: BACKEND/055 {export="storage_address", constraint="an operation supported by VM instruction emission"}
+  %address = storage_address %storage : low.storage<stack> -> reg<vm.value : i64>
+  return %address
+}
+
+// ====
+
+vm.target<core> @target
+
+low.func.def public target<vm.core>(@target) @short_reload() -> (reg<vm.value : i16>) asm {
+  %storage = storage {byte_alignment = 2, byte_length = 2} : low.storage<stack>
+  // ERROR@+1: BACKEND/055 {export="short_reload", constraint="a register transfer that fits within its storage span"}
+  %value = low.reload %storage : low.storage<stack> -> reg<vm.value : i16>
+  return %value
+}

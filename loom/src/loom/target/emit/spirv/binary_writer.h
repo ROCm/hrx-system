@@ -55,14 +55,16 @@ iree_status_t loom_spirv_binary_write_words(loom_spirv_binary_writer_t* writer,
                                             iree_host_size_t word_count);
 
 // Appends a SPIR-V instruction header and raw word operands. |operand_count|
-// excludes the instruction header word.
+// excludes the instruction header word. The producer must admit the 16-bit
+// instruction word count before calling this allocation-only writer.
 iree_status_t loom_spirv_binary_write_instruction(
     loom_spirv_binary_writer_t* writer, uint16_t opcode,
     const uint32_t* operands, iree_host_size_t operand_count);
 
 // Appends a SPIR-V instruction that contains one literal string between two
 // raw operand spans. String bytes are copied with the required trailing NUL and
-// padded to a 32-bit word boundary.
+// padded to a 32-bit word boundary. The producer must admit the complete
+// instruction extent, including fixed operands and the padded string.
 iree_status_t loom_spirv_binary_write_string_instruction(
     loom_spirv_binary_writer_t* writer, uint16_t opcode,
     const uint32_t* prefix_operands, iree_host_size_t prefix_operand_count,

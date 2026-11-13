@@ -17,8 +17,6 @@
 #include "loom/util/adaptive_sort.h"
 
 typedef struct loom_low_storage_transport_read_t {
-  // Load whose source extent participates in read/write ordering.
-  const loom_op_t* op;
   // Resolved cell and ownership transfer, shared with binding publication.
   loom_low_storage_transport_binding_t binding;
   // Exclusive end of the accessed extent.
@@ -124,6 +122,7 @@ static bool loom_low_storage_transport_resolve(
       8;
   const uint64_t relative_offset = loom_low_storage_transfer_offset(traffic);
   *out_binding = (loom_low_storage_transport_binding_t){
+      .op = traffic,
       .space = reference.reservation.space,
       .moves_source = !is_store && loom_low_storage_transfer_moves(traffic),
       .register_class = register_class,
@@ -252,7 +251,6 @@ static iree_status_t loom_low_storage_transport_append_reads(
     uint64_t byte_length = 0;
     read->foldable = loom_low_storage_transport_resolve(
         builder, op, boundary, &read->binding, &byte_length);
-    read->op = op;
     read->ordinal = (uint32_t)count;
     read->byte_end = read->binding.byte_offset + byte_length;
     if (read->binding.moves_source && !read->foldable) {
@@ -276,7 +274,7 @@ static iree_status_t loom_low_storage_transport_append_reads(
     }
     for (iree_host_size_t i = start; i < end; ++i) {
       const loom_low_storage_transport_read_t* read = &builder->reads[i];
-      if (loom_low_storage_transfer_moves(read->op) &&
+      if (loom_low_storage_transfer_moves(read->binding.op) &&
           read->ordinal < last_ordinal && read->ordinal >= prefix_count) {
         prefix_count = read->ordinal + 1;
       }
@@ -307,7 +305,7 @@ static iree_status_t loom_low_storage_transport_append_reads(
       if (read->ordinal >= prefix_count && read->foldable) {
         read->binding.moves_source = consumes_cell;
         status = loom_low_storage_transport_append_binding(
-            builder, loom_low_storage_load_result(read->op), false,
+            builder, loom_low_storage_load_result(read->binding.op), false,
             &read->binding, boundary_ordinal);
       }
     }

@@ -43,6 +43,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv:cooperative_properties",
+        "//loom/src/loom/target/arch/spirv:error_defs",
         "//loom/src/loom/target/arch/spirv:features",
         "//loom/src/loom/target/arch/spirv:profile",
         "//loom/src/loom/target/arch/spirv/records:target_records",

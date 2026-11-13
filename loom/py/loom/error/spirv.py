@@ -509,6 +509,173 @@ ERR_SPIRV_033 = ErrorDef(
     ),
 )
 
+# ERR_SPIRV_034: A target profile omits a required feature fact.
+ERR_SPIRV_034 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=34,
+    severity=Severity.ERROR,
+    summary="SPIR-V target profile is missing a feature dependency.",
+    message=(
+        "SPIR-V target profile '{profile_name}' feature '{feature_name}' "
+        "requires feature '{required_feature_name}'"
+    ),
+    params=(
+        ErrorParam("profile_name", ParamKind.STRING),
+        ErrorParam("feature_name", ParamKind.STRING),
+        ErrorParam("required_feature_name", ParamKind.STRING),
+    ),
+)
+
+ERR_SPIRV_035 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=35,
+    severity=Severity.ERROR,
+    summary="SPIR-V profile observations contradict each other.",
+    message=(
+        "SPIR-V {fact_kind} '{fact_name}' has contradictory facts: "
+        "'{first_provenance}' says {first_state} while '{second_provenance}' says"
+        " {second_state}"
+    ),
+    params=(
+        ErrorParam("fact_kind", ParamKind.STRING),
+        ErrorParam("fact_name", ParamKind.STRING),
+        ErrorParam("first_provenance", ParamKind.STRING),
+        ErrorParam("first_state", ParamKind.BOOL),
+        ErrorParam("second_provenance", ParamKind.STRING),
+        ErrorParam("second_state", ParamKind.BOOL),
+    ),
+)
+
+ERR_SPIRV_036 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=36,
+    severity=Severity.ERROR,
+    summary="SPIR-V numeric profile observation is out of range.",
+    message=(
+        "SPIR-V {fact_kind} '{fact_name}' value {value} from '{provenance}' is "
+        "outside the supported range [1, {maximum}]"
+    ),
+    params=(
+        ErrorParam("fact_kind", ParamKind.STRING),
+        ErrorParam("fact_name", ParamKind.STRING),
+        ErrorParam("value", ParamKind.U64),
+        ErrorParam("provenance", ParamKind.STRING),
+        ErrorParam("maximum", ParamKind.U64),
+    ),
+)
+
+ERR_SPIRV_037 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=37,
+    severity=Severity.ERROR,
+    summary="SPIR-V numeric profile observations contradict each other.",
+    message=(
+        "SPIR-V {fact_kind} '{fact_name}' has contradictory values: "
+        "'{first_provenance}' says {first_value} while '{second_provenance}' says"
+        " {second_value}"
+    ),
+    params=(
+        ErrorParam("fact_kind", ParamKind.STRING),
+        ErrorParam("fact_name", ParamKind.STRING),
+        ErrorParam("first_provenance", ParamKind.STRING),
+        ErrorParam("first_value", ParamKind.U64),
+        ErrorParam("second_provenance", ParamKind.STRING),
+        ErrorParam("second_value", ParamKind.U64),
+    ),
+)
+
+ERR_SPIRV_038 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=38,
+    severity=Severity.ERROR,
+    summary="SPIR-V profile exceeds its observed environment version.",
+    message=(
+        "SPIR-V target profile requires SPIR-V version "
+        "{required_major}.{required_minor}, but environment '{fact_name}' from "
+        "'{provenance}' allows only {maximum_major}.{maximum_minor}"
+    ),
+    params=(
+        ErrorParam("required_major", ParamKind.U32),
+        ErrorParam("required_minor", ParamKind.U32),
+        ErrorParam("fact_name", ParamKind.STRING),
+        ErrorParam("provenance", ParamKind.STRING),
+        ErrorParam("maximum_major", ParamKind.U32),
+        ErrorParam("maximum_minor", ParamKind.U32),
+    ),
+)
+
+ERR_SPIRV_039 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=39,
+    severity=Severity.ERROR,
+    summary="SPIR-V subgroup width is not a power of two.",
+    message=(
+        "SPIR-V subgroup width '{fact_name}' value {value} from '{provenance}' "
+        "must be a power of two"
+    ),
+    params=(
+        ErrorParam("fact_name", ParamKind.STRING),
+        ErrorParam("value", ParamKind.U32),
+        ErrorParam("provenance", ParamKind.STRING),
+    ),
+)
+
+ERR_SPIRV_040 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=40,
+    severity=Severity.ERROR,
+    summary="SPIR-V subgroup widths contradict the observed range.",
+    message=(
+        "SPIR-V subgroup widths contradict the supported range: fixed={fixed}, "
+        "default={default}, minimum={minimum}, maximum={maximum}"
+    ),
+    params=(
+        ErrorParam("fixed", ParamKind.U32),
+        ErrorParam("default", ParamKind.U32),
+        ErrorParam("minimum", ParamKind.U32),
+        ErrorParam("maximum", ParamKind.U32),
+    ),
+)
+
+ERR_SPIRV_041 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=41,
+    severity=Severity.ERROR,
+    summary="SPIR-V cooperative row observations contradict each other.",
+    message=(
+        "SPIR-V profile has contradictory cooperative {row_kind} row facts: "
+        "'{first_name}' from '{first_provenance}' says {first_state} while "
+        "'{second_name}' from '{second_provenance}' says {second_state}"
+    ),
+    params=(
+        ErrorParam("row_kind", ParamKind.STRING),
+        ErrorParam("first_name", ParamKind.STRING),
+        ErrorParam("first_provenance", ParamKind.STRING),
+        ErrorParam("first_state", ParamKind.BOOL),
+        ErrorParam("second_name", ParamKind.STRING),
+        ErrorParam("second_provenance", ParamKind.STRING),
+        ErrorParam("second_state", ParamKind.BOOL),
+    ),
+)
+
+ERR_SPIRV_042 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=42,
+    severity=Severity.ERROR,
+    summary="SPIR-V cooperative row names identify different operations.",
+    message=(
+        "SPIR-V profile has contradictory cooperative {row_kind} row definitions "
+        "for name '{name}': '{first_provenance}' and '{second_provenance}' "
+        "describe different rows"
+    ),
+    params=(
+        ErrorParam("row_kind", ParamKind.STRING),
+        ErrorParam("name", ParamKind.STRING),
+        ErrorParam("first_provenance", ParamKind.STRING),
+        ErrorParam("second_provenance", ParamKind.STRING),
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_005,
     ERR_SPIRV_006,
@@ -536,4 +703,13 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_031,
     ERR_SPIRV_032,
     ERR_SPIRV_033,
+    ERR_SPIRV_034,
+    ERR_SPIRV_035,
+    ERR_SPIRV_036,
+    ERR_SPIRV_037,
+    ERR_SPIRV_038,
+    ERR_SPIRV_039,
+    ERR_SPIRV_040,
+    ERR_SPIRV_041,
+    ERR_SPIRV_042,
 )

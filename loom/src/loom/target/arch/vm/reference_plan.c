@@ -7,6 +7,7 @@
 #include "loom/target/arch/vm/reference_plan.h"
 
 #include "loom/ir/structural_hash.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/util/adaptive_sort.h"
 
 // Bucket values store a u16 canonical ordinal and an index-domain tag. Static
@@ -77,7 +78,10 @@ iree_status_t loom_vm_reference_plan_bind(loom_vm_reference_plan_t* plan,
                                           const loom_module_t* module,
                                           loom_type_t type,
                                           iree_arena_allocator_t* arena,
+                                          iree_diagnostic_emitter_t emitter,
+                                          const loom_op_t* op, bool* out_bound,
                                           uint16_t* out_ordinal) {
+  *out_bound = false;
   if (!plan->count) {
     IREE_RETURN_IF_ERROR(loom_intern_table_initialize(arena, 32, &plan->index));
     loom_segmented_storage_initialize(
@@ -98,6 +102,7 @@ iree_status_t loom_vm_reference_plan_bind(loom_vm_reference_plan_t* plan,
   loom_intern_probe_t source = loom_intern_table_probe(
       &plan->index, source_hash, loom_vm_reference_equal, &source_query);
   if (source.index != UINT32_MAX) {
+    *out_bound = true;
     *out_ordinal = (uint16_t)source.index;
     return iree_ok_status();
   }
@@ -105,10 +110,9 @@ iree_status_t loom_vm_reference_plan_bind(loom_vm_reference_plan_t* plan,
   if (!loom_vm_type_reference_key(module, type, &key)) {
     const iree_string_view_t spelling =
         loom_string_table_get(&module->strings, source_id);
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "VM signature type '%.*s' has no managed reference identity",
-        (int)spelling.size, spelling.data);
+    return loom_target_artifact_emit_symbol_requirement(
+        emitter, op, IREE_SV("VM"), spelling,
+        IREE_SV("a managed reference identity"));
   }
   const uint32_t key_hash = loom_vm_reference_key_hash(&key);
   const loom_vm_reference_query_t key_query = {.plan = plan, .key = &key};
@@ -117,8 +121,9 @@ iree_status_t loom_vm_reference_plan_bind(loom_vm_reference_plan_t* plan,
   uint16_t ordinal = (uint16_t)canonical.index;
   if (canonical.index == UINT32_MAX) {
     if (plan->count == (uint32_t)UINT16_MAX + 1) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "VM reference type count exceeds u16 ordinals");
+      return loom_target_artifact_emit_limit(
+          emitter, op, IREE_SV("VM"), IREE_SV("reference type count"),
+          (uint64_t)plan->count + 1, (uint32_t)UINT16_MAX + 1);
     }
     if (plan->count >= IREE_ARRAYSIZE(plan->inline_entries) &&
         (plan->count - IREE_ARRAYSIZE(plan->inline_entries)) %
@@ -144,6 +149,7 @@ iree_status_t loom_vm_reference_plan_bind(loom_vm_reference_plan_t* plan,
   loom_intern_table_insert(&plan->index, source.slot, source_hash,
                            ordinal | source_tag);
   *out_ordinal = ordinal;
+  *out_bound = true;
   return iree_ok_status();
 }
 

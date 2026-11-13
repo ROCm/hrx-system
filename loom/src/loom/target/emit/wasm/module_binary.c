@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/wasm/binary_writer.h"
 #include "loom/target/emit/wasm/function_body.h"
 #include "loom/target/emit/wasm/types.h"
@@ -39,6 +40,10 @@ enum {
 };
 
 typedef struct loom_wasm_module_layout_t {
+  // Caller sink for module-wide format rejection.
+  iree_diagnostic_emitter_t diagnostic_emitter;
+  // False after body or section rejection; partial bytes are never published.
+  bool accepted;
   // Planned functions in WebAssembly function-index order.
   const loom_wasm_function_plan_t* functions;
   // Number of planned functions.
@@ -56,12 +61,14 @@ typedef struct loom_wasm_module_layout_t {
 } loom_wasm_module_layout_t;
 
 static iree_status_t loom_wasm_module_write_section(
-    loom_wasm_binary_writer_t* module_writer, uint8_t section_id,
+    loom_wasm_module_layout_t* layout, loom_wasm_binary_writer_t* module_writer,
+    uint8_t section_id, iree_string_view_t quantity,
     const loom_wasm_binary_writer_t* payload_writer) {
   if (payload_writer->length > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm section %u exceeds u32 size",
-                            (unsigned)section_id);
+    layout->accepted = false;
+    return loom_target_artifact_emit_limit(layout->diagnostic_emitter, NULL,
+                                           IREE_SV("Wasm"), quantity,
+                                           payload_writer->length, UINT32_MAX);
   }
   IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u8(module_writer, section_id));
   IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u32_leb(
@@ -72,10 +79,6 @@ static iree_status_t loom_wasm_module_write_section(
 
 static iree_status_t loom_wasm_module_write_name(
     loom_wasm_binary_writer_t* writer, iree_string_view_t name) {
-  if (name.size > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm name exceeds u32 size");
-  }
   IREE_RETURN_IF_ERROR(
       loom_wasm_binary_write_u32_leb(writer, (uint32_t)name.size));
   return loom_wasm_binary_write_bytes(writer, (const uint8_t*)name.data,
@@ -97,9 +100,12 @@ static void loom_wasm_module_layout_deinitialize(
 }
 
 static iree_status_t loom_wasm_module_layout_initialize(
-    const loom_wasm_program_plan_t* plan, iree_allocator_t allocator,
+    const loom_wasm_program_plan_t* plan,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_allocator_t allocator,
     loom_wasm_module_layout_t* out_layout) {
   *out_layout = (loom_wasm_module_layout_t){
+      .diagnostic_emitter = diagnostic_emitter,
+      .accepted = true,
       .functions = plan->functions,
       .function_count = plan->function_count,
       .types = plan->types,
@@ -107,22 +113,20 @@ static iree_status_t loom_wasm_module_layout_initialize(
       .function_export_count = plan->export_count,
   };
 
-  iree_host_size_t body_storage_size = 0;
-  if (!iree_host_size_checked_mul(plan->function_count,
-                                  sizeof(*out_layout->bodies),
-                                  &body_storage_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm function body table size overflow");
-  }
+  const iree_host_size_t body_storage_size =
+      plan->function_count * sizeof(*out_layout->bodies);
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(allocator, body_storage_size,
                                              (void**)&out_layout->bodies));
   memset(out_layout->bodies, 0, body_storage_size);
 
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
-       i < plan->function_count && iree_status_is_ok(status); ++i) {
-    status = loom_wasm_emit_function_body(plan, &plan->functions[i], allocator,
-                                          &out_layout->bodies[i]);
+       i < plan->function_count && iree_status_is_ok(status) &&
+       out_layout->accepted;
+       ++i) {
+    status = loom_wasm_emit_function_body(
+        plan, &plan->functions[i], diagnostic_emitter, allocator,
+        &out_layout->accepted, &out_layout->bodies[i]);
     if (iree_status_is_ok(status) &&
         iree_any_bit_set(out_layout->bodies[i].flags,
                          LOOM_WASM_FUNCTION_BODY_FLAG_USES_MEMORY)) {
@@ -148,10 +152,6 @@ static iree_status_t loom_wasm_module_write_value_type_list(
 static iree_status_t loom_wasm_module_write_type_section_payload(
     const loom_wasm_module_layout_t* layout,
     loom_wasm_binary_writer_t* payload_writer) {
-  if (layout->type_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm type count exceeds u32");
-  }
   IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u32_leb(
       payload_writer, (uint32_t)layout->type_count));
   for (iree_host_size_t i = 0; i < layout->type_count; ++i) {
@@ -167,15 +167,16 @@ static iree_status_t loom_wasm_module_write_type_section_payload(
 }
 
 static iree_status_t loom_wasm_module_write_type_section(
-    const loom_wasm_module_layout_t* layout,
-    loom_wasm_binary_writer_t* module_writer, iree_allocator_t allocator) {
+    loom_wasm_module_layout_t* layout, loom_wasm_binary_writer_t* module_writer,
+    iree_allocator_t allocator) {
   loom_wasm_binary_writer_t payload_writer;
   loom_wasm_binary_writer_initialize(allocator, &payload_writer);
   iree_status_t status =
       loom_wasm_module_write_type_section_payload(layout, &payload_writer);
   if (iree_status_is_ok(status)) {
     status = loom_wasm_module_write_section(
-        module_writer, LOOM_WASM_SECTION_TYPE, &payload_writer);
+        layout, module_writer, LOOM_WASM_SECTION_TYPE,
+        IREE_SV("type section byte length"), &payload_writer);
   }
   loom_wasm_binary_writer_deinitialize(&payload_writer);
   return status;
@@ -184,10 +185,6 @@ static iree_status_t loom_wasm_module_write_type_section(
 static iree_status_t loom_wasm_module_write_function_section_payload(
     const loom_wasm_module_layout_t* layout,
     loom_wasm_binary_writer_t* payload_writer) {
-  if (layout->function_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm function count exceeds u32");
-  }
   IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u32_leb(
       payload_writer, (uint32_t)layout->function_count));
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
@@ -198,15 +195,16 @@ static iree_status_t loom_wasm_module_write_function_section_payload(
 }
 
 static iree_status_t loom_wasm_module_write_function_section(
-    const loom_wasm_module_layout_t* layout,
-    loom_wasm_binary_writer_t* module_writer, iree_allocator_t allocator) {
+    loom_wasm_module_layout_t* layout, loom_wasm_binary_writer_t* module_writer,
+    iree_allocator_t allocator) {
   loom_wasm_binary_writer_t payload_writer;
   loom_wasm_binary_writer_initialize(allocator, &payload_writer);
   iree_status_t status =
       loom_wasm_module_write_function_section_payload(layout, &payload_writer);
   if (iree_status_is_ok(status)) {
     status = loom_wasm_module_write_section(
-        module_writer, LOOM_WASM_SECTION_FUNCTION, &payload_writer);
+        layout, module_writer, LOOM_WASM_SECTION_FUNCTION,
+        IREE_SV("function section byte length"), &payload_writer);
   }
   loom_wasm_binary_writer_deinitialize(&payload_writer);
   return status;
@@ -221,14 +219,16 @@ static iree_status_t loom_wasm_module_write_memory_section_payload(
 }
 
 static iree_status_t loom_wasm_module_write_memory_section(
-    loom_wasm_binary_writer_t* module_writer, iree_allocator_t allocator) {
+    loom_wasm_module_layout_t* layout, loom_wasm_binary_writer_t* module_writer,
+    iree_allocator_t allocator) {
   loom_wasm_binary_writer_t payload_writer;
   loom_wasm_binary_writer_initialize(allocator, &payload_writer);
   iree_status_t status =
       loom_wasm_module_write_memory_section_payload(&payload_writer);
   if (iree_status_is_ok(status)) {
     status = loom_wasm_module_write_section(
-        module_writer, LOOM_WASM_SECTION_MEMORY, &payload_writer);
+        layout, module_writer, LOOM_WASM_SECTION_MEMORY,
+        IREE_SV("memory section byte length"), &payload_writer);
   }
   loom_wasm_binary_writer_deinitialize(&payload_writer);
   return status;
@@ -241,10 +241,6 @@ static iree_status_t loom_wasm_module_write_export_section_payload(
       layout->flags, LOOM_WASM_MODULE_BINARY_FLAG_DEFINES_MEMORY);
   const uint64_t export_count =
       (uint64_t)layout->function_export_count + (exports_memory ? 1u : 0u);
-  if (export_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm export count exceeds u32");
-  }
   IREE_RETURN_IF_ERROR(
       loom_wasm_binary_write_u32_leb(payload_writer, (uint32_t)export_count));
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
@@ -270,8 +266,8 @@ static iree_status_t loom_wasm_module_write_export_section_payload(
 }
 
 static iree_status_t loom_wasm_module_write_export_section(
-    const loom_wasm_module_layout_t* layout,
-    loom_wasm_binary_writer_t* module_writer, iree_allocator_t allocator) {
+    loom_wasm_module_layout_t* layout, loom_wasm_binary_writer_t* module_writer,
+    iree_allocator_t allocator) {
   if (layout->function_export_count == 0 &&
       !iree_any_bit_set(layout->flags,
                         LOOM_WASM_MODULE_BINARY_FLAG_DEFINES_MEMORY)) {
@@ -283,7 +279,8 @@ static iree_status_t loom_wasm_module_write_export_section(
       loom_wasm_module_write_export_section_payload(layout, &payload_writer);
   if (iree_status_is_ok(status)) {
     status = loom_wasm_module_write_section(
-        module_writer, LOOM_WASM_SECTION_EXPORT, &payload_writer);
+        layout, module_writer, LOOM_WASM_SECTION_EXPORT,
+        IREE_SV("export section byte length"), &payload_writer);
   }
   loom_wasm_binary_writer_deinitialize(&payload_writer);
   return status;
@@ -292,10 +289,6 @@ static iree_status_t loom_wasm_module_write_export_section(
 static iree_status_t loom_wasm_module_write_code_section_payload(
     const loom_wasm_module_layout_t* layout,
     loom_wasm_binary_writer_t* payload_writer) {
-  if (layout->function_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm function body count exceeds u32");
-  }
   IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u32_leb(
       payload_writer, (uint32_t)layout->function_count));
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
@@ -307,37 +300,31 @@ static iree_status_t loom_wasm_module_write_code_section_payload(
 }
 
 static iree_status_t loom_wasm_module_write_code_section(
-    const loom_wasm_module_layout_t* layout,
-    loom_wasm_binary_writer_t* module_writer, iree_allocator_t allocator) {
+    loom_wasm_module_layout_t* layout, loom_wasm_binary_writer_t* module_writer,
+    iree_allocator_t allocator) {
   loom_wasm_binary_writer_t payload_writer;
   loom_wasm_binary_writer_initialize(allocator, &payload_writer);
   iree_status_t status =
       loom_wasm_module_write_code_section_payload(layout, &payload_writer);
   if (iree_status_is_ok(status)) {
     status = loom_wasm_module_write_section(
-        module_writer, LOOM_WASM_SECTION_CODE, &payload_writer);
+        layout, module_writer, LOOM_WASM_SECTION_CODE,
+        IREE_SV("code section byte length"), &payload_writer);
   }
   loom_wasm_binary_writer_deinitialize(&payload_writer);
   return status;
 }
 
 static iree_status_t loom_wasm_module_write_name_section_payload(
-    const loom_wasm_module_layout_t* layout,
+    loom_wasm_module_layout_t* layout,
     loom_wasm_binary_writer_t* payload_writer, iree_allocator_t allocator) {
   IREE_RETURN_IF_ERROR(
       loom_wasm_module_write_name(payload_writer, IREE_SV("name")));
 
   loom_wasm_binary_writer_t function_names_writer;
   loom_wasm_binary_writer_initialize(allocator, &function_names_writer);
-  iree_status_t status = iree_ok_status();
-  if (layout->function_count > UINT32_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "Wasm name function count exceeds u32");
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_wasm_binary_write_u32_leb(&function_names_writer,
-                                            (uint32_t)layout->function_count);
-  }
+  iree_status_t status = loom_wasm_binary_write_u32_leb(
+      &function_names_writer, (uint32_t)layout->function_count);
   for (iree_host_size_t i = 0;
        i < layout->function_count && iree_status_is_ok(status); ++i) {
     const loom_wasm_function_plan_t* function = &layout->functions[i];
@@ -349,18 +336,21 @@ static iree_status_t loom_wasm_module_write_name_section_payload(
     }
   }
   if (iree_status_is_ok(status) && function_names_writer.length > UINT32_MAX) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "Wasm function-name subsection exceeds u32");
+    layout->accepted = false;
+    status = loom_target_artifact_emit_limit(
+        layout->diagnostic_emitter, NULL, IREE_SV("Wasm"),
+        IREE_SV("function-name subsection byte length"),
+        function_names_writer.length, UINT32_MAX);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout->accepted) {
     status = loom_wasm_binary_write_u8(payload_writer,
                                        LOOM_WASM_NAME_SUBSECTION_FUNCTIONS);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout->accepted) {
     status = loom_wasm_binary_write_u32_leb(
         payload_writer, (uint32_t)function_names_writer.length);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout->accepted) {
     status =
         loom_wasm_binary_write_bytes(payload_writer, function_names_writer.data,
                                      function_names_writer.length);
@@ -370,15 +360,16 @@ static iree_status_t loom_wasm_module_write_name_section_payload(
 }
 
 static iree_status_t loom_wasm_module_write_name_section(
-    const loom_wasm_module_layout_t* layout,
-    loom_wasm_binary_writer_t* module_writer, iree_allocator_t allocator) {
+    loom_wasm_module_layout_t* layout, loom_wasm_binary_writer_t* module_writer,
+    iree_allocator_t allocator) {
   loom_wasm_binary_writer_t payload_writer;
   loom_wasm_binary_writer_initialize(allocator, &payload_writer);
   iree_status_t status = loom_wasm_module_write_name_section_payload(
       layout, &payload_writer, allocator);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout->accepted) {
     status = loom_wasm_module_write_section(
-        module_writer, LOOM_WASM_SECTION_CUSTOM, &payload_writer);
+        layout, module_writer, LOOM_WASM_SECTION_CUSTOM,
+        IREE_SV("name section byte length"), &payload_writer);
   }
   loom_wasm_binary_writer_deinitialize(&payload_writer);
   return status;
@@ -402,53 +393,57 @@ void loom_wasm_module_binary_deinitialize(loom_wasm_module_binary_t* module,
 }
 
 iree_status_t loom_wasm_program_emit_binary(
-    const loom_wasm_program_plan_t* plan, iree_allocator_t allocator,
-    loom_wasm_module_binary_t* out_module) {
+    const loom_wasm_program_plan_t* plan,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_allocator_t allocator,
+    bool* out_accepted, loom_wasm_module_binary_t* out_module) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(out_module);
+  *out_accepted = false;
   *out_module = (loom_wasm_module_binary_t){0};
 
   loom_wasm_module_layout_t layout = {0};
-  iree_status_t status =
-      loom_wasm_module_layout_initialize(plan, allocator, &layout);
+  iree_status_t status = loom_wasm_module_layout_initialize(
+      plan, diagnostic_emitter, allocator, &layout);
 
   loom_wasm_binary_writer_t module_writer;
   loom_wasm_binary_writer_initialize(allocator, &module_writer);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout.accepted) {
     status = loom_wasm_module_write_header(&module_writer);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout.accepted) {
     status =
         loom_wasm_module_write_type_section(&layout, &module_writer, allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout.accepted) {
     status = loom_wasm_module_write_function_section(&layout, &module_writer,
                                                      allocator);
   }
-  if (iree_status_is_ok(status) &&
+  if (iree_status_is_ok(status) && layout.accepted &&
       iree_any_bit_set(layout.flags,
                        LOOM_WASM_MODULE_BINARY_FLAG_DEFINES_MEMORY)) {
-    status = loom_wasm_module_write_memory_section(&module_writer, allocator);
+    status = loom_wasm_module_write_memory_section(&layout, &module_writer,
+                                                   allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout.accepted) {
     status = loom_wasm_module_write_export_section(&layout, &module_writer,
                                                    allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout.accepted) {
     status =
         loom_wasm_module_write_code_section(&layout, &module_writer, allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout.accepted) {
     status =
         loom_wasm_module_write_name_section(&layout, &module_writer, allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout.accepted) {
     *out_module = (loom_wasm_module_binary_t){
         .data = module_writer.data,
         .data_length = module_writer.length,
         .flags = layout.flags,
     };
     module_writer.data = NULL;
+    *out_accepted = true;
   }
 
   loom_wasm_binary_writer_deinitialize(&module_writer);

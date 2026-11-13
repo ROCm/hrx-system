@@ -18,6 +18,15 @@
 
 namespace {
 
+iree_status_t FinalizeModule(loom_spirv_module_builder_t* builder,
+                             loom_spirv_module_binary_t* module) {
+  bool accepted = false;
+  iree_status_t status =
+      loom_spirv_module_builder_finalize(builder, {}, &accepted, module);
+  EXPECT_TRUE(accepted);
+  return status;
+}
+
 struct Instruction {
   uint16_t opcode = 0;
   std::vector<uint32_t> operands;
@@ -313,13 +322,12 @@ iree_status_t EmitStorageBufferI32Add(loom_spirv_module_builder_t* builder,
 
 TEST(SpirvModuleBuilderTest, BuildsStorageBufferI32AddModule) {
   loom_spirv_module_builder_t builder;
-  IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
-      &loom_spirv_low_target_bundle_vulkan1_3, iree_allocator_system(),
-      &builder));
+  loom_spirv_module_builder_initialize(&loom_spirv_low_target_bundle_vulkan1_3,
+                                       iree_allocator_system(), &builder);
   IREE_ASSERT_OK(EmitStorageBufferI32Add(&builder, IREE_SV("vector_add_i32")));
 
   loom_spirv_module_binary_t module;
-  IREE_ASSERT_OK(loom_spirv_module_builder_finalize(&builder, &module));
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
   loom_spirv_module_builder_deinitialize(&builder);
 
   ASSERT_GE(module.word_count, 5u);
@@ -411,9 +419,8 @@ TEST(SpirvModuleBuilderTest, BuildsStorageBufferI32AddModule) {
 
 TEST(SpirvModuleBuilderTest, InternsExtendedInstructionImports) {
   loom_spirv_module_builder_t builder;
-  IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
-      &loom_spirv_low_target_bundle_vulkan1_3, iree_allocator_system(),
-      &builder));
+  loom_spirv_module_builder_initialize(&loom_spirv_low_target_bundle_vulkan1_3,
+                                       iree_allocator_system(), &builder);
 
   uint32_t first_id = 0;
   IREE_ASSERT_OK(loom_spirv_module_builder_import_extended_instruction_set(
@@ -425,7 +432,7 @@ TEST(SpirvModuleBuilderTest, InternsExtendedInstructionImports) {
   EXPECT_EQ(repeated_id, first_id);
 
   loom_spirv_module_binary_t module;
-  IREE_ASSERT_OK(loom_spirv_module_builder_finalize(&builder, &module));
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
   loom_spirv_module_builder_deinitialize(&builder);
 
   const std::vector<Instruction> instructions = ParseInstructions(module);
@@ -480,11 +487,11 @@ TEST(SpirvModuleBuilderTest, EmitsRawBdaHalKernelPreamble) {
   };
 
   loom_spirv_module_builder_t builder;
-  IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
-      &target, iree_allocator_system(), &builder));
+  loom_spirv_module_builder_initialize(&target, iree_allocator_system(),
+                                       &builder);
 
   loom_spirv_module_binary_t module;
-  IREE_ASSERT_OK(loom_spirv_module_builder_finalize(&builder, &module));
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
   loom_spirv_module_builder_deinitialize(&builder);
 
   std::vector<Instruction> instructions = ParseInstructions(module);
@@ -550,13 +557,13 @@ TEST(SpirvModuleBuilderTest, EmitsVulkanMemoryModelForDeviceScopeRawBda) {
   };
 
   loom_spirv_module_builder_t builder;
-  IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
-      &target, iree_allocator_system(), &builder));
+  loom_spirv_module_builder_initialize(&target, iree_allocator_system(),
+                                       &builder);
   loom_spirv_module_builder_require_feature_bits(
       &builder, LOOM_SPIRV_FEATURE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE);
 
   loom_spirv_module_binary_t module;
-  IREE_ASSERT_OK(loom_spirv_module_builder_finalize(&builder, &module));
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
   loom_spirv_module_builder_deinitialize(&builder);
 
   const std::vector<Instruction> instructions = ParseInstructions(module);
@@ -599,13 +606,13 @@ TEST(SpirvModuleBuilderTest, EmitsCooperativeMatrixRawBdaHalKernelPreamble) {
   };
 
   loom_spirv_module_builder_t builder;
-  IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
-      &target, iree_allocator_system(), &builder));
+  loom_spirv_module_builder_initialize(&target, iree_allocator_system(),
+                                       &builder);
   loom_spirv_module_builder_require_feature_bits(
       &builder, LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR);
 
   loom_spirv_module_binary_t module;
-  IREE_ASSERT_OK(loom_spirv_module_builder_finalize(&builder, &module));
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
   loom_spirv_module_builder_deinitialize(&builder);
 
   std::vector<Instruction> instructions = ParseInstructions(module);
@@ -649,14 +656,14 @@ TEST(SpirvModuleBuilderTest, EmitsCooperativeMatrixRawBdaHalKernelPreamble) {
 
 TEST(SpirvModuleBuilderTest, EmitsTransitiveSubgroupBallotCapabilities) {
   loom_spirv_module_builder_t builder;
-  IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
+  loom_spirv_module_builder_initialize(
       &loom_spirv_low_target_bundle_subgroup32_ballot_hal,
-      iree_allocator_system(), &builder));
+      iree_allocator_system(), &builder);
   loom_spirv_module_builder_require_feature_bits(
       &builder, LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_BALLOT);
 
   loom_spirv_module_binary_t module;
-  IREE_ASSERT_OK(loom_spirv_module_builder_finalize(&builder, &module));
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
   loom_spirv_module_builder_deinitialize(&builder);
 
   const std::vector<Instruction> instructions = ParseInstructions(module);
@@ -670,12 +677,12 @@ TEST(SpirvModuleBuilderTest, EmitsTransitiveSubgroupBallotCapabilities) {
 
 TEST(SpirvModuleBuilderTest, EmitsFloatControlsOnlyWhenRequired) {
   loom_spirv_module_builder_t builder;
-  IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
+  loom_spirv_module_builder_initialize(
       &loom_spirv_low_target_bundle_extended_types, iree_allocator_system(),
-      &builder));
+      &builder);
 
   loom_spirv_module_binary_t module;
-  IREE_ASSERT_OK(loom_spirv_module_builder_finalize(&builder, &module));
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
   loom_spirv_module_builder_deinitialize(&builder);
 
   std::vector<Instruction> instructions = ParseInstructions(module);
@@ -684,12 +691,12 @@ TEST(SpirvModuleBuilderTest, EmitsFloatControlsOnlyWhenRequired) {
   EXPECT_FALSE(HasExtension(instructions, "SPV_KHR_float_controls"));
   loom_spirv_module_binary_deinitialize(&module, iree_allocator_system());
 
-  IREE_ASSERT_OK(loom_spirv_module_builder_initialize(
+  loom_spirv_module_builder_initialize(
       &loom_spirv_low_target_bundle_extended_types, iree_allocator_system(),
-      &builder));
+      &builder);
   loom_spirv_module_builder_require_feature_bits(
       &builder, LOOM_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE);
-  IREE_ASSERT_OK(loom_spirv_module_builder_finalize(&builder, &module));
+  IREE_ASSERT_OK(FinalizeModule(&builder, &module));
   loom_spirv_module_builder_deinitialize(&builder);
 
   instructions = ParseInstructions(module);
@@ -697,37 +704,6 @@ TEST(SpirvModuleBuilderTest, EmitsFloatControlsOnlyWhenRequired) {
                              {LOOM_SPIRV_CAPABILITY_DENORM_PRESERVE}));
   EXPECT_TRUE(HasExtension(instructions, "SPV_KHR_float_controls"));
   loom_spirv_module_binary_deinitialize(&module, iree_allocator_system());
-}
-
-TEST(SpirvModuleBuilderTest, RejectsNonSpirvTargetBundle) {
-  const loom_target_snapshot_t snapshot = {
-      .name = IREE_SVL("not-spirv"),
-      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
-      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
-  };
-  const loom_target_export_plan_t export_plan = {
-      .name = IREE_SVL("shader-entry"),
-      .export_symbol = {},
-      .calling_convention = {},
-      .abi_kind = LOOM_TARGET_ABI_SHADER_ENTRY_POINT,
-  };
-  const loom_target_config_t config = {
-      .name = IREE_SVL("config"),
-      .schedule_model_stable_id = UINT64_C(0x5b86e123b2b92ba9),
-      .contract_set = {},
-      .contract_feature_bits = LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
-  };
-  const loom_target_bundle_t target = {
-      .name = IREE_SVL("wrong-target"),
-      .snapshot = &snapshot,
-      .export_plan = &export_plan,
-      .config = &config,
-  };
-
-  loom_spirv_module_builder_t builder;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        loom_spirv_module_builder_initialize(
-                            &target, iree_allocator_system(), &builder));
 }
 
 }  // namespace

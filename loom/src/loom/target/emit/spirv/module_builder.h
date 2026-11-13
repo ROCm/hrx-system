@@ -17,6 +17,7 @@
 #define LOOM_TARGET_EMIT_SPIRV_MODULE_BUILDER_H_
 
 #include "iree/base/api.h"
+#include "loom/error/emitter.h"
 #include "loom/target/arch/spirv/extended_instruction.h"
 #include "loom/target/arch/spirv/features.h"
 #include "loom/target/emit/spirv/binary_writer.h"
@@ -62,8 +63,6 @@ typedef struct loom_spirv_module_binary_t {
 typedef struct loom_spirv_module_builder_t {
   // Allocator used for section and final module storage.
   iree_allocator_t allocator;
-  // Target name used in feature diagnostics.
-  iree_string_view_t target_name;
   // Export ABI selected for this module.
   loom_target_abi_kind_t abi_kind;
   // Feature atoms required by the ABI and emitted packets.
@@ -93,7 +92,7 @@ void loom_spirv_module_binary_deinitialize(loom_spirv_module_binary_t* module,
 
 // Initializes a sectioned builder for |target|. |target| must describe a
 // SPIR-V binary shader-entry-point or HAL-kernel bundle.
-iree_status_t loom_spirv_module_builder_initialize(
+void loom_spirv_module_builder_initialize(
     const loom_target_bundle_t* target, iree_allocator_t allocator,
     loom_spirv_module_builder_t* out_builder);
 
@@ -134,10 +133,22 @@ iree_status_t loom_spirv_module_builder_import_extended_instruction_set(
 void loom_spirv_module_builder_require_id_bound(
     loom_spirv_module_builder_t* builder, uint32_t id_bound);
 
+// Emits a source-owned literal string instruction after admitting its encoded
+// extent. On rejection, emits a diagnostic and clears |accepted| without
+// writing the instruction. Success never changes the caller's acceptance.
+iree_status_t loom_spirv_module_builder_emit_string(
+    loom_spirv_module_builder_t* builder, loom_spirv_module_section_t section,
+    uint16_t opcode, const uint32_t* prefix_operands,
+    iree_host_size_t prefix_operand_count, iree_string_view_t string,
+    const uint32_t* suffix_operands, iree_host_size_t suffix_operand_count,
+    iree_diagnostic_emitter_t diagnostic_emitter, const loom_op_t* source_op,
+    bool* accepted);
+
 // Finalizes all sections into one SPIR-V binary module. The resulting module
 // owns its storage and must be deinitialized by the caller.
 iree_status_t loom_spirv_module_builder_finalize(
     loom_spirv_module_builder_t* builder,
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_accepted,
     loom_spirv_module_binary_t* out_module);
 
 #ifdef __cplusplus

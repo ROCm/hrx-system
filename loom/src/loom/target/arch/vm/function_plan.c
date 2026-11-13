@@ -17,6 +17,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/low/storage.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
+#include "loom/target/artifact_diagnostics.h"
 
 // Branch displacement fields are patched after the single emission walk. Dense
 // target indices come directly from the shared CFG, in scheduled block order.
@@ -398,34 +399,30 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_return(
 // Bind a data operand while emitting its first consumer, keeping unused and
 // non-VM payloads out of this artifact. Authored numeric ordinals name the
 // declaration-order table; symbols and ordinals share the same final binding.
-static iree_status_t loom_vm_function_rodata(const loom_module_t* module,
-                                             loom_attribute_t value,
-                                             loom_vm_program_build_t* plan,
-                                             uint64_t* out_ordinal) {
+static iree_status_t loom_vm_function_rodata(
+    const loom_module_t* module, loom_attribute_t value,
+    loom_vm_program_build_t* plan, iree_diagnostic_emitter_t emitter,
+    const loom_op_t* op, bool* out_accepted, uint64_t* out_ordinal) {
+  *out_accepted = false;
   loom_symbol_ref_t symbol = value.symbol;
   if (value.kind != LOOM_ATTR_SYMBOL) {
     if ((uint64_t)value.i64 >= plan->rodata.symbol_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "VM rodata ordinal exceeds the data table");
+      return loom_target_artifact_emit_limit(
+          emitter, op, IREE_SV("VM"),
+          IREE_SV("required read-only data declaration count"),
+          (uint64_t)value.i64 + 1, plan->rodata.symbol_count);
     }
     symbol = (loom_symbol_ref_t){.symbol_id = plan->rodata.symbols[value.i64]};
   }
   const loom_op_t* definition =
       module->symbols.entries[symbol.symbol_id].defining_op;
-  if (!loom_global_rodata_def_isa(definition)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "VM rodata operand requires a data definition");
-  }
   uint16_t* ordinal = &plan->rodata.ordinals_by_symbol[symbol.symbol_id];
   if (*ordinal == UINT16_MAX) {
     const int64_t alignment = loom_global_rodata_def_alignment(definition);
     if (alignment > UINT32_MAX) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "VM rodata alignment exceeds u32");
-    }
-    if (plan->rodata.count == UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "VM rodata count exceeds the u16 ordinal space");
+      return loom_target_artifact_emit_limit(
+          emitter, definition, IREE_SV("VM"),
+          IREE_SV("read-only data alignment"), (uint64_t)alignment, UINT32_MAX);
     }
     *ordinal = (uint16_t)plan->rodata.count;
     plan->rodata.values[plan->rodata.count++] = definition;
@@ -433,6 +430,7 @@ static iree_status_t loom_vm_function_rodata(const loom_module_t* module,
         iree_max(plan->rodata.alignment, (uint32_t)alignment);
   }
   *out_ordinal = *ordinal;
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -441,7 +439,9 @@ static iree_status_t loom_vm_function_rodata(const loom_module_t* module,
 IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_packet(
     const loom_low_emission_frame_t* frame,
     const loom_low_schedule_node_t* node, loom_vm_program_build_t* module_plan,
-    iree_io_stream_t* stream) {
+    iree_diagnostic_emitter_t emitter, iree_io_stream_t* stream,
+    bool* out_accepted) {
+  *out_accepted = true;
   const loom_low_descriptor_t* descriptor = node->descriptor;
   const loom_value_ordinal_t* results =
       loom_low_schedule_node_const_result_ordinals(node);
@@ -509,8 +509,12 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_packet(
         const loom_attribute_t value = attributes.entries[i].value;
         uint64_t bits;
         if (immediate->kind == LOOM_LOW_IMMEDIATE_KIND_ORDINAL) {
-          IREE_RETURN_IF_ERROR(loom_vm_function_rodata(frame->module, value,
-                                                       module_plan, &bits));
+          IREE_RETURN_IF_ERROR(
+              loom_vm_function_rodata(frame->module, value, module_plan,
+                                      emitter, node->op, out_accepted, &bits));
+          if (!*out_accepted) {
+            return iree_ok_status();
+          }
         } else {
           bits = (uint64_t)value.i64;
         }
@@ -530,7 +534,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_packet(
 
 // The scheduler retains call sites; module collection retains their signatures.
 // Reserve the canonical offset-zero packet before projecting local storage.
-static iree_status_t loom_vm_function_plan_calls(
+static bool loom_vm_function_plan_calls(
     const loom_low_emission_frame_t* frame,
     const loom_vm_program_build_t* functions,
     loom_vm_function_storage_t* storage) {
@@ -561,12 +565,11 @@ static iree_status_t loom_vm_function_plan_calls(
   if (packet_bytes > UINT16_MAX ||
       frame->schedule.requirements.storage_layout.space_sizes.stack_bytes >
           UINT16_MAX - packet_bytes) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "VM local storage exceeds 65535 bytes");
+    return false;
   }
   storage->local_base = (uint16_t)packet_bytes;
   storage->packet_ref_count = packet_refs;
-  return iree_ok_status();
+  return true;
 }
 
 // The shared plan preserves live callers and sequences the entire register and
@@ -615,7 +618,10 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_call(
 static iree_status_t loom_vm_function_storage(
     const loom_low_emission_frame_t* frame,
     const loom_low_schedule_node_t* node,
-    const loom_vm_function_storage_t* storage, iree_io_stream_t* stream) {
+    const loom_vm_function_storage_t* storage,
+    iree_diagnostic_emitter_t emitter, iree_io_stream_t* stream,
+    bool* out_accepted) {
+  *out_accepted = true;
   const bool is_store = loom_low_storage_store_isa(node->op);
   const loom_value_id_t storage_value =
       is_store ? loom_low_storage_store_storage(node->op)
@@ -643,8 +649,10 @@ static iree_status_t loom_vm_function_storage(
   const uint32_t cell_bytes = register_class->alloc_unit_bits / 8;
   if ((uint64_t)assignment->location_count * cell_bytes >
       reference.byte_length - relative_offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "VM register transfer exceeds its storage span");
+    *out_accepted = false;
+    return loom_target_artifact_emit_requirement(
+        emitter, node->op, IREE_SV("VM"),
+        IREE_SV("a register transfer that fits within its storage span"));
   }
   const uint64_t byte_offset = reference.reservation.byte_offset +
                                reference.byte_offset + relative_offset;
@@ -652,15 +660,17 @@ static iree_status_t loom_vm_function_storage(
       assignment->descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF;
   if (reference.reservation.space !=
       (is_reference ? LOOM_STORAGE_SPACE_PRIVATE : LOOM_STORAGE_SPACE_STACK)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "VM references require private storage and values "
-                            "require stack storage");
+    *out_accepted = false;
+    return loom_target_artifact_emit_requirement(
+        emitter, node->op, IREE_SV("VM"),
+        IREE_SV("private storage for references and stack storage for values"));
   }
   if (is_reference) {
     if (byte_offset % cell_bytes != 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "VM reference storage requires cell-aligned offsets");
+      *out_accepted = false;
+      return loom_target_artifact_emit_requirement(
+          emitter, node->op, IREE_SV("VM"),
+          IREE_SV("cell-aligned reference storage offsets"));
     }
     const bool moves = loom_low_storage_transfer_moves(node->op);
     // Copying transfers preserve the source; moving transfers clear it.
@@ -849,13 +859,17 @@ iree_status_t loom_vm_function_plan_write(
   const loom_low_storage_layout_space_sizes_t local_storage =
       frame.schedule.requirements.storage_layout.space_sizes;
   if (local_storage.scratch_bytes || local_storage.workgroup_bytes) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "VM local storage requires stack or private space");
+    return loom_target_artifact_emit_requirement(
+        diagnostic_emitter, function.op, IREE_SV("VM"),
+        IREE_SV("stack or private local storage"));
   }
   // Preparation projects invocation storage once; calls consume retained moves.
   loom_vm_function_storage_t storage = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_vm_function_plan_calls(&frame, functions, &storage));
+  if (!loom_vm_function_plan_calls(&frame, functions, &storage)) {
+    return loom_target_artifact_emit_requirement(
+        diagnostic_emitter, function.op, IREE_SV("VM"),
+        IREE_SV("at most 65535 bytes of local storage including call packets"));
+  }
   uint64_t local_byte_length = storage.local_base + local_storage.stack_bytes;
   const uint32_t ref_cell_bytes =
       frame.target.descriptor_set->reg_classes[VM_CORE_REG_CLASS_ID_REF]
@@ -897,14 +911,15 @@ iree_status_t loom_vm_function_plan_write(
       const bool is_ref = binding->register_class == VM_CORE_REG_CLASS_ID_REF;
       if (binding->space !=
           (is_ref ? LOOM_STORAGE_SPACE_PRIVATE : LOOM_STORAGE_SPACE_STACK)) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "VM references require private storage and "
-                                "values require stack storage");
+        return loom_target_artifact_emit_requirement(
+            diagnostic_emitter, binding->op, IREE_SV("VM"),
+            IREE_SV(
+                "private storage for references and stack storage for values"));
       }
       if (is_ref && binding->byte_offset % ref_cell_bytes) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "VM reference storage requires cell-aligned offsets");
+        return loom_target_artifact_emit_requirement(
+            diagnostic_emitter, binding->op, IREE_SV("VM"),
+            IREE_SV("cell-aligned reference storage offsets"));
       }
       storage.binding_locations[i] =
           (uint16_t)(is_ref ? storage.packet_ref_count +
@@ -932,13 +947,16 @@ iree_status_t loom_vm_function_plan_write(
     storage.borrowed_ref = (uint16_t)local_ref_count++;
   }
   if (local_byte_length > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "VM local storage exceeds 65535 bytes");
+    return loom_target_artifact_emit_limit(
+        diagnostic_emitter, function.op, IREE_SV("VM"),
+        IREE_SV("local storage byte length"), local_byte_length, UINT16_MAX);
   }
   out_row->local_byte_length_u16 = (uint16_t)local_byte_length;
   if (local_ref_count > (uint64_t)UINT16_MAX + 1) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "VM local references exceed 65536 slots");
+    return loom_target_artifact_emit_limit(
+        diagnostic_emitter, function.op, IREE_SV("VM"),
+        IREE_SV("local reference count"), local_ref_count,
+        (uint32_t)UINT16_MAX + 1);
   }
   out_row->local_ref_count_u32 = (uint32_t)local_ref_count;
   out_row->value_register_count_u16 = (uint16_t)iree_max(
@@ -970,6 +988,7 @@ iree_status_t loom_vm_function_plan_write(
   iree_host_size_t edge_copy_index = 0;
 
   const iree_io_stream_pos_t start = iree_io_stream_offset(stream);
+  bool accepted = true;
   iree_status_t status = iree_ok_status();
   if (frame.allocation.entry_moves.moves.count != 0 ||
       signature->row.argument_value_count_u16 > 16 ||
@@ -992,15 +1011,17 @@ iree_status_t loom_vm_function_plan_write(
     ++out_row->block_count_u32;
   }
   for (iree_host_size_t b = 0;
-       b < frame.schedule.block_count && iree_status_is_ok(status); ++b) {
+       b < frame.schedule.block_count && iree_status_is_ok(status) && accepted;
+       ++b) {
     const loom_low_schedule_block_t* block = &frame.schedule.blocks[b];
     block_offsets[b] = iree_io_stream_offset(stream);
     const iree_vm_bytecode_control_block_t instruction = {
         .opcode = IREE_VM_BYTECODE_OPCODE_CONTROL_BLOCK,
     };
     status = iree_io_stream_write(stream, sizeof(instruction), &instruction);
-    for (uint32_t i = 0;
-         i < block->scheduled_node_count && iree_status_is_ok(status); ++i) {
+    for (uint32_t i = 0; i < block->scheduled_node_count &&
+                         iree_status_is_ok(status) && accepted;
+         ++i) {
       const uint32_t node_index =
           frame.schedule
               .scheduled_node_indices[block->scheduled_node_start + i];
@@ -1009,7 +1030,8 @@ iree_status_t loom_vm_function_plan_write(
         continue;
       }
       if (node->descriptor) {
-        status = loom_vm_function_packet(&frame, node, functions, stream);
+        status = loom_vm_function_packet(&frame, node, functions,
+                                         diagnostic_emitter, stream, &accepted);
       } else {
         switch (node->op->kind) {
           case LOOM_OP_LOW_FUNC_CALL:
@@ -1024,7 +1046,8 @@ iree_status_t loom_vm_function_plan_write(
           case LOOM_OP_LOW_RELOAD:
           case LOOM_OP_LOW_SPILL_MOVE:
           case LOOM_OP_LOW_RELOAD_MOVE:
-            status = loom_vm_function_storage(&frame, node, &storage, stream);
+            status = loom_vm_function_storage(
+                &frame, node, &storage, diagnostic_emitter, stream, &accepted);
             break;
           case LOOM_OP_LOW_RELEASE:
             status = loom_vm_function_release(&frame, node, stream);
@@ -1089,11 +1112,10 @@ iree_status_t loom_vm_function_plan_write(
           }
           default: {
             if (!loom_direct_branch_isa(node->op)) {
-              status = iree_make_status(
-                  IREE_STATUS_UNIMPLEMENTED,
-                  "VM instruction emission for '%.*s' is unavailable",
-                  (int)loom_op_name(module, node->op).size,
-                  loom_op_name(module, node->op).data);
+              accepted = false;
+              status = loom_target_artifact_emit_requirement(
+                  diagnostic_emitter, node->op, IREE_SV("VM"),
+                  IREE_SV("an operation supported by VM instruction emission"));
               break;
             }
             // Allocation records one group for each payload-bearing branch, in
@@ -1118,18 +1140,19 @@ iree_status_t loom_vm_function_plan_write(
       }
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && accepted) {
     const iree_io_stream_pos_t end = iree_io_stream_offset(stream);
     const iree_io_stream_pos_t length = end - start;
     if (length > INT32_MAX) {
-      status =
-          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                           "VM function bytecode exceeds signed 32-bit extent");
+      accepted = false;
+      status = loom_target_artifact_emit_limit(
+          diagnostic_emitter, function.op, IREE_SV("VM"),
+          IREE_SV("function bytecode length"), (uint64_t)length, INT32_MAX);
     } else {
       out_row->bytecode_length_u32 = (uint32_t)length;
     }
-    for (iree_host_size_t i = 0; i < fixup_count && iree_status_is_ok(status);
-         ++i) {
+    for (iree_host_size_t i = 0;
+         i < fixup_count && iree_status_is_ok(status) && accepted; ++i) {
       const loom_vm_branch_fixup_t fixup = fixups[i];
       const int32_t displacement =
           (int32_t)((block_offsets[fixup.target_block] - fixup.offset -
@@ -1142,11 +1165,11 @@ iree_status_t loom_vm_function_plan_write(
             iree_io_stream_write(stream, sizeof(displacement), &displacement);
       }
     }
-    if (fixup_count && iree_status_is_ok(status)) {
+    if (fixup_count && iree_status_is_ok(status) && accepted) {
       status = iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, end);
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && accepted) {
     *out_accepted = true;
   }
   return status;

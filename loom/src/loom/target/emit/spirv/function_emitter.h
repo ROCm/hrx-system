@@ -61,6 +61,10 @@ typedef struct loom_spirv_function_emission_context_t {
   const loom_spirv_program_plan_t* program;
   // Physical plans indexed identically to |program->functions|.
   loom_spirv_function_emission_plan_t* emission_plans;
+  // Source-scoped diagnostic sink for this function's encoding failures.
+  iree_diagnostic_emitter_t diagnostic_emitter;
+  // Borrowed module acceptance cell, cleared by a rejected encoding.
+  bool* accepted;
   // Scratch arena reset and managed by the module-emission call.
   iree_arena_allocator_t* scratch_arena;
   // Sectioned SPIR-V module builder receiving the emitted function.
