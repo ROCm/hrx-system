@@ -104,9 +104,9 @@ struct GraphApi {
   decltype(&hipGraphAddHostNode) add_host = nullptr;
   // Creates an independently mutable template from the supplied source.
   decltype(&hipGraphClone) clone = nullptr;
-  // Compiles the source before measuring executable replacement.
+  // Creates an executable from a template, including its private snapshot.
   decltype(&hipGraphInstantiateWithFlags) instantiate = nullptr;
-  // Releases the final executable outside the update interval.
+  // Releases an executable outside the measured instantiation/update interval.
   decltype(&hipGraphExecDestroy) destroy_executable = nullptr;
   // Validates, compiles, and publishes a whole-graph replacement.
   decltype(&hipGraphExecUpdate) update = nullptr;
@@ -351,6 +351,64 @@ GRAPH_TEMPLATE_BATCH_ORDER(FanOut, Chunks);
 
 #undef GRAPH_TEMPLATE_OPERATIONS
 #undef GRAPH_TEMPLATE_BENCHMARK
+
+template <Topology topology, Edges edges, bool terminal_host>
+void GraphInstantiate(benchmark::State& state) {
+  auto& api = Api();
+  uint32_t value = 0;
+  GraphInput input(state.range(0), topology, edges,
+                   terminal_host ? &value : nullptr);
+  hipGraph_t source = input.Build();
+  input.Verify(source);
+  hipGraphExec_t warmup = nullptr;
+  Check(api.instantiate(&warmup, source, 0));
+  Check(api.destroy_executable(warmup));
+  Check(api.destroy(source));
+  for (auto _ : state) {
+    // A fresh template prevents cached analysis from a prior instantiation
+    // from changing the operation measured. Runtime startup is already warm.
+    state.PauseTiming();
+    source = input.Build();
+    state.ResumeTiming();
+    hipGraphExec_t executable = nullptr;
+    Check(api.instantiate(&executable, source, 0));
+    benchmark::DoNotOptimize(executable);
+    state.PauseTiming();
+    Check(api.destroy_executable(executable));
+    Check(api.destroy(source));
+    state.ResumeTiming();
+  }
+  state.counters["nodes"] = state.range(0);
+  state.counters["edges"] = input.edge_count();
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
+#define GRAPH_INSTANTIATE_BENCHMARK(topology, edges, terminal_host, name)      \
+  BENCHMARK_TEMPLATE(GraphInstantiate, Topology::k##topology, Edges::k##edges, \
+                     terminal_host)                                            \
+      ->Name("GraphInstantiate/" name "/" #topology "/" #edges)                \
+      ->ArgName("nodes")                                                       \
+      ->Arg(1)                                                                 \
+      ->Arg(16)                                                                \
+      ->Arg(256)                                                               \
+      ->Arg(1024)                                                              \
+      ->Arg(4096)                                                              \
+      ->Unit(benchmark::kMicrosecond)
+
+#define GRAPH_INSTANTIATE_SHAPE(topology, edges)                \
+  GRAPH_INSTANTIATE_BENCHMARK(topology, edges, false, "Empty"); \
+  GRAPH_INSTANTIATE_BENCHMARK(topology, edges, true, "Host")
+
+GRAPH_INSTANTIATE_SHAPE(Independent, Embedded);
+GRAPH_INSTANTIATE_SHAPE(Chain, Embedded);
+GRAPH_INSTANTIATE_SHAPE(Chain, Batch);
+GRAPH_INSTANTIATE_SHAPE(FanIn, Embedded);
+GRAPH_INSTANTIATE_SHAPE(FanIn, Batch);
+GRAPH_INSTANTIATE_SHAPE(FanOut, Embedded);
+GRAPH_INSTANTIATE_SHAPE(FanOut, Batch);
+
+#undef GRAPH_INSTANTIATE_SHAPE
+#undef GRAPH_INSTANTIATE_BENCHMARK
 
 template <bool accepted, Topology topology, Edges edges,
           bool reorder_edges = true>
