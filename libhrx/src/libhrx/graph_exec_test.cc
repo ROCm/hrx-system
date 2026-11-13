@@ -437,6 +437,57 @@ TEST_P(GraphKernelTest, UnsupportedFlagsLeaveTheGraphUnchanged) {
   EXPECT_EQ(node_count, 0u);
 }
 
+TEST_P(GraphKernelTest, MissingArgumentStorageLeavesTheGraphUsable) {
+  for (bool bindings : {false, true}) {
+    auto attrs = KernelAttrs(GetParam());
+    if (bindings) {
+      attrs.binding_count = 1;
+      attrs.bindings = nullptr;
+    } else {
+      attrs.constants = nullptr;
+    }
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          hrx_status_to_iree(hrx_graph_add_kernel_node(
+                              graph_, nullptr, 0, &attrs, nullptr)));
+  }
+  size_t node_count = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_size(graph_, &node_count)));
+  EXPECT_EQ(node_count, 0u);
+  InstantiateOriginal();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
+}
+
+TEST_P(GraphKernelTest, UnrepresentableArgumentStorageLeavesTheGraphUsable) {
+  const hrx_buffer_ref_t binding = {};
+  for (int layout = 0; layout < 3; ++layout) {
+    auto attrs = KernelAttrs(GetParam());
+    attrs.bindings = &binding;
+    if (layout == 0) {
+      // Rounding the constant span to its required alignment overflows.
+      attrs.constants_size = SIZE_MAX;
+    } else if (layout == 1) {
+      // The binding array's byte length cannot be represented.
+      attrs.binding_count = SIZE_MAX / sizeof(iree_hal_buffer_ref_t) + 1;
+    } else {
+      // Both arrays fit independently, but their combined storage does not.
+      attrs.constants_size = SIZE_MAX & ~(size_t)(iree_max_align_t - 1);
+      attrs.binding_count = 1;
+    }
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          hrx_status_to_iree(hrx_graph_add_kernel_node(
+                              graph_, nullptr, 0, &attrs, nullptr)));
+  }
+  size_t node_count = 0;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_size(graph_, &node_count)));
+  EXPECT_EQ(node_count, 0u);
+  InstantiateOriginal();
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
+}
+
 TEST_P(GraphKernelTest, ReplacementPreservesPendingArgumentsAndResources) {
   InstantiateOriginal();
   Semaphore gate;

@@ -141,9 +141,9 @@ bool iree_hal_streaming_queue_family_supports_value_waits(
 
 static bool iree_hal_streaming_value_operations_contain_wait(
     iree_host_size_t operation_count,
-    const iree_hal_streaming_value_operation_t* operations) {
+    const hrx_atomic_operation_t* operations) {
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
-    if (operations[i].kind == IREE_HAL_STREAMING_VALUE_OPERATION_WAIT) {
+    if (operations[i].kind == HRX_ATOMIC_OPERATION_WAIT) {
       return true;
     }
   }
@@ -151,7 +151,7 @@ static bool iree_hal_streaming_value_operations_contain_wait(
 }
 
 static iree_status_t iree_hal_streaming_value_operation_target_ref(
-    const iree_hal_streaming_value_operation_t* operation,
+    const hrx_atomic_operation_t* operation,
     iree_hal_buffer_ref_t* out_target_ref) {
   IREE_ASSERT_ARGUMENT(operation);
   IREE_ASSERT_ARGUMENT(out_target_ref);
@@ -162,13 +162,13 @@ static iree_status_t iree_hal_streaming_value_operation_target_ref(
 
   iree_hal_atomic_width_t width = IREE_HAL_ATOMIC_WIDTH_32;
   switch (operation->kind) {
-    case IREE_HAL_STREAMING_VALUE_OPERATION_WAIT:
+    case HRX_ATOMIC_OPERATION_WAIT:
       width = operation->params.wait.width;
       break;
-    case IREE_HAL_STREAMING_VALUE_OPERATION_STORE:
+    case HRX_ATOMIC_OPERATION_STORE:
       width = operation->params.store.width;
       break;
-    case IREE_HAL_STREAMING_VALUE_OPERATION_UPDATE:
+    case HRX_ATOMIC_OPERATION_UPDATE:
       width = operation->params.update.width;
       break;
     default:
@@ -188,7 +188,7 @@ static iree_status_t iree_hal_streaming_value_operation_target_ref(
 }
 
 iree_status_t iree_hal_streaming_value_operation_validate(
-    const iree_hal_streaming_value_operation_t* operation) {
+    const hrx_atomic_operation_t* operation) {
   iree_hal_buffer_ref_t target_ref = {0};
   IREE_RETURN_IF_ERROR(
       iree_hal_streaming_value_operation_target_ref(operation, &target_ref));
@@ -196,60 +196,9 @@ iree_status_t iree_hal_streaming_value_operation_validate(
                                         target_ref.length);
 }
 
-static iree_status_t iree_hal_streaming_append_value_operation(
-    iree_hal_command_buffer_t* command_buffer,
-    const iree_hal_streaming_value_operation_t* operation,
-    iree_hal_execution_stage_t source_stage,
-    iree_hal_execution_stage_t target_stage) {
-  iree_hal_buffer_ref_t target_ref = {0};
-  IREE_RETURN_IF_ERROR(
-      iree_hal_streaming_value_operation_target_ref(operation, &target_ref));
-  switch (operation->kind) {
-    case IREE_HAL_STREAMING_VALUE_OPERATION_WAIT:
-      return iree_hal_command_buffer_atomic_wait(command_buffer, source_stage,
-                                                 target_stage, target_ref,
-                                                 operation->params.wait);
-    case IREE_HAL_STREAMING_VALUE_OPERATION_STORE:
-      return iree_hal_command_buffer_atomic_store(command_buffer, source_stage,
-                                                  target_stage, target_ref,
-                                                  operation->params.store);
-    case IREE_HAL_STREAMING_VALUE_OPERATION_UPDATE:
-      return iree_hal_command_buffer_atomic_rmw(command_buffer, source_stage,
-                                                target_stage, target_ref,
-                                                operation->params.update);
-    default:
-      IREE_ASSERT_UNREACHABLE("stream value operation must be valid");
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "invalid stream value operation");
-  }
-}
-
-iree_status_t iree_hal_streaming_command_buffer_append_value_operations(
-    iree_hal_command_buffer_t* command_buffer, iree_host_size_t operation_count,
-    const iree_hal_streaming_value_operation_t* operations,
-    iree_hal_execution_stage_t initial_source_stage,
-    iree_hal_execution_stage_t target_stage) {
-  IREE_ASSERT_ARGUMENT(command_buffer);
-  if (IREE_UNLIKELY(operation_count == 0 || !operations)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "stream value operation batch is empty");
-  }
-
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < operation_count && iree_status_is_ok(status);
-       ++i) {
-    const iree_hal_execution_stage_t source_stage =
-        i == 0 ? initial_source_stage : IREE_HAL_EXECUTION_STAGE_ATOMIC;
-    status = iree_hal_streaming_append_value_operation(
-        command_buffer, &operations[i], source_stage, target_stage);
-  }
-  return status;
-}
-
 static iree_status_t iree_hal_streaming_record_value_operations(
     const iree_hal_queue_family_t* queue_family,
-    iree_host_size_t operation_count,
-    const iree_hal_streaming_value_operation_t* operations,
+    iree_host_size_t operation_count, const hrx_atomic_operation_t* operations,
     iree_hal_command_buffer_t** out_command_buffer) {
   IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(out_command_buffer);
@@ -264,10 +213,10 @@ static iree_status_t iree_hal_streaming_record_value_operations(
     status = iree_hal_command_buffer_begin(command_buffer);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_command_buffer_append_value_operations(
-        command_buffer, operation_count, operations,
-        IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-        IREE_HAL_EXECUTION_STAGE_ATOMIC);
+    status =
+        hrx_command_record_atomics(command_buffer, operation_count, operations,
+                                   IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+                                   IREE_HAL_EXECUTION_STAGE_ATOMIC);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(command_buffer);
@@ -306,7 +255,7 @@ static iree_status_t iree_hal_streaming_validate_value_stream_locked(
 // by its owning context before this stream is flushed.
 static iree_status_t iree_hal_streaming_record_write_batch_locked(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
-    const iree_hal_streaming_value_operation_t* operations) {
+    const hrx_atomic_operation_t* operations) {
   IREE_RETURN_IF_ERROR(iree_hal_streaming_validate_value_stream_locked(stream));
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush_locked(stream));
 
@@ -321,7 +270,7 @@ static iree_status_t iree_hal_streaming_record_write_batch_locked(
     status = iree_hal_command_buffer_begin(command_buffer);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_command_buffer_append_value_operations(
+    status = hrx_command_record_atomics(
         command_buffer, operation_count, operations,
         IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
         IREE_HAL_EXECUTION_STAGE_ATOMIC | IREE_HAL_EXECUTION_STAGE_DISPATCH |
@@ -337,7 +286,7 @@ static iree_status_t iree_hal_streaming_record_write_batch_locked(
 
 static iree_status_t iree_hal_streaming_submit_value_operations_locked(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
-    const iree_hal_streaming_value_operation_t* operations,
+    const hrx_atomic_operation_t* operations,
     iree_hal_command_buffer_t* command_buffer) {
   uint64_t wait_value = 0;
   uint64_t signal_value = 0;
@@ -354,21 +303,21 @@ static iree_status_t iree_hal_streaming_submit_value_operations_locked(
   };
   iree_status_t status = iree_ok_status();
   if (operation_count == 1) {
-    const iree_hal_streaming_value_operation_t* operation = &operations[0];
+    const hrx_atomic_operation_t* operation = &operations[0];
     switch (operation->kind) {
-      case IREE_HAL_STREAMING_VALUE_OPERATION_WAIT:
+      case HRX_ATOMIC_OPERATION_WAIT:
         status = iree_hal_queue_atomic_wait(
             submission.queue, wait_semaphores, submission.signals,
             operation->target_buffer, operation->target_offset,
             operation->params.wait, /*barriers=*/NULL);
         break;
-      case IREE_HAL_STREAMING_VALUE_OPERATION_STORE:
+      case HRX_ATOMIC_OPERATION_STORE:
         status = iree_hal_queue_atomic_store(
             submission.queue, wait_semaphores, submission.signals,
             operation->target_buffer, operation->target_offset,
             operation->params.store, /*barriers=*/NULL);
         break;
-      case IREE_HAL_STREAMING_VALUE_OPERATION_UPDATE:
+      case HRX_ATOMIC_OPERATION_UPDATE:
         status = iree_hal_queue_atomic_rmw(
             submission.queue, wait_semaphores, submission.signals,
             operation->target_buffer, operation->target_offset,
@@ -394,7 +343,7 @@ static iree_status_t iree_hal_streaming_submit_value_operations_locked(
 
 iree_status_t iree_hal_streaming_queue_value_operations(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
-    const iree_hal_streaming_value_operation_t* operations) {
+    const hrx_atomic_operation_t* operations) {
   IREE_ASSERT_ARGUMENT(stream);
   if (IREE_UNLIKELY(operation_count == 0 || !operations)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -473,8 +422,8 @@ iree_status_t iree_hal_streaming_queue_value_operations(
 iree_status_t iree_hal_streaming_queue_wait_value(
     iree_hal_streaming_stream_t* stream, iree_hal_buffer_t* target_buffer,
     iree_device_size_t target_offset, iree_hal_atomic_wait_params_t params) {
-  const iree_hal_streaming_value_operation_t operation = {
-      .kind = IREE_HAL_STREAMING_VALUE_OPERATION_WAIT,
+  const hrx_atomic_operation_t operation = {
+      .kind = HRX_ATOMIC_OPERATION_WAIT,
       .target_buffer = target_buffer,
       .target_offset = target_offset,
       .params.wait = params,
@@ -485,8 +434,8 @@ iree_status_t iree_hal_streaming_queue_wait_value(
 iree_status_t iree_hal_streaming_queue_store_value(
     iree_hal_streaming_stream_t* stream, iree_hal_buffer_t* target_buffer,
     iree_device_size_t target_offset, iree_hal_atomic_store_params_t params) {
-  const iree_hal_streaming_value_operation_t operation = {
-      .kind = IREE_HAL_STREAMING_VALUE_OPERATION_STORE,
+  const hrx_atomic_operation_t operation = {
+      .kind = HRX_ATOMIC_OPERATION_STORE,
       .target_buffer = target_buffer,
       .target_offset = target_offset,
       .params.store = params,
@@ -497,8 +446,8 @@ iree_status_t iree_hal_streaming_queue_store_value(
 iree_status_t iree_hal_streaming_queue_update_value(
     iree_hal_streaming_stream_t* stream, iree_hal_buffer_t* target_buffer,
     iree_device_size_t target_offset, iree_hal_atomic_rmw_params_t params) {
-  const iree_hal_streaming_value_operation_t operation = {
-      .kind = IREE_HAL_STREAMING_VALUE_OPERATION_UPDATE,
+  const hrx_atomic_operation_t operation = {
+      .kind = HRX_ATOMIC_OPERATION_UPDATE,
       .target_buffer = target_buffer,
       .target_offset = target_offset,
       .params.update = params,

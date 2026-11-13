@@ -13201,18 +13201,18 @@ static void iree_hip_stream_value_write_params_set_scope(
 static void iree_hip_stream_value_write_operation_initialize(
     const iree_hip_stream_value_target_t* target,
     const iree_hip_stream_value_write_params_t* params,
-    iree_hal_streaming_value_operation_t* out_operation) {
+    hrx_atomic_operation_t* out_operation) {
   memset(out_operation, 0, sizeof(*out_operation));
   out_operation->target_buffer = target->buffer;
   out_operation->target_offset = target->offset;
   switch (params->operation) {
     case IREE_HIP_STREAM_VALUE_WRITE_OPERATION_STORE:
-      out_operation->kind = IREE_HAL_STREAMING_VALUE_OPERATION_STORE;
+      out_operation->kind = HRX_ATOMIC_OPERATION_STORE;
       out_operation->params.store = params->store;
       break;
     case IREE_HIP_STREAM_VALUE_WRITE_OPERATION_ADD:
     case IREE_HIP_STREAM_VALUE_WRITE_OPERATION_SUBTRACT:
-      out_operation->kind = IREE_HAL_STREAMING_VALUE_OPERATION_UPDATE;
+      out_operation->kind = HRX_ATOMIC_OPERATION_UPDATE;
       out_operation->params.update = params->update;
       break;
     default:
@@ -13224,9 +13224,9 @@ static void iree_hip_stream_value_write_operation_initialize(
 static void iree_hip_stream_value_wait_operation_initialize(
     const iree_hip_stream_value_target_t* target,
     iree_hal_atomic_wait_params_t params,
-    iree_hal_streaming_value_operation_t* out_operation) {
-  *out_operation = (iree_hal_streaming_value_operation_t){
-      .kind = IREE_HAL_STREAMING_VALUE_OPERATION_WAIT,
+    hrx_atomic_operation_t* out_operation) {
+  *out_operation = (hrx_atomic_operation_t){
+      .kind = HRX_ATOMIC_OPERATION_WAIT,
       .target_buffer = target->buffer,
       .target_offset = target->offset,
       .params.wait = params,
@@ -13267,7 +13267,7 @@ static hipError_t iree_hip_stream_value_reject_capture(
 
 typedef struct iree_hip_capture_stream_value_batch_t {
   const hipBatchMemOpNodeParams* params;
-  const iree_hal_streaming_value_operation_t* operations;
+  const hrx_atomic_operation_t* operations;
   const hrx_buffer_t* owners;
 } iree_hip_capture_stream_value_batch_t;
 
@@ -13291,8 +13291,8 @@ static iree_status_t iree_hip_capture_record_stream_value_batch(
 // replay never depends on the continued presence of raw pointers in a registry.
 static hipError_t iree_hip_stream_value_try_capture_batch(
     iree_hal_streaming_stream_t* stream, const hipBatchMemOpNodeParams* params,
-    const iree_hal_streaming_value_operation_t* operations,
-    const hrx_buffer_t* owners, bool* out_captured) {
+    const hrx_atomic_operation_t* operations, const hrx_buffer_t* owners,
+    bool* out_captured) {
   iree_hip_capture_stream_value_batch_t capture = {
       .params = params,
       .operations = operations,
@@ -13336,7 +13336,7 @@ static hipError_t iree_hip_enqueue_stream_value_write(
   }
   iree_hip_stream_value_write_params_set_scope(&target, &write_params);
 
-  iree_hal_streaming_value_operation_t operation;
+  hrx_atomic_operation_t operation;
   iree_hip_stream_value_write_operation_initialize(&target, &write_params,
                                                    &operation);
   hipStreamBatchMemOpParams hip_operation = {0};
@@ -13430,7 +13430,7 @@ static hipError_t iree_hip_enqueue_stream_value_wait(
                                                        resolved_stream.stream);
   }
   if (result == hipSuccess) {
-    iree_hal_streaming_value_operation_t operation;
+    hrx_atomic_operation_t operation;
     iree_hip_stream_value_wait_operation_initialize(&target, wait_params,
                                                     &operation);
     status = iree_hal_streaming_queue_value_operations(resolved_stream.stream,
@@ -13498,7 +13498,7 @@ enum { IREE_HIP_STREAM_VALUE_INLINE_BATCH_CAPACITY = 16 };
 
 typedef struct iree_hip_stream_value_prepared_batch_t {
   // Generic operations ready for submission or graph storage.
-  iree_hal_streaming_value_operation_t* operations;
+  hrx_atomic_operation_t* operations;
   // Retained allocation owners corresponding to each operation.
   hrx_buffer_t* owners;
   // Unique retained targets used while resolving operation addresses.
@@ -13518,7 +13518,7 @@ typedef struct iree_hip_stream_value_prepared_batch_t {
   // Heap storage used when the inline capacity is exceeded.
   void* allocated_storage;
   // Inline generic operation storage.
-  iree_hal_streaming_value_operation_t
+  hrx_atomic_operation_t
       inline_operations[IREE_HIP_STREAM_VALUE_INLINE_BATCH_CAPACITY];
   // Inline allocation-owner storage.
   hrx_buffer_t inline_owners[IREE_HIP_STREAM_VALUE_INLINE_BATCH_CAPACITY];
@@ -13600,8 +13600,7 @@ static hipError_t iree_hip_stream_value_operation_decode(
 static void iree_hip_stream_value_operation_initialize_decoded(
     const iree_hip_stream_value_decoded_operation_t* decoded,
     const iree_hip_stream_value_target_t* allocation,
-    iree_device_size_t target_offset,
-    iree_hal_streaming_value_operation_t* out_operation) {
+    iree_device_size_t target_offset, hrx_atomic_operation_t* out_operation) {
   iree_hip_stream_value_target_t target = *allocation;
   target.offset = target_offset;
   if (decoded->is_wait) {
@@ -13653,9 +13652,9 @@ static hipError_t iree_hip_stream_value_prepared_batch_initialize(
     iree_host_size_t range_matches_offset = 0;
     iree_host_size_t total_size = 0;
     if (IREE_UNLIKELY(
-            !iree_host_size_checked_mul(
-                operation_count, sizeof(iree_hal_streaming_value_operation_t),
-                &operations_size) ||
+            !iree_host_size_checked_mul(operation_count,
+                                        sizeof(hrx_atomic_operation_t),
+                                        &operations_size) ||
             !iree_host_size_checked_align(operations_size, iree_max_align_t,
                                           &owners_offset) ||
             !iree_host_size_checked_mul(operation_count, sizeof(hrx_buffer_t),
@@ -13706,7 +13705,7 @@ static hipError_t iree_hip_stream_value_prepared_batch_initialize(
       return iree_status_to_hip_result(status);
     }
     out_batch->operations =
-        (iree_hal_streaming_value_operation_t*)out_batch->allocated_storage;
+        (hrx_atomic_operation_t*)out_batch->allocated_storage;
     out_batch->owners =
         (hrx_buffer_t*)((uint8_t*)out_batch->allocated_storage + owners_offset);
     out_batch->targets =
@@ -22604,7 +22603,7 @@ typedef struct iree_hip_graph_batch_mem_op_snapshot_t {
   // Copied opaque operation parameters.
   hipStreamBatchMemOpParams* param_array;
   // Copied resolved operations.
-  iree_hal_streaming_value_operation_t* operations;
+  hrx_atomic_operation_t* operations;
   // Retained allocation owners corresponding to |operations|.
   hrx_buffer_t* owners;
   // Number of entries in |param_array|, |operations|, and |owners|.
@@ -22680,8 +22679,8 @@ static iree_status_t iree_hip_graph_batch_mem_op_snapshot_initialize(
       iree_allocator_system(), total_size, &out_snapshot->storage));
   out_snapshot->param_array = (hipStreamBatchMemOpParams*)out_snapshot->storage;
   out_snapshot->operations =
-      (iree_hal_streaming_value_operation_t*)((uint8_t*)out_snapshot->storage +
-                                              operations_offset);
+      (hrx_atomic_operation_t*)((uint8_t*)out_snapshot->storage +
+                                operations_offset);
   out_snapshot->owners =
       (hrx_buffer_t*)((uint8_t*)out_snapshot->storage + owners_offset);
   out_snapshot->operation_count = attrs->operation_count;

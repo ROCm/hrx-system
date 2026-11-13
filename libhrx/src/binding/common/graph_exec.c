@@ -1298,7 +1298,7 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
       case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP: {
         const iree_hal_streaming_graph_batch_mem_op_node_attrs_t* attrs =
             iree_hal_streaming_graph_node_batch_mem_op(node);
-        status = iree_hal_streaming_command_buffer_append_value_operations(
+        status = hrx_command_record_atomics(
             command_buffer, attrs->operation_count, attrs->operations,
             IREE_HAL_EXECUTION_STAGE_DISPATCH |
                 IREE_HAL_EXECUTION_STAGE_TRANSFER |

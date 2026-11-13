@@ -8,6 +8,7 @@
 
 #include "buffer.h"
 #include "buffer_table.h"
+#include "command_recording.h"
 #include "device.h"
 #include "graph_analysis.h"
 #include "graph_exec.h"
@@ -272,38 +273,6 @@ static inline bool hrx_graph_node_is_recordable(
   return (type & HRX_GRAPH_NODE_TYPE_RECORDABLE_BIT) != 0;
 }
 
-typedef struct hrx_graph_kernel_node_attrs_internal_t {
-  // Executable retained by the graph's node resource set.
-  iree_hal_executable_t* executable;
-  // Export selected from |executable|.
-  uint32_t export_ordinal;
-  // Number of workgroups along each axis.
-  uint32_t grid_dim[3];
-  // Number of work items per workgroup along each axis.
-  uint32_t block_dim[3];
-  // Validated HAL dispatch flags, translated when the node is inserted.
-  iree_hal_dispatch_flags_t flags;
-  // Argument bytes copied into the graph arena.
-  iree_const_byte_span_t constants;
-  // References copied into the graph arena; the resource set retains buffers.
-  iree_hal_buffer_ref_list_t bindings;
-} hrx_graph_kernel_node_attrs_internal_t;
-
-typedef struct hrx_graph_memcpy_node_attrs_internal_t {
-  iree_hal_buffer_ref_t dst_ref;
-  iree_hal_buffer_ref_t src_ref;
-  iree_device_size_t size;
-  iree_hal_copy_flags_t flags;
-} hrx_graph_memcpy_node_attrs_internal_t;
-
-typedef struct hrx_graph_memset_node_attrs_internal_t {
-  iree_hal_buffer_ref_t dst_ref;
-  uint32_t pattern;
-  uint8_t pattern_size;
-  iree_device_size_t count;
-  iree_hal_fill_flags_t flags;
-} hrx_graph_memset_node_attrs_internal_t;
-
 typedef struct hrx_graph_host_call_node_attrs_internal_t {
   // Application callback retaining the public HRX status contract.
   hrx_host_call_fn_t fn;
@@ -316,9 +285,9 @@ typedef struct hrx_graph_node_s {
   uint32_t node_index;
   uint32_t dependency_count;
   union {
-    hrx_graph_kernel_node_attrs_internal_t kernel;
-    hrx_graph_memcpy_node_attrs_internal_t memcpy;
-    hrx_graph_memset_node_attrs_internal_t memset;
+    hrx_command_dispatch_t kernel;
+    hrx_command_copy_t memcpy;
+    hrx_command_fill_t memset;
     hrx_graph_host_call_node_attrs_internal_t host;
   } attrs;
   struct hrx_graph_node_s* dependencies[];

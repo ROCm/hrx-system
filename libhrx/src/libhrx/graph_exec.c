@@ -43,36 +43,6 @@ typedef struct hrx_graph_exec_block_t {
 } hrx_graph_exec_block_t;
 
 //===----------------------------------------------------------------------===//
-// Dependency barriers selected by graph analysis
-//===----------------------------------------------------------------------===//
-
-static iree_status_t hrx_graph_record_dependency_barrier(
-    iree_hal_command_buffer_t* command_buffer) {
-  // Every operation in a recorded partition executes on this device. Host
-  // calls and other partitions cross the system-scope entry/exit barriers;
-  // dependencies within the partition only order device memory accesses.
-  const iree_hal_access_scope_t device_access =
-      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
-      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
-  const iree_hal_memory_barrier_t memory_barrier = {
-      .source_scope = device_access,
-      .target_scope = device_access,
-  };
-  const iree_hal_barrier_t execution_barrier = {
-      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-      .memory_barrier_count = 1,
-      .memory_barriers = &memory_barrier,
-  };
-  IREE_RETURN_IF_ERROR(
-      iree_hal_command_buffer_barrier(command_buffer, &execution_barrier));
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
 // Partition recording into command buffers
 //===----------------------------------------------------------------------===//
 
@@ -103,60 +73,29 @@ static iree_status_t hrx_graph_record_partition(
       z0, iree_hal_command_buffer_begin_debug_group(command_buffer, label_name,
                                                     label_color, location));
 
-  iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; iree_status_is_ok(status) && i < node_count; ++i) {
-    const uint32_t index = schedule->order[node_start_index + i];
-    const uint8_t flags = schedule->flags[index];
-    if ((flags >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT) != stream_id) {
-      continue;
-    }
-    hrx_graph_node_s* node = schedule->sources[index];
-    if (flags & HRX_GRAPH_ANALYSIS_NODE_BARRIER_BEFORE) {
-      status = hrx_graph_record_dependency_barrier(command_buffer);
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-    }
-    switch (node->type) {
-      case HRX_GRAPH_NODE_TYPE_INTERNAL_KERNEL: {
-        const hrx_graph_kernel_node_attrs_internal_t* attrs =
-            &node->attrs.kernel;
-        const iree_hal_dispatch_config_t config = {
-            .workgroup_size = {attrs->block_dim[0], attrs->block_dim[1],
-                               attrs->block_dim[2]},
-            .workgroup_count = {attrs->grid_dim[0], attrs->grid_dim[1],
-                                attrs->grid_dim[2]},
-        };
-        status = iree_hal_command_buffer_dispatch(
-            command_buffer, attrs->executable,
-            iree_hal_executable_function_from_index(attrs->export_ordinal),
-            config, attrs->constants, attrs->bindings, attrs->flags);
-        break;
-      }
-      case HRX_GRAPH_NODE_TYPE_INTERNAL_MEMCPY: {
-        const hrx_graph_memcpy_node_attrs_internal_t* attrs =
-            &node->attrs.memcpy;
-        status = iree_hal_command_buffer_copy_buffer(
-            command_buffer, attrs->src_ref, attrs->dst_ref, attrs->flags);
-        break;
-      }
-      case HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET: {
-        const hrx_graph_memset_node_attrs_internal_t* attrs =
-            &node->attrs.memset;
-        status = iree_hal_command_buffer_fill_buffer(
-            command_buffer, attrs->dst_ref, &attrs->pattern,
-            attrs->pattern_size, attrs->flags);
-        break;
-      }
-      default: {
-        status = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "non-recordable node type %d in recordable partition",
-            (int)node->type);
-        break;
-      }
-    }
-  }
+  // Every operation in a recorded partition executes on this device. Host
+  // calls and other partitions cross the system-scope entry/exit barriers;
+  // dependencies within the partition only order device memory accesses.
+  const iree_hal_access_scope_t device_access =
+      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
+  const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = device_access,
+      .target_scope = device_access,
+  };
+  const iree_hal_barrier_t execution_barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory_barrier,
+  };
+  iree_hal_barrier_flags_t release_flags = IREE_HAL_BARRIER_FLAG_NONE;
+  iree_status_t status = hrx_graph_record_commands(
+      schedule, node_start_index, node_count, stream_id, &execution_barrier,
+      command_buffer, &release_flags);
 
   if (iree_status_is_ok(status)) {
     const iree_hal_barrier_t release_barrier = {
@@ -244,9 +183,10 @@ static iree_status_t hrx_graph_recording_compile_schedule(
         // Host calls are the only isolated native operations. Empty nodes
         // have no partition in the compiled schedule.
         block->type = HRX_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL;
-        hrx_graph_node_s* node = schedule->sources[first_index];
-        block->attrs.host_call.fn = node->attrs.host.fn;
-        block->attrs.host_call.user_data = node->attrs.host.user_data;
+        const hrx_graph_host_call_node_attrs_internal_t* host_call =
+            schedule->sources[first_index];
+        block->attrs.host_call.fn = host_call->fn;
+        block->attrs.host_call.user_data = host_call->user_data;
       }
     }
     recording->blocks[block_index++] = block;

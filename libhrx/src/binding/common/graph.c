@@ -100,9 +100,9 @@ static iree_status_t iree_hal_streaming_graph_batch_mem_op_layout_calculate(
                                         &out_layout->params_capacity) ||
           !iree_host_size_checked_align(param_array_size, iree_max_align_t,
                                         &out_layout->param_array_capacity) ||
-          !iree_host_size_checked_mul(
-              operation_count, sizeof(iree_hal_streaming_value_operation_t),
-              &operations_size) ||
+          !iree_host_size_checked_mul(operation_count,
+                                      sizeof(hrx_atomic_operation_t),
+                                      &operations_size) ||
           !iree_host_size_checked_align(operations_size, iree_max_align_t,
                                         &operations_size) ||
           !iree_host_size_checked_mul(operation_count, sizeof(hrx_buffer_t),
@@ -129,8 +129,8 @@ static iree_status_t iree_hal_streaming_graph_batch_mem_op_layout_calculate(
 }
 
 static iree_status_t iree_hal_streaming_graph_validate_batch_mem_operations(
-    const iree_hal_streaming_value_operation_t* operations,
-    const hrx_buffer_t* owners, iree_host_size_t operation_count) {
+    const hrx_atomic_operation_t* operations, const hrx_buffer_t* owners,
+    iree_host_size_t operation_count) {
   if (IREE_UNLIKELY(operation_count == 0 || !operations || !owners)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "batch mem op node requires operations");
@@ -848,9 +848,8 @@ iree_status_t iree_hal_streaming_graph_clone(
                  source_attrs->param_array_size);
         }
         clone_attrs->operations =
-            (iree_hal_streaming_value_operation_t*)(extra_data +
-                                                    batch_mem_op_layout
-                                                        .operations_offset);
+            (hrx_atomic_operation_t*)(extra_data +
+                                      batch_mem_op_layout.operations_offset);
         clone_attrs->operation_count = source_attrs->operation_count;
         clone_attrs->operation_capacity = source_attrs->operation_count;
         clone_attrs->owners =
@@ -1841,8 +1840,7 @@ iree_status_t iree_hal_streaming_graph_add_batch_mem_op_node(
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, const void* params,
     iree_host_size_t params_size, const void* param_array,
-    iree_host_size_t param_array_size,
-    const iree_hal_streaming_value_operation_t* operations,
+    iree_host_size_t param_array_size, const hrx_atomic_operation_t* operations,
     const hrx_buffer_t* owners, iree_host_size_t operation_count,
     iree_hal_streaming_graph_node_t** out_node) {
   IREE_ASSERT_ARGUMENT(graph);
@@ -1894,8 +1892,7 @@ iree_status_t iree_hal_streaming_graph_add_batch_mem_op_node(
     memcpy(attrs->param_array, param_array, param_array_size);
   }
   attrs->operations =
-      (iree_hal_streaming_value_operation_t*)(extra_data +
-                                              layout.operations_offset);
+      (hrx_atomic_operation_t*)(extra_data + layout.operations_offset);
   attrs->operation_count = operation_count;
   attrs->operation_capacity = operation_count;
   attrs->owners = (hrx_buffer_t*)(extra_data + layout.owners_offset);
@@ -1961,8 +1958,7 @@ iree_status_t iree_hal_streaming_graph_add_child_graph_node(
 iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
     iree_hal_streaming_graph_node_t* node, const void* params,
     iree_host_size_t params_size, const void* param_array,
-    iree_host_size_t param_array_size,
-    const iree_hal_streaming_value_operation_t* operations,
+    iree_host_size_t param_array_size, const hrx_atomic_operation_t* operations,
     const hrx_buffer_t* owners, iree_host_size_t operation_count) {
   if (!node || !node->graph ||
       node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP) {
@@ -1980,7 +1976,7 @@ iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
       iree_hal_streaming_graph_node_batch_mem_op(node);
   void* params_storage = attrs->params;
   void* param_array_storage = attrs->param_array;
-  iree_hal_streaming_value_operation_t* operation_storage = attrs->operations;
+  hrx_atomic_operation_t* operation_storage = attrs->operations;
   hrx_buffer_t* owner_storage = attrs->owners;
   iree_host_size_t params_capacity = attrs->params_capacity;
   iree_host_size_t param_array_capacity = attrs->param_array_capacity;
@@ -1998,8 +1994,7 @@ iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
     param_array_storage =
         param_array_size > 0 ? storage + layout.param_array_offset : NULL;
     operation_storage =
-        (iree_hal_streaming_value_operation_t*)(storage +
-                                                layout.operations_offset);
+        (hrx_atomic_operation_t*)(storage + layout.operations_offset);
     owner_storage = (hrx_buffer_t*)(storage + layout.owners_offset);
     params_capacity = layout.params_capacity;
     param_array_capacity = layout.param_array_capacity;

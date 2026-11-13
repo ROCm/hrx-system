@@ -1433,8 +1433,8 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
       .width = IREE_HAL_ATOMIC_WIDTH_64,
       .reserved = {},
   };
-  iree_hal_streaming_value_operation_t operation = {
-      .kind = IREE_HAL_STREAMING_VALUE_OPERATION_STORE,
+  hrx_atomic_operation_t operation = {
+      .kind = HRX_ATOMIC_OPERATION_STORE,
       .target_buffer = target.buffer,
       .target_offset = target.offset,
   };

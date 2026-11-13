@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 #define IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 
+#include "command_recording.h"
 #include "common/host_callback.h"
 #include "common/memory.h"
 #include "common/stream.h"
@@ -26,8 +27,6 @@ typedef struct iree_hal_streaming_graph_exec_t iree_hal_streaming_graph_exec_t;
 typedef struct iree_hal_streaming_graph_node_t iree_hal_streaming_graph_node_t;
 typedef struct iree_hal_streaming_module_t iree_hal_streaming_module_t;
 typedef struct iree_hal_streaming_symbol_t iree_hal_streaming_symbol_t;
-typedef struct iree_hal_streaming_value_operation_t
-    iree_hal_streaming_value_operation_t;
 
 //===----------------------------------------------------------------------===//
 // Graph types
@@ -335,7 +334,7 @@ typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
   // Number of operation array bytes reserved at |param_array|.
   iree_host_size_t param_array_capacity;
   // Resolved generic operations recorded when this graph executes.
-  iree_hal_streaming_value_operation_t* operations;
+  hrx_atomic_operation_t* operations;
   // Number of valid entries in |operations| and |owners|.
   iree_host_size_t operation_count;
   // Number of entries reserved in |operations| and |owners|.
@@ -725,16 +724,14 @@ iree_status_t iree_hal_streaming_graph_add_batch_mem_op_node(
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, const void* params,
     iree_host_size_t params_size, const void* param_array,
-    iree_host_size_t param_array_size,
-    const iree_hal_streaming_value_operation_t* operations,
+    iree_host_size_t param_array_size, const hrx_atomic_operation_t* operations,
     const hrx_buffer_t* owners, iree_host_size_t operation_count,
     iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
     iree_hal_streaming_graph_node_t* node, const void* params,
     iree_host_size_t params_size, const void* param_array,
-    iree_host_size_t param_array_size,
-    const iree_hal_streaming_value_operation_t* operations,
+    iree_host_size_t param_array_size, const hrx_atomic_operation_t* operations,
     const hrx_buffer_t* owners, iree_host_size_t operation_count);
 
 // Removes an ordinary operation and its helpers. Allocation and free nodes
