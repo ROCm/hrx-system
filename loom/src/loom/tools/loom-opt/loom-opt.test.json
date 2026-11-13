@@ -917,7 +917,7 @@
         {
           "path": "{tmp}/missing.loom",
           "contains": [
-            "\"NOT_FOUND\"",
+            "\"INVALID_ARGUMENT\"",
             "// RUN: loom-opt --verify=true --pipeline='@missing' %s"
           ]
         }

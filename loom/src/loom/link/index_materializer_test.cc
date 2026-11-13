@@ -994,8 +994,7 @@ func.def public @same(%x: i32) -> (i32) {
               LOOM_LINK_PROVIDER_ROLE_INPUT);
 
   loom_link_index_materialization_t materialization = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                        TryMerge(index.get(), &materialization));
+  IREE_EXPECT_OK(TryMerge(index.get(), &materialization));
   EXPECT_EQ(materialization.plan, nullptr);
   EXPECT_EQ(materialization.product.module, nullptr);
 }
@@ -1980,12 +1979,10 @@ TEST_F(LinkIndexMaterializerTest, ConfigProvidersRejectIncompatibleContracts) {
       AddProvider(index.get(), form, source, provider, bytecode, name,
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
       loom_link_index_materialization_t linked = {};
-      IREE_EXPECT_STATUS_IS(
-          iree_string_view_equal(name, IREE_SV("conflict.loom"))
-              ? IREE_STATUS_ALREADY_EXISTS
-              : IREE_STATUS_INVALID_ARGUMENT,
-          TryMaterialize(index.get(), IREE_SV("entry"), LOOM_LINK_PLAN_LINK,
-                         LOOM_LINK_PLAN_UNRESOLVED_ERROR, &linked));
+      IREE_EXPECT_OK(TryMaterialize(index.get(), IREE_SV("entry"),
+                                    LOOM_LINK_PLAN_LINK,
+                                    LOOM_LINK_PLAN_UNRESOLVED_ERROR, &linked));
+      EXPECT_EQ(linked.product.module, nullptr);
       loom_link_index_materialization_deinitialize(&linked);
     }
   }

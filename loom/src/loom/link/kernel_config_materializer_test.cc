@@ -1173,7 +1173,8 @@ kernel.def target(@dispatch_target) @dispatch_rows(%count_source: buffer) {
   iree_status_t full_status =
       loom_link_plan_materialize(full_plan.get(), &environment, IREE_SV("full"),
                                  &materialization_arena, &full_materialization);
-  IREE_EXPECT_NOT_OK(full_status);
+  IREE_EXPECT_OK(full_status);
+  EXPECT_EQ(full_materialization.module, nullptr);
   loom_module_free(full_materialization.module);
   iree_arena_deinitialize(&materialization_arena);
   projected_module.reset();

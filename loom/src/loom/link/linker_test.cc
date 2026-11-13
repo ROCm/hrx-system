@@ -773,8 +773,7 @@ func.def @caller(%x: i32) -> (i32) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        LinkStatus({harness}, {IREE_SV("@missing")}, &linked));
+  IREE_EXPECT_OK(LinkStatus({harness}, {IREE_SV("@missing")}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -889,8 +888,7 @@ func.def target(@def_target) @identity(%x: i32) -> (i32) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({harness, corpus}, &linked));
+  IREE_EXPECT_OK(LinkStatus({harness, corpus}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -905,8 +903,7 @@ low.func.def target<test.low.alt> @identity() {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({harness, corpus}, &linked));
+  IREE_EXPECT_OK(LinkStatus({harness, corpus}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -921,8 +918,7 @@ func.def @identity(%x: i32) -> (i32) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({harness, corpus}, &linked));
+  IREE_EXPECT_OK(LinkStatus({harness, corpus}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -937,8 +933,7 @@ command.def @program() launch(%fixed: buffer, %dynamic: buffer) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({harness, corpus}, &linked));
+  IREE_EXPECT_OK(LinkStatus({harness, corpus}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -977,8 +972,7 @@ kernel.def @fill(%element_count: index) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({harness, corpus}, &linked));
+  IREE_EXPECT_OK(LinkStatus({harness, corpus}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -996,8 +990,7 @@ kernel.def @fill(%element_count: index) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({harness, corpus}, &linked));
+  IREE_EXPECT_OK(LinkStatus({harness, corpus}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -1015,8 +1008,7 @@ kernel.def @fill(%element_count: index) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({harness, corpus}, &linked));
+  IREE_EXPECT_OK(LinkStatus({harness, corpus}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -1081,8 +1073,7 @@ config.def @model36.model.hidden_size = 2048 : index
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                        LinkStatus({first, second}, &linked));
+  IREE_EXPECT_OK(LinkStatus({first, second}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -1095,8 +1086,7 @@ config.decl @model36.model.hidden_size : %value: index where [range(%value, 1, 8
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({root, library}, &linked));
+  IREE_EXPECT_OK(LinkStatus({root, library}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -1524,11 +1514,21 @@ func.def public @identity(%x: i32) -> (i32) {
   loom_link_options_t options = {
       .module_name = IREE_SV("linked"),
   };
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                        loom_link_materialized_modules(
-                            inputs, IREE_ARRAYSIZE(inputs), &options,
-                            &block_pool_, iree_allocator_system(), &linked));
+  IREE_EXPECT_OK(loom_link_materialized_modules(
+      inputs, IREE_ARRAYSIZE(inputs), &options, &block_pool_,
+      iree_allocator_system(), &linked));
   EXPECT_EQ(linked, nullptr);
+
+  loom_linker_t* linker = CreateIncrementalLinker();
+  IREE_ASSERT_OK(loom_linker_add_module(linker, first, nullptr));
+  EXPECT_FALSE(loom_linker_is_rejected(linker));
+  IREE_ASSERT_OK(loom_linker_add_module(linker, second, nullptr));
+  EXPECT_TRUE(loom_linker_is_rejected(linker));
+  IREE_ASSERT_OK(loom_linker_add_module(linker, first, nullptr));
+  EXPECT_TRUE(loom_linker_is_rejected(linker));
+  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
+  EXPECT_EQ(linked, nullptr);
+  loom_linker_free(linker);
 }
 
 TEST_F(LinkerTest, CoalescesLinkOncePublicDefinitions) {
@@ -1567,8 +1567,7 @@ func.def public linkonce @identity(%x: i64) -> (i64) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({first, second}, &linked));
+  IREE_EXPECT_OK(LinkStatus({first, second}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -1585,8 +1584,7 @@ func.def public linkonce @identity(%x: i32) -> (i32) {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                        LinkStatus({first, second}, &linked));
+  IREE_EXPECT_OK(LinkStatus({first, second}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -1619,8 +1617,7 @@ global.rodata.def public linkonce @lookup = bytes("01")
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                        LinkStatus({first, second}, &linked));
+  IREE_EXPECT_OK(LinkStatus({first, second}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -1671,8 +1668,7 @@ kernel.def linkonce @copy() {
 )"));
 
   loom_module_t* linked = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        LinkStatus({first, second}, &linked));
+  IREE_EXPECT_OK(LinkStatus({first, second}, &linked));
   EXPECT_EQ(linked, nullptr);
 }
 
@@ -1722,10 +1718,9 @@ template.def<@demo.effect> @provider(%x: i32) -> (i32) {
   loom_link_options_t options = {
       .module_name = IREE_SV("linked"),
   };
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_link_materialized_modules(
-                            inputs, IREE_ARRAYSIZE(inputs), &options,
-                            &block_pool_, iree_allocator_system(), &linked));
+  IREE_EXPECT_OK(loom_link_materialized_modules(
+      inputs, IREE_ARRAYSIZE(inputs), &options, &block_pool_,
+      iree_allocator_system(), &linked));
   EXPECT_EQ(linked, nullptr);
 }
 

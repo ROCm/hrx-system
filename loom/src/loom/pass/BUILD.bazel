@@ -65,6 +65,9 @@ loom_cc_library(
     srcs = ["pipeline_snapshot.c"],
     hdrs = ["pipeline_snapshot.h"],
     deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:linker",
         "//loom/src/loom/ops/pass",

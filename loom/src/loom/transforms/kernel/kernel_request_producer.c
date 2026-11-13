@@ -175,7 +175,7 @@ static iree_status_t loom_kernel_request_source_prepare(
 
   loom_symbol_ref_t kernel_ref = loom_symbol_ref_null();
   loom_func_like_t kernel = {0};
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     IREE_ASSERT_LT(source_symbol_ordinal,
                    materialization.product.target_symbols.count);
     kernel_ref =
@@ -193,14 +193,14 @@ static iree_status_t loom_kernel_request_source_prepare(
 
   loom_template_provider_slice_t external_candidates =
       loom_template_provider_slice_empty();
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_link_template_candidate_loader_load(
         producer->candidate_loader, materialization.plan,
         &materialization.product, scratch_arena, &external_candidates);
   }
 
   loom_symbol_reference_table_t references = {0};
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_symbol_reference_table_build(
         materialization.product.module, &construction_arena, &references);
   }
@@ -208,30 +208,30 @@ static iree_status_t loom_kernel_request_source_prepare(
   loom_symbol_fact_table_initialize(&symbol_facts, scratch_arena);
   loom_template_provider_catalog_t providers = {0};
   loom_template_provider_catalog_initialize(&providers, scratch_arena);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_template_provider_catalog_build(
         &providers, materialization.product.module, &symbol_facts,
         external_candidates.providers, external_candidates.count);
   }
   loom_template_decision_model_catalog_t decision_models = {0};
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_template_decision_model_catalog_build(
         materialization.product.module, &symbol_facts, &references, &providers,
         scratch_arena, &decision_models);
   }
 
   loom_template_applicability_target_t kernel_target = {0};
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_kernel_request_resolve_target(
         materialization.product.module, kernel, &symbol_facts, &kernel_target);
   }
   loom_value_fact_table_t kernel_facts = {0};
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_value_fact_table_initialize(
         &kernel_facts, &construction_arena,
         materialization.product.module->values.count);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     loom_type_registry_configure_fact_context(&kernel_facts.context);
     // Query operands and direct target requirements share the bound target.
     kernel_facts.context.target_facts = kernel_target.facts;
@@ -239,20 +239,20 @@ static iree_status_t loom_kernel_request_source_prepare(
         &kernel_facts, materialization.product.module, kernel);
   }
   loom_symbolic_expr_context_t expression_context = {0};
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     loom_symbolic_expr_context_initialize(materialization.product.module,
                                           /*value_domain=*/NULL, &kernel_facts,
                                           &construction_arena,
                                           &expression_context);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_kernel_class_classifier_build(
         materialization.product.module, kernel_ref.symbol_id, &references,
         &decision_models, &kernel_facts, &expression_context, &kernel_target,
         scratch_arena, out_classifier);
   }
 
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     *out_models = decision_models;
     *out_materialization = materialization;
     materialization = (loom_link_index_materialization_t){0};
@@ -744,7 +744,7 @@ iree_status_t loom_kernel_request_producer_publish(
   iree_status_t status = loom_kernel_request_source_prepare(
       producer, environment, source_symbol_ordinal, scratch_arena, &classifier,
       &models, &materialization);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_kernel_request_source_publish(
         &classifier, &models, source_symbol_ordinal, site_module, sites,
         site_count, collection_options,
@@ -836,11 +836,11 @@ iree_status_t loom_kernel_request_preparation_allocate(
         &preparation->arena, &preparation->classifier, &preparation->models,
         &materialization);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     status = loom_kernel_request_preparation_capture_config_keys(
         index, &materialization, preparation);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && materialization.product.module != NULL) {
     preparation->module = materialization.product.module;
     materialization.product.module = NULL;
     *out_preparation = preparation;

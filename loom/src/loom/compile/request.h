@@ -109,8 +109,8 @@ iree_status_t loom_compile_request_resolve(
 // transferred source may be reused when no linking is required or replaced and
 // freed. The caller owns |*out_module| whenever it is non-NULL, including on
 // failure. Source storage referenced by |sources| must outlive the call and
-// output module. Specialization diagnostics are counted in |out_error_count|;
-// status represents allocation, linking, or diagnostic-sink failures.
+// output module. Link and specialization rejection is counted in
+// |out_error_count|; status represents infrastructure failures only.
 iree_status_t loom_compile_request_materialize(
     const loom_compile_request_t* request,
     const loom_target_environment_t* target_environment,

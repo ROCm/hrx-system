@@ -28,7 +28,7 @@ typedef struct loom_link_source_projection_t {
 
 // Result of materializing one exact plan.
 typedef struct loom_link_plan_materialization_t {
-  // Standalone linked module owned by the caller.
+  // Standalone linked module owned by the caller, or NULL on rejection.
   loom_module_t* module;
   // Source correspondence indexed by index-wide module ordinal. Includes
   // intermediate kernel-configuration projections. Storage belongs to the
@@ -100,7 +100,8 @@ loom_symbol_ref_t loom_link_plan_materialization_lookup_symbol(
 // plan's root/dependency reasons authoritatively determine the output surface;
 // no second root list is resolved during materialization. The
 // returned target-symbol projection preserves exact indexed source identity
-// across private names and duplicate global declarations.
+// across private names and duplicate global declarations. Semantic rejection
+// emits diagnostics and returns an empty materialization with OK status.
 iree_status_t loom_link_plan_materialize(
     const loom_link_plan_t* plan,
     const loom_link_plan_materialization_environment_t* environment,

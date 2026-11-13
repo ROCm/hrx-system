@@ -49,6 +49,14 @@ static iree_status_t loomc_link_materialization_capture_diagnostic(
       /*text_print_options=*/NULL));
 }
 
+static iree_status_t loomc_link_materialization_capture_emission(
+    void* user_data, const loom_diagnostic_emission_t* emission) {
+  loomc_link_materialization_state_t* state = user_data;
+  return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(
+      state->diagnostics.result, emission->module, (loom_source_resolver_t){0},
+      LOOM_EMITTER_PASS, emission, NULL));
+}
+
 static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
     void* user_data, const loom_link_module_index_provider_t* provider) {
   loomc_link_materialization_state_t* state =
@@ -283,7 +291,8 @@ static iree_status_t loomc_link_target_specializations_project(
 static iree_status_t loomc_link_materialization_prepare_module(
     void* user_data, const loom_link_module_index_t* index,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_link_plan_materialization_t* materialization) {
+    loom_link_plan_materialization_t* materialization, bool* out_accepted) {
+  *out_accepted = false;
   loom_module_t** inout_module = &materialization->module;
   loomc_link_materialization_state_t* state =
       (loomc_link_materialization_state_t*)user_data;
@@ -300,7 +309,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
     return iree_status_from_loomc(status);
   }
   if (!loomc_result_succeeded(state->diagnostics.result)) {
-    return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
+    return iree_ok_status();
   }
 
   const loomc_target_specialization_options_t* target =
@@ -310,6 +319,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
   if (deployment_profile == NULL &&
       (target == NULL || (target->specialization_count == 0 &&
                           target->target_binding_count == 0))) {
+    *out_accepted = true;
     return iree_ok_status();
   }
 
@@ -372,11 +382,12 @@ static iree_status_t loomc_link_materialization_prepare_module(
     return iree_status_from_loomc(status);
   }
   if (error_count == 0) {
+    *out_accepted = true;
     return iree_ok_status();
   }
   loomc_result_set_status_code(state->diagnostics.result,
                                LOOMC_STATUS_FAILED_PRECONDITION);
-  return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
+  return iree_ok_status();
 }
 
 iree_status_t loomc_link_materialization_validate_command_kernel_entries(
@@ -502,6 +513,8 @@ loomc_link_materialization_state_environment(
       .block_pool = loomc_workspace_block_pool(state->composition.workspace),
       .low_repr_environment = low_repr_environment,
       .diagnostic_sink = loomc_link_materialization_diagnostic_sink,
+      .diagnostic_emitter = {.fn = loomc_link_materialization_capture_emission,
+                             .user_data = state},
       .prepare_module = loomc_link_materialization_prepare_module,
       .user_data = state,
       .allocator = iree_allocator_from_loomc(state->allocator),

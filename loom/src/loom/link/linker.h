@@ -22,6 +22,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -70,6 +71,8 @@ typedef struct loom_link_options_t {
   // Optional linked symbol references parallel to root_symbols. An empty list
   // ignores the resolved identities; otherwise the counts must match.
   loom_linker_target_symbol_list_t root_target_symbols;
+  // Optional diagnostic delivery; rejection is retained without a callback.
+  iree_diagnostic_emitter_t diagnostic_emitter;
   // Optional consumer of the source correspondence produced by each input.
   loom_linker_source_callback_t source_callback;
 } loom_link_options_t;
@@ -81,6 +84,8 @@ typedef struct loom_linker_options_t {
   // Maximum number of target symbols carrying sparse-plan state.
   // Zero keeps merge/dense links allocation-free for this state.
   iree_host_size_t planned_symbol_capacity;
+  // Optional diagnostic delivery; rejection is retained without a callback.
+  iree_diagnostic_emitter_t diagnostic_emitter;
   // Optional consumer of the source correspondence produced by each add.
   loom_linker_source_callback_t source_callback;
 } loom_linker_options_t;
@@ -176,6 +181,11 @@ iree_status_t loom_linker_allocate(loom_context_t* context,
                                    iree_allocator_t allocator,
                                    loom_linker_t** out_linker);
 
+// Returns whether a source contract or requested root has been rejected.
+// Rejection is monotonic: subsequent adds/finalization do nothing, and finish
+// returns no module. Diagnostic delivery failure is an infrastructure status.
+bool loom_linker_is_rejected(const loom_linker_t* linker);
+
 // Frees |linker| and any unfinished target module it still owns.
 void loom_linker_free(loom_linker_t* linker);
 
@@ -260,7 +270,8 @@ iree_status_t loom_linker_finalize_roots(loom_linker_t* linker,
 
 // Finalizes the linked output module and transfers ownership to the caller.
 //
-// The caller owns *out_module on success and must release it with
+// A rejected link returns OK with *out_module NULL. Otherwise the caller
+// owns *out_module and must release it with
 // loom_module_free(). The linker remains valid only for loom_linker_free().
 iree_status_t loom_linker_finish(loom_linker_t* linker,
                                  loom_module_t** out_module);
@@ -269,7 +280,8 @@ iree_status_t loom_linker_finish(loom_linker_t* linker,
 // module. This is a compatibility wrapper around the incremental linker.
 //
 // At least one source module is required. All source modules must share the
-// same finalized context. The caller owns the returned module and releases it
+// same finalized context. Rejection returns OK and a NULL module. The caller
+// owns an accepted module and releases it
 // with loom_module_free().
 //
 // Symbol policy:

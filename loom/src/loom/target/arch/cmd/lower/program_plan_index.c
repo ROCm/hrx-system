@@ -150,11 +150,14 @@ iree_status_t loom_cmd_program_plan_build_from_index(
       .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
   };
   loom_link_index_materialization_t materialization = {0};
+  loom_link_plan_materialization_environment_t environment =
+      *materialization_environment;
+  environment.diagnostic_emitter = diagnostic_emitter;
   iree_status_t status = loom_link_index_materialize(
-      index, &link_options, materialization_environment,
-      IREE_SV("command_program_roots"), &materialization);
-  bool source_valid = true;
-  if (iree_status_is_ok(status)) {
+      index, &link_options, &environment, IREE_SV("command_program_roots"),
+      &materialization);
+  bool source_valid = materialization.product.module != NULL;
+  if (iree_status_is_ok(status) && source_valid) {
     status = loom_cmd_program_plan_diagnose_unresolved_definitions(
         index, &materialization, diagnostic_emitter, &source_valid);
   }
@@ -186,7 +189,7 @@ iree_status_t loom_cmd_program_plan_build_from_index(
   if (iree_status_is_ok(status) && source_valid && options != NULL &&
       options->kernel_request_sink.publish != NULL) {
     kernel_source = (loom_cmd_program_kernel_source_t){
-        .environment = materialization_environment,
+        .environment = &environment,
         .collection_options = options->kernel_class_collection,
         .sink = options->kernel_request_sink,
     };
@@ -195,7 +198,7 @@ iree_status_t loom_cmd_program_plan_build_from_index(
       kernel_source.provider = options->kernel_request_provider;
       if (kernel_source.provider.publish == NULL) {
         status = loom_kernel_request_producer_allocate(
-            index, materialization_environment, &kernel_request_producer);
+            index, &environment, &kernel_request_producer);
         kernel_source.provider = (loom_kernel_request_provider_t){
             .publish = loom_cmd_program_plan_produce_kernel_requests,
             .user_data = kernel_request_producer,

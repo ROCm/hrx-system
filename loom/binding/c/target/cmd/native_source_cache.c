@@ -289,19 +289,18 @@ static iree_status_t loomc_cmd_native_source_prepare(
   preparation_state.arena = &source->entry.arena;
   preparation_state.allocator = loomc_allocator_from_iree(allocator);
   loom_link_plan_materialization_environment_t preparation_environment =
-      *environment;
+      loomc_link_materialization_state_environment(&preparation_state);
   preparation_environment.block_pool = &source->entry.block_pool;
   preparation_environment.allocator = allocator;
-  preparation_environment.user_data = &preparation_state;
   if (iree_status_is_ok(status)) {
     status = loom_kernel_request_preparation_allocate(
         cache->index, &preparation_environment, symbol_ordinal,
         &source->preparation);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && source->preparation != NULL) {
     status = loomc_cmd_native_source_capture_key(source, &preparation_state);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && source->preparation != NULL) {
     // Empty results retain neither storage nor the first invocation's result.
     if (loomc_result_diagnostic_count(source->diagnostics) == 0) {
       loomc_result_release(source->diagnostics);
@@ -752,15 +751,15 @@ iree_status_t loomc_cmd_native_source_cache_publish(
   if (source == NULL) {
     status = loomc_cmd_native_source_prepare(cache, state, environment,
                                              source_symbol_ordinal, &source);
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && source != NULL) {
       source = loomc_cmd_source_publish_completed(cache, state, source);
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && source != NULL) {
     status = iree_status_from_loomc(loomc_result_copy_diagnostics(
         state->diagnostics.result, source->diagnostics));
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && source != NULL) {
     loomc_cmd_plan_publication_t publication = {.cache = cache,
                                                 .source = source};
     const loom_kernel_request_plan_provider_t plans = {

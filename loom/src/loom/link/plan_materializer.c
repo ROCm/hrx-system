@@ -98,15 +98,7 @@ static iree_status_t loom_link_plan_materialize_bytecode_module(
         selection, &read_options, environment->allocator, &read_result,
         &materialized_module);
   }
-  if (iree_status_is_ok(status) &&
-      (read_result.error_count != 0 || materialized_module == NULL)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "bytecode provider '%.*s' module %" PRIhsz
-                              " did not materialize",
-                              (int)provider->name.size, provider->name.data,
-                              module->provider_module_ordinal);
-  }
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) || read_result.error_count != 0) {
     loom_module_free(materialized_module);
     return status;
   }
@@ -201,7 +193,8 @@ static iree_status_t loom_link_plan_materialize_module(
     iree_host_size_t* target_source_definitions,
     loom_symbol_ref_t* target_template_families,
     loom_symbol_ref_t* target_kernel_configurations, loom_linker_t* linker,
-    loom_link_plan_source_capture_t* source_capture) {
+    loom_link_plan_source_capture_t* source_capture, bool* out_accepted) {
+  *out_accepted = false;
   const loom_link_module_index_module_t* module = selection->source_module;
   source_capture->input = module;
   source_capture->projected_sources = NULL;
@@ -209,6 +202,9 @@ static iree_status_t loom_link_plan_materialize_module(
     loom_link_kernel_config_module_projection_t projected = {0};
     IREE_RETURN_IF_ERROR(loom_link_plan_project_kernel_config_module(
         plan, selection, environment, module->name, scratch_arena, &projected));
+    if (projected.module == NULL) {
+      return iree_ok_status();
+    }
     source_capture->projected_sources = projected.target_sources;
     const iree_host_size_t projected_symbol_count =
         projected.module->symbols.count;
@@ -254,7 +250,8 @@ static iree_status_t loom_link_plan_materialize_module(
     iree_status_t status =
         loom_linker_add_exact_module(linker, projected.module, selected_targets,
                                      source_outputs, out_target_symbols);
-    if (iree_status_is_ok(status)) {
+    *out_accepted = !loom_linker_is_rejected(linker);
+    if (iree_status_is_ok(status) && *out_accepted) {
       loom_link_plan_materialization_scatter_target_symbols(
           plan, index, selection, module_target_symbols,
           /*projected_module=*/true, target_symbols, target_source_definitions,
@@ -324,6 +321,9 @@ static iree_status_t loom_link_plan_materialize_module(
             .ordinals = source_symbols.ordinals,
         },
         environment, complete_module, &materialized_module);
+    if (iree_status_is_ok(status) && materialized_module == NULL) {
+      return iree_ok_status();
+    }
     if (iree_status_is_ok(status)) {
       status = loom_linker_add_exact_module(linker, materialized_module,
                                             selected_targets, source_outputs,
@@ -331,52 +331,13 @@ static iree_status_t loom_link_plan_materialize_module(
     }
     loom_module_free(materialized_module);
   }
-  if (iree_status_is_ok(status)) {
+  *out_accepted = !loom_linker_is_rejected(linker);
+  if (iree_status_is_ok(status) && *out_accepted) {
     loom_link_plan_materialization_scatter_target_symbols(
         plan, index, selection, module_target_symbols,
         /*projected_module=*/false, target_symbols, target_source_definitions,
         target_template_families,
         /*source_configuration_functions=*/NULL, target_kernel_configurations);
-  }
-  return status;
-}
-
-// Recovers provider-level context after the canonical linker rejects two
-// selected concrete definitions. Collision recovery is deliberately confined
-// to the failing path: valid plans rely only on the target module's symbol map
-// and never maintain a second per-plan name-membership structure.
-static iree_status_t loom_link_plan_annotate_global_collision(
-    iree_status_t status, const loom_link_plan_t* plan,
-    const loom_link_module_index_t* index,
-    const loom_link_plan_module_selection_t* selection) {
-  if (iree_status_code(status) != IREE_STATUS_ALREADY_EXISTS) {
-    return status;
-  }
-
-  for (iree_host_size_t i = 0; i < selection->symbols.count; ++i) {
-    const loom_link_module_index_symbol_t* symbol =
-        selection->symbols.values[i].source_symbol;
-    if (symbol->identity != LOOM_LINK_SYMBOL_IDENTITY_GLOBAL ||
-        !iree_any_bit_set(symbol->flags,
-                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION)) {
-      continue;
-    }
-
-    const loom_link_module_index_symbol_t* previous =
-        loom_link_module_index_lookup_name(index, symbol->name);
-    while (previous) {
-      const bool is_prior_selected_definition =
-          previous->module_ordinal < symbol->module_ordinal &&
-          previous->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL &&
-          iree_any_bit_set(previous->flags,
-                           LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION) &&
-          loom_link_plan_contains_symbol(plan, previous->ordinal);
-      if (is_prior_selected_definition) {
-        return loom_link_module_index_annotate_global_collision(
-            status, index, previous, symbol);
-      }
-      previous = loom_link_module_index_next_same_name(index, previous);
-    }
   }
   return status;
 }
@@ -390,7 +351,8 @@ static iree_status_t loom_link_plan_materialize_modules(
     iree_host_size_t* target_source_definitions,
     loom_symbol_ref_t* target_template_families,
     loom_symbol_ref_t* target_kernel_configurations, loom_linker_t* linker,
-    loom_link_plan_source_capture_t* source_capture) {
+    loom_link_plan_source_capture_t* source_capture, bool* out_accepted) {
+  *out_accepted = true;
   const iree_host_size_t max_module_symbol_count =
       projection->maximum_materialized_symbol_count;
   iree_host_size_t* source_symbol_ordinals = NULL;
@@ -411,17 +373,14 @@ static iree_status_t loom_link_plan_materialize_modules(
   }
 
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < projection->modules.count && iree_status_is_ok(status); ++i) {
+  for (iree_host_size_t i = 0; i < projection->modules.count &&
+                               iree_status_is_ok(status) && *out_accepted;
+       ++i) {
     status = loom_link_plan_materialize_module(
         plan, index, &projection->modules.values[i], environment, scratch_arena,
         source_symbol_ordinals, source_symbol_outputs, module_target_symbols,
         target_symbols, target_source_definitions, target_template_families,
-        target_kernel_configurations, linker, source_capture);
-    if (!iree_status_is_ok(status)) {
-      status = loom_link_plan_annotate_global_collision(
-          status, plan, index, &projection->modules.values[i]);
-    }
+        target_kernel_configurations, linker, source_capture, out_accepted);
   }
   return status;
 }
@@ -505,6 +464,7 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
   const loom_linker_options_t linker_options = {
       .module_name = module_name,
       .planned_symbol_capacity = planned_symbol_capacity,
+      .diagnostic_emitter = environment->diagnostic_emitter,
       .source_callback = {.fn = loom_link_plan_capture_sources,
                           .user_data = &source_capture},
   };
@@ -514,19 +474,20 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
       environment->allocator, &linker));
 
   loom_module_t* output_module = NULL;
+  bool accepted = false;
   iree_status_t status = loom_link_plan_materialize_modules(
       plan, index, &module_projection, environment,
       loom_link_plan_mode(plan) == LOOM_LINK_PLAN_LINK, scratch_arena,
       target_symbols, target_source_definitions, target_template_families,
-      target_kernel_configurations, linker, &source_capture);
-  if (iree_status_is_ok(status)) {
+      target_kernel_configurations, linker, &source_capture, &accepted);
+  if (iree_status_is_ok(status) && accepted) {
     status = loom_linker_finish(linker, &output_module);
   }
   const iree_host_size_t linked_symbol_count =
       output_module != NULL ? output_module->symbols.count : 0;
   loom_linker_free(linker);
 
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) || output_module == NULL) {
     loom_module_free(output_module);
     return status;
   }
@@ -549,9 +510,10 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
   if (environment->prepare_module != NULL) {
     status = environment->prepare_module(
         environment->user_data, index, environment->block_pool,
-        environment->allocator, out_materialization);
+        environment->allocator, out_materialization, &accepted);
   }
-  if (iree_status_is_ok(status) && target_kernel_configurations != NULL) {
+  if (iree_status_is_ok(status) && accepted &&
+      target_kernel_configurations != NULL) {
     output_module = out_materialization->module;
     // Configuration helpers execute with their kernel's target, including a
     // profile assigned after the helper was projected from the source header.
@@ -574,7 +536,7 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
       loom_func_like_set_target(output_module, helper, target);
     }
   }
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) || !accepted) {
     loom_module_free(out_materialization->module);
     *out_materialization = (loom_link_plan_materialization_t){0};
   }

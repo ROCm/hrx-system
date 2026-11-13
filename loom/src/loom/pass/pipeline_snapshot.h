@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -36,11 +37,13 @@ typedef struct loom_pass_pipeline_snapshot_t {
 //
 // The source module and context must remain immutable during this call but may
 // be released or mutated after it returns. The caller must deinitialize the
-// snapshot on both success and failure.
+// snapshot on both success and failure. Rejection emits a diagnostic and
+// returns an empty snapshot with OK status.
 iree_status_t loom_pass_pipeline_snapshot_initialize(
     const loom_module_t* source_module, iree_string_view_t pipeline_symbol,
-    iree_string_view_t identifier, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, loom_pass_pipeline_snapshot_t* out_snapshot);
+    iree_string_view_t identifier, iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
+    loom_pass_pipeline_snapshot_t* out_snapshot);
 
 // Releases snapshot-owned module storage.
 void loom_pass_pipeline_snapshot_deinitialize(

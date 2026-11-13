@@ -1802,7 +1802,7 @@ func.def public @broken(%x: i32) -> (i32) {
 }
 
 TEST(LinkTest, DuplicatePublicDefinitionsProduceFailedResult) {
-  ContextPtr context = CreateContext();
+  ContextPtr context = CreateContext(LOOMC_SOURCE_RETENTION_METADATA_ONLY);
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr first = CreateTextSource("first.loom", R"(
 func.def public @entry(%x: i32) -> (i32) {
@@ -1829,7 +1829,23 @@ func.def public @entry(%x: i32) -> (i32) {
 
   EXPECT_EQ(module.get(), nullptr);
   ASSERT_FALSE(loomc_result_succeeded(result.get()));
-  ASSERT_GT(loomc_result_diagnostic_count(result.get()), 0u);
+  ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+  const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+  EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/005");
+  ASSERT_NE(diagnostic->range.source, nullptr);
+  EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+            "second.loom");
+  EXPECT_EQ(diagnostic->range.start_line, 2u);
+  EXPECT_EQ(diagnostic->range.start_column, 1u);
+  EXPECT_EQ(diagnostic->range.end_line, 4u);
+  EXPECT_EQ(loomc_source_contents(diagnostic->range.source).data_length, 0u);
+  ASSERT_EQ(diagnostic->related_location_count, 1u);
+  const auto& previous = diagnostic->related_locations[0].range;
+  ASSERT_NE(previous.source, nullptr);
+  EXPECT_EQ(ToString(loomc_source_identifier(previous.source)), "first.loom");
+  EXPECT_EQ(previous.start_line, 2u);
+  EXPECT_EQ(previous.start_column, 1u);
+  EXPECT_EQ(previous.end_line, 4u);
 }
 
 TEST(LinkTest, SourceRetentionProjectsOnlySelectedTextProviders) {

@@ -811,6 +811,10 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
     status = loomc_link_translate_operation_status(
         result, before_diagnostics, loomc_make_cstring_view("LINK/MATERIALIZE"),
         operation_status);
+    if (loomc_status_is_ok(status) &&
+        index_materialization.product.module == NULL) {
+      loomc_result_set_status_code(result, LOOMC_STATUS_INVALID_ARGUMENT);
+    }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       (options->artifact_flags & LOOMC_LINK_ARTIFACT_FLAG_PLAN_TEXT)) {
@@ -950,6 +954,9 @@ loomc_status_t loomc_link_request(loomc_linker_t* linker,
     status = loomc_link_translate_operation_status(
         result, before_diagnostics, loomc_make_cstring_view("LINK/REQUEST"),
         operation_status);
+    if (loomc_status_is_ok(status) && materialization.product.module == NULL) {
+      loomc_result_set_status_code(result, LOOMC_STATUS_INVALID_ARGUMENT);
+    }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_link_request_map_target_roots(

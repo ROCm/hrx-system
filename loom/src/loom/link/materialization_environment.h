@@ -36,11 +36,12 @@ typedef loom_diagnostic_sink_t (*loom_link_plan_diagnostic_sink_fn_t)(
 // use |block_pool| and |allocator| so its lifetime remains coupled to the
 // materialization environment rather than to callback-local scratch. The other
 // fields are borrowed, immutable projections from |index| established by the
-// linker.
+// linker. Rejected specialization sets |out_accepted| false after diagnosing;
+// status carries only infrastructure failure.
 typedef iree_status_t (*loom_link_plan_prepare_module_fn_t)(
     void* user_data, const loom_link_module_index_t* index,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_link_plan_materialization_t* materialization);
+    loom_link_plan_materialization_t* materialization, bool* out_accepted);
 
 // Environment shared by every source materialized for one plan.
 typedef struct loom_link_plan_materialization_environment_t {
@@ -52,6 +53,8 @@ typedef struct loom_link_plan_materialization_environment_t {
   loom_low_repr_environment_t low_repr_environment;
   // Optional per-provider diagnostic sink resolver.
   loom_link_plan_diagnostic_sink_fn_t diagnostic_sink;
+  // Structured link-contract diagnostics, independent of semantic acceptance.
+  iree_diagnostic_emitter_t diagnostic_emitter;
   // Optional caller-owned specialization applied to the linked output.
   loom_link_plan_prepare_module_fn_t prepare_module;
   // User data passed to diagnostic_sink and prepare_module.

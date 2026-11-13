@@ -46,7 +46,7 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
     const loom_value_fact_table_t* source_facts,
     const loom_cmd_program_kernel_source_t* kernel_source,
     loom_cmd_program_kernel_site_root_t* roots, iree_host_size_t root_count,
-    iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena, bool* out_valid);
 
 // Publishes generated count-producer sources and assigns their requirements.
 //

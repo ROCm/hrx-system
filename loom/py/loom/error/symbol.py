@@ -172,6 +172,87 @@ ERR_SYMBOL_012 = ErrorDef(
     ),
 )
 
+ERR_SYMBOL_013 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=13,
+    severity=Severity.ERROR,
+    summary="Linked symbol contracts are incompatible.",
+    message="symbol '@{symbol_name}' has incompatible contract field '{field}'",
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("field", ParamKind.STRING),
+    ),
+)
+
+ERR_SYMBOL_014 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=14,
+    severity=Severity.ERROR,
+    summary="Linked function signatures have different lengths.",
+    message=(
+        "declaration for '@{symbol_name}' has {source_count} {field}, "
+        "but the selected symbol has {selected_count}"
+    ),
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("field", ParamKind.STRING),
+        ErrorParam("source_count", ParamKind.U64),
+        ErrorParam("selected_count", ParamKind.U64),
+    ),
+)
+
+ERR_SYMBOL_015 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=15,
+    severity=Severity.ERROR,
+    summary="Linked function signatures have incompatible types.",
+    message=(
+        "declaration for '@{symbol_name}' has incompatible {field} type "
+        "at index {ordinal}"
+    ),
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("field", ParamKind.STRING),
+        ErrorParam("ordinal", ParamKind.U64),
+    ),
+)
+
+ERR_SYMBOL_016 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=16,
+    severity=Severity.ERROR,
+    summary="Linked value contract exceeds the predicate limit.",
+    message=(
+        "symbol '@{symbol_name}' has {count} merged predicates, "
+        "exceeding the limit of {limit}"
+    ),
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("count", ParamKind.U64),
+        ErrorParam("limit", ParamKind.U64),
+    ),
+)
+
+ERR_SYMBOL_017 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=17,
+    severity=Severity.ERROR,
+    summary="Requested root has no definition.",
+    message=(
+        "root symbol '@{symbol_name}' has no materialized definition or declaration"
+    ),
+    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+)
+
+ERR_SYMBOL_018 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=18,
+    severity=Severity.ERROR,
+    summary="Requested root has an empty name.",
+    message="root symbol name must not be empty",
+    params=(),
+)
+
 ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_001,
     ERR_SYMBOL_002,
@@ -185,4 +266,10 @@ ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_010,
     ERR_SYMBOL_011,
     ERR_SYMBOL_012,
+    ERR_SYMBOL_013,
+    ERR_SYMBOL_014,
+    ERR_SYMBOL_015,
+    ERR_SYMBOL_016,
+    ERR_SYMBOL_017,
+    ERR_SYMBOL_018,
 )
