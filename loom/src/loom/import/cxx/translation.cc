@@ -38,7 +38,6 @@
 #include "loom/import/cxx/binding/command_programs.h"
 #include "loom/import/cxx/binding/config.h"
 #include "loom/import/cxx/binding/constexpr.h"
-#include "loom/import/cxx/binding/exponent.h"
 #include "loom/import/cxx/binding/fastmath.h"
 #include "loom/import/cxx/binding/function_contracts.h"
 #include "loom/import/cxx/binding/index_expression.h"
@@ -5657,16 +5656,6 @@ class Translator final : private Initialization::Evaluation {
             FenceIntrinsic::resolve_builtin(unit_, diagnostics_, call)) {
       fence->call(&builder_, locations_.get(call));
       return IntrinsicCallResult{std::nullopt};
-    }
-    if (auto exponent = ExponentBuiltin::resolve(types_, call)) {
-      std::array<Value, 2> arguments;
-      auto* argument = call->expressionList;
-      for (auto& value : arguments) {
-        value = expression(argument->value);
-        argument = argument->next;
-      }
-      return IntrinsicCallResult{exponent->call(
-          arguments, storage_, call, &builder_, locations_.get(call))};
     }
     if (auto arithmetic = multiprecision_arithmetic_builtin(call)) {
       return arithmetic;

@@ -120,7 +120,6 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:config",
         "//loom/src/loom/import/cxx/binding:constant_attributes",
         "//loom/src/loom/import/cxx/binding:constexpr",
-        "//loom/src/loom/import/cxx/binding:exponent",
         "//loom/src/loom/import/cxx/binding:fastmath",
         "//loom/src/loom/import/cxx/binding:function_contracts",
         "//loom/src/loom/import/cxx/binding:index_expression",

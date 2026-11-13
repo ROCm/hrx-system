@@ -1,0 +1,241 @@
+// RUN: roundtrip
+// Library declarations use the same typed operations as their builtins.
+// Unary, binary, ternary, and mixed integer signatures retain f32/f64.
+extern "C" {
+float sqrtf(float) noexcept;
+double sqrt(double) noexcept;
+double fabs(double);
+double fmod(double, double);
+double fma(double, double, double);
+double scalbn(double, int);
+}
+struct Results {
+  // Float square root.
+  float single;
+  // Double square root.
+  double wide;
+  // Absolute value.
+  double magnitude;
+  // Truncating remainder.
+  double remainder;
+  // Fused multiply-add.
+  double fused;
+  // Power-of-two scaling.
+  double scaled;
+};
+[[loom::fastmath("contract")]] Results evaluate(float single, double value, double other, int exponent) {
+  return {sqrtf(single), sqrt(value), fabs(value), fmod(value, other), fma(value, other, value), scalbn(value, exponent)};
+}
+
+// ----
+func.def public @evaluate(%single: f32, %value: f64, %other: f64, %exponent: i32) -> (f32, f64, f64, f64, f64, f64) {
+  %10 = scalar.sqrtf<contract> %single : f32
+  %11 = scalar.sqrtf<contract> %value : f64
+  %12 = scalar.absf<contract> %value : f64
+  %13 = scalar.remf<contract> %value, %other : f64
+  %14 = scalar.fmaf<contract> %value, %other, %value : f64
+  %15 = scalar.ldexpf %value, %exponent : f64, i32
+  func.return %10, %11, %12, %13, %14, %15 : f32, f64, f64, f64, f64, f64
+}
+
+// ====
+// A declaration reached through a C++ overload set still has C linkage.
+// Parsing builtin wrappers first must not change ordinary overload selection.
+namespace library {
+template <class = void> float sqrt(float value) { return __builtin_sqrtf(value); }
+extern "C" double sqrt(double);
+}
+using library::sqrt;
+double wide(double value) { return sqrt(value) + sqrt(value); }
+float single(float value) { return sqrt(value); }
+
+// ----
+func.def public @wide(%value: f64) -> (f64) {
+  %2 = scalar.sqrtf %value : f64
+  %3 = scalar.sqrtf %value : f64
+  %4 = scalar.addf %2, %3 : f64
+  func.return %4 : f64
+}
+
+func.def public @single(%value: f32) -> (f32) {
+  %7 = func.call pure @library__sqrt_void(%value) : (f32) -> (f32)
+  func.return %7 : f32
+}
+
+func.def @library__sqrt_void(%value: f32) -> (f32) {
+  %10 = scalar.sqrtf %value : f32
+  func.return %10 : f32
+}
+
+// ====
+// Frexp stores its second result even when the fraction is discarded. Top-level
+// parameter qualifiers do not change the standard function signature.
+extern "C" {
+double frexp(double, int* const);
+float frexpf(float, int*);
+double ldexp(double, const int);
+float ldexpf(float, int);
+}
+double decompose(double value, int power, int* exponent) { return ldexp(frexp(value, exponent), power); }
+float decompose_float(float value, int power, int* exponent) { return ldexpf(frexpf(value, exponent), power); }
+void exponent_only(double value, int* exponent) { frexp(value, exponent); }
+
+// ----
+func.def public @decompose(%value: f64, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f64) {
+  %5, %6 = scalar.frexpf %value : f64, i32
+  %7 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %6, %7[0] : i32, view<1xi32>
+  %8 = scalar.ldexpf %5, %power : f64, i32
+  func.return %8 : f64
+}
+
+func.def public @decompose_float(%value: f32, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f32) {
+  %14, %15 = scalar.frexpf %value : f32, i32
+  %16 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %15, %16[0] : i32, view<1xi32>
+  %17 = scalar.ldexpf %14, %power : f32, i32
+  func.return %17 : f32
+}
+
+func.def public @exponent_only(%value: f64, %exponent: buffer, %exponent_byte_offset: offset) {
+  %21, %22 = scalar.frexpf %value : f64, i32
+  %23 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %22, %23[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Cached bindings retain the permissions of each call, not the first caller.
+extern "C" double sqrt(double) noexcept;
+extern "C" double sqrt(double) noexcept;
+[[loom::fastmath("afn")]] double approximate(double value) { return sqrt(value); }
+double precise(double value) { return sqrt(value); }
+
+// ----
+func.def public @approximate(%value: f64) -> (f64) {
+  %2 = scalar.sqrtf<afn> %value : f64
+  func.return %2 : f64
+}
+
+func.def public @precise(%value: f64) -> (f64) {
+  %5 = scalar.sqrtf %value : f64
+  func.return %5 : f64
+}
+
+// ====
+// Explicit source definitions and bindings own their semantics. Calls preceding
+// a definition see the complete declaration index, not source-order guesses.
+extern "C" {
+double sin(double);
+[[loom::import("math")]] double sqrt(double);
+[[loom::symbol("application.cos")]] double cos(double);
+}
+namespace application { double exp(double value) { return value + 1.0; } }
+double evaluate(double value) { return sin(value) + sqrt(value) + cos(value) + application::exp(value); }
+extern "C" double sin(double value) { return value + 2.0; }
+
+// ----
+func.def public @application.exp(%value: f64) -> (f64) {
+  %2 = scalar.constant 1.0 : f64
+  %3 = scalar.addf %value, %2 : f64
+  func.return %3 : f64
+}
+
+func.def public @evaluate(%value: f64) -> (f64) {
+  %6 = func.call pure @sin(%value) : (f64) -> (f64)
+  %7 = func.call @sqrt(%value) : (f64) -> (f64)
+  %8 = scalar.addf %6, %7 : f64
+  %9 = func.call @application.cos(%value) : (f64) -> (f64)
+  %10 = scalar.addf %8, %9 : f64
+  %11 = func.call pure @application.exp(%value) : (f64) -> (f64)
+  %12 = scalar.addf %10, %11 : f64
+  func.return %12 : f64
+}
+
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>]>) @sin(%value: f64) -> (f64) {
+  %15 = scalar.constant 2.0 : f64
+  %16 = scalar.addf %value, %15 : f64
+  func.return %16 : f64
+}
+
+func.decl import("math") source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>]>) @sqrt(%17: f64) -> (f64)
+
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>]>) @application.cos(%19: f64) -> (f64)
+
+// ====
+// Similar names with different prototypes remain ordinary external functions.
+extern "C" {
+int sqrt(int);
+double pow(double, int);
+double frexp(double, const int*);
+}
+int integer(int value) { return sqrt(value); }
+double other(double value, int power, const int* exponent) { return pow(value, power) + frexp(value, exponent); }
+
+// ----
+func.def public @integer(%value: i32) -> (i32) {
+  %2 = func.call @sqrt(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @other(%value: f64, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f64) {
+  %8 = func.call @pow(%value, %power) : (f64, i32) -> (f64)
+  %9 = func.call @frexp(%value, %exponent, %exponent_byte_offset) : (f64, buffer, offset) -> (f64)
+  %10 = scalar.addf %8, %9 : f64
+  func.return %10 : f64
+}
+
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @sqrt(%11: i32) -> (i32)
+
+func.decl source_signature(#func.abi.c.signature<arguments = [0, 1], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>, #func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @pow(%13: f64, %14: i32) -> (f64)
+
+func.decl source_signature(#func.abi.c.signature<arguments = [0, 1], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>]>) @frexp(%16: f64, %17: buffer, %18: offset) -> (f64)
+
+// ====
+// Integer absolute values preserve the source data model.
+extern "C" {
+int abs(int);
+long labs(long);
+long long llabs(long long);
+}
+int integer(int value) { return abs(value); }
+long wide(long value) { return labs(value); }
+long long widest(long long value) { return llabs(value); }
+
+// ----
+func.def public @integer(%value: i32) -> (i32) {
+  %2 = scalar.absi %value : i32
+  func.return %2 : i32
+}
+
+func.def public @wide(%value: i64) -> (i64) {
+  %5 = scalar.absi %value : i64
+  func.return %5 : i64
+}
+
+func.def public @widest(%value: i64) -> (i64) {
+  %8 = scalar.absi %value : i64
+  func.return %8 : i64
+}
+
+// ====
+// INPUT: cxx data-model=llp64
+extern "C" long labs(long);
+long magnitude(long value) { return labs(value); }
+
+// ----
+func.def public @magnitude(%value: i32) -> (i32) {
+  %2 = scalar.absi %value : i32
+  func.return %2 : i32
+}
+
+// ====
+// INPUT: cxx data-model=ilp32
+extern "C" long labs(long);
+long magnitude(long value) { return labs(value); }
+
+// ----
+func.def public @magnitude(%value: i32) -> (i32) {
+  %2 = scalar.absi %value : i32
+  func.return %2 : i32
+}

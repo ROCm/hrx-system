@@ -12,6 +12,7 @@ assertions when acceptance is the contract.
 | Floating type identity, constants, and conversions | `float16`, `bfloat16`, `float8`, `numeric_conversion` |
 | Precision at the arithmetic result | `narrow_float_subtraction`, `rounding` |
 | Intrinsic result fields and exponent output arguments | `exponent` |
+| Standard-library math, builtin precision, diagnostics, and C++ export | `math_builtins`, `math_library`, `math_builtins_invalid`, `math_export` |
 | Math permissions and lexical scope | `fastmath`, `scalar_templates`, `logarithms`, `reciprocal` |
 | Value and object representation bits | `bitcast`, `bitcast_payloads`, `bitcast_folding`, `constexpr_bitcast` |
 | Infinity/huge-value builtins, NaN payloads, and their source admission | `floating_constants`, `floating_constants_invalid` |

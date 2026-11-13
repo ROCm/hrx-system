@@ -123,6 +123,8 @@ func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %
 // RUN: roundtrip
 // INPUT: cxx data-model=lp64
 // Source data model controls long width.
+static_assert(sizeof(long double) == __SIZEOF_LONG_DOUBLE__);
+static_assert(__LDBL_MANT_DIG__ == 53);
 long identity(long x) { return x; }
 // ----
 func.def public @identity(%x: i64) -> (i64) {
@@ -133,6 +135,8 @@ func.def public @identity(%x: i64) -> (i64) {
 // RUN: roundtrip
 // INPUT: cxx data-model=llp64
 // Source data model controls long width.
+static_assert(sizeof(long double) == __SIZEOF_LONG_DOUBLE__);
+static_assert(__LDBL_MANT_DIG__ == 53);
 long identity(long x) { return x; }
 // ----
 func.def public @identity(%x: i32) -> (i32) {
@@ -147,3 +151,45 @@ static_assert(sizeof(long) == 4);
 static_assert(sizeof(long long) == 8);
 static_assert(sizeof(long long) == __SIZEOF_LONG_LONG__);
 static_assert((1LL << 40) == 1099511627776LL);
+static_assert(sizeof(long double) == __SIZEOF_LONG_DOUBLE__);
+static_assert(__LDBL_MANT_DIG__ == 53);
+
+// ====
+// RUN: verify
+// Numeric limit declarations in system headers need the complete source
+// floating-point model, including long-double-typed constant expressions.
+static_assert(__DECIMAL_DIG__ == 17);
+static_assert(__LDBL_DIG__ == __DBL_DIG__);
+static_assert(__LDBL_MAX_EXP__ == __DBL_MAX_EXP__);
+static_assert(__LDBL_MIN_EXP__ == __DBL_MIN_EXP__);
+static_assert(__LDBL_MAX_10_EXP__ == __DBL_MAX_10_EXP__);
+static_assert(__LDBL_MIN_10_EXP__ == __DBL_MIN_10_EXP__);
+static_assert(__LDBL_HAS_DENORM__ && __LDBL_HAS_INFINITY__ && __LDBL_HAS_QUIET_NAN__);
+static_assert(__LDBL_MAX__ == __DBL_MAX__);
+static_assert(__LDBL_NORM_MAX__ == __DBL_NORM_MAX__);
+static_assert(__LDBL_MIN__ == __DBL_MIN__);
+static_assert(__LDBL_DENORM_MIN__ == __DBL_DENORM_MIN__);
+static_assert(__LDBL_EPSILON__ == __DBL_EPSILON__);
+static_assert(__is_same(decltype(__LDBL_MAX__), long double));
+static_assert(__is_same(decltype(__LDBL_NORM_MAX__), long double));
+static_assert(__is_same(decltype(__LDBL_MIN__), long double));
+static_assert(__is_same(decltype(__LDBL_DENORM_MIN__), long double));
+static_assert(__is_same(decltype(__LDBL_EPSILON__), long double));
+
+// ====
+// RUN: verify
+// Presence checks do not expand a predefine; undefinition still masks it.
+#if !defined(__loom__) || !defined(__LDBL_MANT_DIG__) || !defined(__LDBL_MAX__)
+#error missing source model definitions
+#endif
+#undef __LDBL_MAX__
+#if defined(__LDBL_MAX__)
+#error undefined source predefine was restored
+#endif
+#define __LDBL_MAX__ 7
+static_assert(__LDBL_MAX__ == 7);
+static_assert(__LDBL_MANT_DIG__ == 53);
+#undef __LDBL_MANT_DIG__
+#if defined(__LDBL_MANT_DIG__)
+#error expanded source predefine was restored
+#endif

@@ -323,7 +323,14 @@ bool Functions::ordinary_analysis_call(const DirectCall& call) {
       intrinsics_.lookup(function, call.source)) {
     return false;
   }
-  return definition(function) != nullptr;
+  if (definition(function)) {
+    return true;
+  }
+  if (!function_imports_.lookup(function) &&
+      !explicit_names_.contains(function->canonical())) {
+    intrinsics_.bind_math(function, call.source);
+  }
+  return false;
 }
 
 void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
@@ -1705,10 +1712,11 @@ void Functions::build_declarations(Types& types, Locations& locations,
     std::vector<loom_type_t> results;
     std::vector<loom_predicate_t> predicates;
     // Dependent type payloads in this signature must outlive the declaration
-    // builder call below.
-    auto bound_signature = bind_callable_signature(
-        {symbol->canonical(), ImplicitObjectABI::None}, source, types, builder,
-        arguments, results, predicates);
+    // builder call below. Bind the collected source occurrence: an implicit
+    // builtin libcall can be canonical without owning parameter symbols.
+    auto bound_signature =
+        bind_callable_signature({symbol, ImplicitObjectABI::None}, source,
+                                types, builder, arguments, results, predicates);
     const loom_attribute_t source_signature = build_c_source_signature(
         unit_, diagnostics_, module_, symbol, source, types);
     loom_func_decl_build_flags_t flags = 0;

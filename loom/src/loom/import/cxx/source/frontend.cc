@@ -162,9 +162,9 @@ class SourceToolchain final : public cxx::Toolchain {
     auto layout = std::make_unique<cxx::MemoryLayout>(
         options.data_model == LOOM_CXX_DATA_MODEL_ILP32 ? 32 : 64);
     layout->setSizeOfLongLong(8);
+    layout->setSizeOfLongDouble(8, 53);
     if (options.data_model == LOOM_CXX_DATA_MODEL_LLP64) {
       layout->setSizeOfLong(4);
-      layout->setSizeOfLongDouble(8, 53);
       layout->setWideCharUnderlyingType(2, false);
     }
     layout->setTriple(string(options.triple));
@@ -176,6 +176,25 @@ class SourceToolchain final : public cxx::Toolchain {
   void addSystemIncludePaths() override {}
   void addSystemCppIncludePaths() override {}
   void addPredefinedMacros() override {
+    // Binary64 long-double limits and fixed source-model definitions stay as
+    // immutable text until used; adding a definition adds no per-import setup.
+    static constexpr cxx::PredefinedMacro kPredefinedDefinitions[] = {
+        {"__LDBL_DECIMAL_DIG__", "17"},
+        {"__LDBL_DENORM_MIN__", "4.9406564584124654e-324L"},
+        {"__LDBL_DIG__", "15"},
+        {"__LDBL_EPSILON__", "2.2204460492503131e-16L"},
+        {"__LDBL_MANT_DIG__", "53"},
+        {"__LDBL_MAX_10_EXP__", "308"},
+        {"__LDBL_MAX_EXP__", "1024"},
+        {"__LDBL_MAX__", "1.7976931348623157e+308L"},
+        {"__LDBL_MIN_10_EXP__", "(-307)"},
+        {"__LDBL_MIN_EXP__", "(-1021)"},
+        {"__LDBL_MIN__", "2.2250738585072014e-308L"},
+        {"__LDBL_NORM_MAX__", "1.7976931348623157e+308L"},
+        {"__SIZEOF_LONG_DOUBLE__", "8"},
+    };
+    static constexpr cxx::PredefinedMacros kPredefinedMacros{
+        kPredefinedDefinitions};
     const auto* layout = memoryLayout();
     bool pointer_is_long = layout->sizeOfLong() == layout->sizeOfPointer();
     defineMacro("__SIZE_TYPE__", pointer_is_long ? "long unsigned int"
@@ -184,9 +203,6 @@ class SourceToolchain final : public cxx::Toolchain {
                 pointer_is_long ? "long int" : "long long int");
     defineMacro("__SIZEOF_POINTER__", std::to_string(layout->sizeOfPointer()));
     defineMacro("__SIZEOF_LONG__", std::to_string(layout->sizeOfLong()));
-    defineMacro("__SIZEOF_INT__", "4");
-    defineMacro("__SIZEOF_SHORT__", "2");
-    defineMacro("__SIZEOF_LONG_LONG__", "8");
     defineMacro("__loom__", "1");
     addCommonMacros();
     if (language() == cxx::LanguageKind::kC) {
@@ -196,6 +212,7 @@ class SourceToolchain final : public cxx::Toolchain {
       defineMacro("__STDCPP_FLOAT16_T__", "1");
       defineMacro("__STDCPP_BFLOAT16_T__", "1");
     }
+    preprocessor()->setPredefinedMacros(kPredefinedMacros);
   }
 };
 

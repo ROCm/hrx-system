@@ -9,19 +9,25 @@
 
 #include <cxx/ast_fwd.h>
 
-#include <optional>
 #include <span>
 
 #include "loom/import/cxx/value/storage.h"
 
 namespace loom::cxx_import {
 
-// Standard frexp/ldexp builtin conventions over the exact High operations.
-// The frontend owns builtin identity, signatures, and argument conversions.
-class ExponentBuiltin {
+// Adapts the standard frexp pointer output to scalar.frexpf's second result.
+// Math admission establishes the source signature before retaining this
+// binding.
+class ExponentIntrinsic {
  public:
-  static std::optional<ExponentBuiltin> resolve(Types& types,
-                                                cxx::CallExpressionAST* call);
+  static ExponentIntrinsic resolve(Types& types,
+                                   const cxx::FunctionType* signature,
+                                   cxx::AST* owner);
+
+  bool equivalent(const ExponentIntrinsic& other) const {
+    return loom_type_equal(type_, other.type_) &&
+           exponent_type_ == other.exponent_type_;
+  }
 
   // Consumes two already evaluated arguments. Frexp writes its second result
   // through the ordinary source storage projection and returns its fraction.
@@ -30,12 +36,12 @@ class ExponentBuiltin {
              loom_location_id_t location) const;
 
  private:
-  ExponentBuiltin(loom_type_t type, const cxx::Type* exponent_type)
+  ExponentIntrinsic(loom_type_t type, const cxx::Type* exponent_type)
       : type_(type), exponent_type_(exponent_type) {}
 
-  // Floating representation selected by the builtin signature.
+  // Floating representation selected by the source signature.
   loom_type_t type_;
-  // Source exponent pointee type for frexp; null for ldexp.
+  // Source exponent pointee type for the second argument's writeback.
   const cxx::Type* exponent_type_;
 };
 

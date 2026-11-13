@@ -166,7 +166,7 @@ struct Pair {
 // ====
 // RUN: verify
 double unsupported(double value, int* exponent) {
-  // ERROR@+1: LOWERING/059 "unsupported C++ type: long double"
+  // ERROR@+1: LOWERING/059 "math builtin '__builtin_frexpl' requires long-double lowering; implicit narrowing is not permitted"
   return __builtin_frexpl(value, exponent);
 }
 
