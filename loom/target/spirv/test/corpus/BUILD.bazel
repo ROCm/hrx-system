@@ -219,7 +219,6 @@ _ALL_PROFILE_XFAILS = {
     "kernel/subgroup/transport_carrier.loom:@subgroup_carrier_i1x7": "TARGET/003",
     "kernel/subgroup/transport_carrier.loom:@subgroup_carrier_i8": "TARGET/003",
     "kernel/workgroup/loop_state.loom:@collective_loop_state": "TARGET/003",
-    "kernel/workgroup/loop_state.loom:@collective_loop_wide_state": "TARGET/003",
     "kernel/workgroup/loop_state.loom:@pipelined_collective_loop_state": "TARGET/003",
     "kernel/workgroup/loop_state.loom:@short_collective_loop_state": "TARGET/003",
     "kernel/workgroup/reduce_partial.loom:@workgroup_reduce_partial_float": "TARGET/003",
