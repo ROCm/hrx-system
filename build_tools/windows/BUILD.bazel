@@ -33,6 +33,21 @@ config_setting(
     flag_values = {":compiler": "msvc"},
 )
 
+constraint_setting(
+    name = "wine_server_lifecycle",
+    default_constraint_value = ":wine_server_persistent",
+)
+
+constraint_value(
+    name = "wine_server_action_private",
+    constraint_setting = ":wine_server_lifecycle",
+)
+
+constraint_value(
+    name = "wine_server_persistent",
+    constraint_setting = ":wine_server_lifecycle",
+)
+
 windows_toolchains()
 
 platform(

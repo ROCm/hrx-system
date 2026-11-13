@@ -41,7 +41,7 @@ def _windows_cc_toolchain_impl(ctx):
             # Executable and declared inputs for inspecting PE/COFF symbols.
             dumpbin = struct(
                 executable = ctx.file.dumpbin or variables.get("DUMPBIN"),
-                execution_requirements = ["no-sandbox", "no-remote-exec"] if ctx.file.dumpbin else [],
+                execution_requirements = ctx.attr.dumpbin_execution_requirements if ctx.file.dumpbin else [],
                 files = depset([ctx.file.dumpbin] if ctx.file.dumpbin else []),
                 use_default_shell_env = bool(ctx.file.dumpbin),
             ),
@@ -56,6 +56,10 @@ windows_cc_toolchain = rule(
         "address_sanitizer_files": attr.label_list(allow_files = True, doc = "Matching Windows compiler-rt DLL, import library, and runtime thunk."),
         "cc": attr.label(mandatory = True, providers = [cc_common.CcToolchainInfo]),
         "dumpbin": attr.label(allow_single_file = True, cfg = "exec", doc = "PE/COFF symbol inspection executable."),
+        "dumpbin_execution_requirements": attr.string_list(
+            default = ["no-sandbox", "no-remote-exec"],
+            doc = "Scheduler requirements for the selected PE/COFF inspection executable.",
+        ),
         "masm": attr.label(allow_single_file = True, cfg = "exec", mandatory = True),
         "masm_arguments": attr.string_list(doc = "MASM flags preceding output and source paths."),
         "masm_files": attr.label_list(allow_files = True, cfg = "exec", doc = "MASM executable and loader dependencies."),
@@ -182,18 +186,30 @@ def windows_toolchains():
                 toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
             )
     elif "@platforms//os:linux" in HOST_CONSTRAINTS:
-        for compiler, implementation in [
-            ("clang_cl", "toolchain"),
-            ("msvc", "msvc_toolchain"),
-        ]:
-            native.toolchain(
-                name = "windows_x86_64_" + compiler,
-                exec_compatible_with = HOST_CONSTRAINTS,
-                target_compatible_with = _WINDOWS_X86_64,
-                target_settings = [":compiler_" + compiler],
-                toolchain = "@iree_windows_toolchain//:" + implementation,
-                toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
-            )
+        native.toolchain(
+            name = "windows_x86_64_clang_cl",
+            exec_compatible_with = HOST_CONSTRAINTS,
+            target_compatible_with = _WINDOWS_X86_64,
+            target_settings = [":compiler_clang_cl"],
+            toolchain = "@iree_windows_toolchain//:toolchain",
+            toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+        )
+        native.toolchain(
+            name = "windows_x86_64_msvc_action_private",
+            exec_compatible_with = HOST_CONSTRAINTS + [":wine_server_action_private"],
+            target_compatible_with = _WINDOWS_X86_64,
+            target_settings = [":compiler_msvc"],
+            toolchain = "@iree_windows_toolchain//:msvc_action_private_toolchain",
+            toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+        )
+        native.toolchain(
+            name = "windows_x86_64_msvc",
+            exec_compatible_with = HOST_CONSTRAINTS + [":wine_server_persistent"],
+            target_compatible_with = _WINDOWS_X86_64,
+            target_settings = [":compiler_msvc"],
+            toolchain = "@iree_windows_toolchain//:msvc_toolchain",
+            toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+        )
     else:
         return
 
