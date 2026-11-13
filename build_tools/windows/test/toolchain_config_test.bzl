@@ -122,24 +122,33 @@ def _test_sanitizer_impl(env, target):
     env.expect.that_collection(command.arguments).not_contains("/clang:-O3")
 
 def _test_cross_msvc(name, **kwargs):
-    _command(
-        name = name + "_subject",
-        compiler = ":msvc_compiler",
-        profile = ["fastbuild", "optimize_for_speed"],
-    )
-    analysis_test(name = name, target = name + "_subject", impl = _test_cross_msvc_impl, **kwargs)
+    targets = {}
+    for kind, compiler in [
+        ("persistent", ":msvc_compiler"),
+        ("action_private", ":msvc_action_private_compiler"),
+    ]:
+        subject = name + "_" + kind
+        _command(
+            name = subject,
+            compiler = compiler,
+            profile = ["fastbuild", "optimize_for_speed"],
+        )
+        targets[kind] = subject
+    analysis_test(name = name, targets = targets, impl = _test_cross_msvc_impl, **kwargs)
 
-def _test_cross_msvc_impl(env, target):
-    command = target[_CommandInfo]
-    env.expect.that_str(command.compiler_id).equals("msvc-cl")
-    env.expect.that_str(command.compiler).equals("build_tools/windows/test/msvc-cl")
-    env.expect.that_collection(command.compiler_requirements).contains("no-sandbox")
-    env.expect.that_collection(command.compiler_requirements).contains("no-remote-exec")
-    for flag in ["/O2", "/Z7", "/X", "/Zc:preprocessor"]:
-        env.expect.that_collection(command.arguments).contains(flag)
-    env.expect.that_collection(command.arguments).not_contains("/clang:-O3")
-    env.expect.that_collection(command.arguments).not_contains("/clang:-flto=thin")
-    env.expect.that_bool(command.explicit_exports).equals(True)
+def _test_cross_msvc_impl(env, targets):
+    for kind in ["persistent", "action_private"]:
+        command = getattr(targets, kind)[_CommandInfo]
+        env.expect.that_str(command.compiler_id).equals("msvc-cl")
+        env.expect.that_str(command.compiler).equals("build_tools/windows/test/msvc-cl")
+        for flag in ["/O2", "/Z7", "/X", "/Zc:preprocessor"]:
+            env.expect.that_collection(command.arguments).contains(flag)
+        env.expect.that_collection(command.arguments).not_contains("/clang:-O3")
+        env.expect.that_collection(command.arguments).not_contains("/clang:-flto=thin")
+        env.expect.that_bool(command.explicit_exports).equals(True)
+    for requirement in ["no-sandbox", "no-remote-exec"]:
+        env.expect.that_collection(targets.persistent[_CommandInfo].compiler_requirements).contains(requirement)
+        env.expect.that_collection(targets.action_private[_CommandInfo].compiler_requirements).not_contains(requirement)
 
 def _test_forced_includes(name, **kwargs):
     targets = {}

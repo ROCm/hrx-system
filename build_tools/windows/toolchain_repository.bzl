@@ -61,29 +61,36 @@ done
 # Bazel-supplied per-action temporary directory redirect that shared state.
 unset TMPDIR
 export WINEDLLOVERRIDES="vcruntime140=n;vcruntime140_1=n"
-# A persistent server started by setup must outlive Bazel's action process
-# groups. Concurrent actions that lazily create an action-owned server can
-# return success without executing cl.exe, so reject that state explicitly.
-# Wine returns 2 when the existing server is already persistent.
-(
-  if ! "$tool_root/tools/flock" 9; then
-    echo "Could not lock the MSVC Wine prefix at $WINEPREFIX." >&2
-    exit 1
+if [[ "${WINE_ACTION_PRIVATE_SERVER:-}" == "1" ]]; then
+  # An action-private execution platform supplies Wine and starts the server
+  # inside this action's namespaces. Prefer that runtime to the host-projected
+  # compatibility tools carried for ordinary local execution.
+  export PATH="/usr/bin:/bin:$PATH"
+else
+  # A persistent server started by setup must outlive Bazel's action process
+  # groups. Concurrent actions that lazily create an action-owned server can
+  # return success without executing cl.exe, so reject that state explicitly.
+  # Wine returns 2 when the existing server is already persistent.
+  (
+    if ! "$tool_root/tools/flock" 9; then
+      echo "Could not lock the MSVC Wine prefix at $WINEPREFIX." >&2
+      exit 1
+    fi
+    "$tool_root/tools/wineserver" -p 9>&- >/dev/null 2>&1
+    wineserver_status=$?
+    if [[ "$wineserver_status" -eq 0 ]]; then
+      "$tool_root/tools/wineserver" -k 9>&- >/dev/null 2>&1
+      echo "MSVC Wine server is not running; run .github/scripts/setup_windows_msvc.sh first." >&2
+      exit 1
+    elif [[ "$wineserver_status" -ne 2 ]]; then
+      echo "Could not query the MSVC Wine server (status $wineserver_status)." >&2
+      exit "$wineserver_status"
+    fi
+  ) 9>"$WINEPREFIX/.hrx-msvc-wineserver.lock"
+  server_setup_status=$?
+  if [[ "$server_setup_status" -ne 0 ]]; then
+    exit "$server_setup_status"
   fi
-  "$tool_root/tools/wineserver" -p 9>&- >/dev/null 2>&1
-  wineserver_status=$?
-  if [[ "$wineserver_status" -eq 0 ]]; then
-    "$tool_root/tools/wineserver" -k 9>&- >/dev/null 2>&1
-    echo "MSVC Wine server is not running; run .github/scripts/setup_windows_msvc.sh first." >&2
-    exit 1
-  elif [[ "$wineserver_status" -ne 2 ]]; then
-    echo "Could not query the MSVC Wine server (status $wineserver_status)." >&2
-    exit "$wineserver_status"
-  fi
-) 9>"$WINEPREFIX/.hrx-msvc-wineserver.lock"
-server_setup_status=$?
-if [[ "$server_setup_status" -ne 0 ]]; then
-  exit "$server_setup_status"
 fi
 """
 
