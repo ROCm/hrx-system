@@ -172,6 +172,7 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->command_buffer = NULL;
   stream->value_flush_timer = NULL;
   stream->pending_launch_count = 0;
+  stream->native_release_state = IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY;
   stream->timeline_semaphore = NULL;
   stream->pending_value = 0;
   stream->completed_value = 0;
@@ -340,8 +341,8 @@ static const iree_hal_access_scope_t iree_hal_streaming_device_access_scope =
 // recorded writes or acquire earlier stream writes for a later recording.
 static iree_status_t iree_hal_streaming_stream_record_dependency(
     iree_hal_command_buffer_t* command_buffer,
-    iree_hal_access_scope_t source_scope,
-    iree_hal_access_scope_t target_scope) {
+    iree_hal_access_scope_t source_scope, iree_hal_access_scope_t target_scope,
+    iree_hal_barrier_flags_t flags) {
   const iree_hal_memory_barrier_t memory_barrier = {
       .source_scope = source_scope,
       .target_scope = target_scope,
@@ -357,6 +358,7 @@ static iree_status_t iree_hal_streaming_stream_record_dependency(
                                : IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
       .memory_barrier_count = 1,
       .memory_barriers = &memory_barrier,
+      .flags = flags,
   };
   return iree_hal_command_buffer_barrier(command_buffer, &barrier);
 }
@@ -385,7 +387,8 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_streaming_stream_record_dependency(
-          command_buffer, 0, iree_hal_streaming_device_access_scope);
+          command_buffer, 0, iree_hal_streaming_device_access_scope,
+          IREE_HAL_BARRIER_FLAG_NONE);
     }
     if (iree_status_is_ok(status)) {
       stream->command_buffer = command_buffer;
@@ -398,7 +401,7 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
     // stronger system releases when required for host-visible results.
     status = iree_hal_streaming_stream_record_dependency(
         stream->command_buffer, iree_hal_streaming_device_access_scope,
-        iree_hal_streaming_device_access_scope);
+        iree_hal_streaming_device_access_scope, IREE_HAL_BARRIER_FLAG_NONE);
   }
 
   return status;
@@ -419,17 +422,20 @@ iree_status_t iree_hal_streaming_stream_flush_locked(
     iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
   if (!stream->command_buffer) {
-    return iree_ok_status();
+    return iree_hal_streaming_submission_release_system_locked(stream);
   }
 
   iree_hal_command_buffer_t* command_buffer = stream->command_buffer;
   iree_status_t status = iree_ok_status();
-  if (stream->pending_launch_count) {
-    // Retain the producer release at the submission boundary without an
-    // acquire for nonexistent later commands. The next recording acquires at
-    // entry, after its stream timeline prerequisite has completed.
+  if (stream->pending_launch_count ||
+      stream->native_release_state ==
+          IREE_HAL_STREAMING_NATIVE_RELEASE_DEVICE) {
+    // Publish both this recording's writes and earlier native writes before
+    // its completion can escape through an event, query, or host operation.
+    // The next recording acquires at entry; there is no later consumer here.
     status = iree_hal_streaming_stream_record_dependency(
-        command_buffer, iree_hal_streaming_device_access_scope, 0);
+        command_buffer, iree_hal_streaming_device_access_scope, 0,
+        IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE);
   }
   stream->command_buffer = NULL;
   stream->pending_launch_count = 0;
@@ -469,6 +475,7 @@ iree_status_t iree_hal_streaming_stream_flush_locked(
     if (iree_status_is_ok(status)) {
       // An accepted submission owns the value it signals, even if flushing the
       // hardware queue subsequently reports an error.
+      stream->native_release_state = IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY;
       status = iree_hal_queue_flush(submission.queue);
     }
   }
@@ -494,23 +501,25 @@ iree_status_t iree_hal_streaming_stream_query(
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(out_completion_state);
 
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
-
-  uint64_t current_value = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_semaphore_query(stream->timeline_semaphore, &current_value));
-
   iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status = iree_hal_streaming_stream_flush_locked(stream);
   const uint64_t pending_value = stream->pending_value;
-  if (current_value >= pending_value) {
-    *out_completion_state = IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
-    stream->completed_value = iree_max(stream->completed_value, current_value);
-  } else {
-    *out_completion_state = IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
+  uint64_t current_value = 0;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
+  }
+  if (iree_status_is_ok(status)) {
+    if (current_value >= pending_value) {
+      *out_completion_state = IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+      stream->completed_value =
+          iree_max(stream->completed_value, current_value);
+    } else {
+      *out_completion_state = IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
+    }
   }
   iree_slim_mutex_unlock(&stream->mutex);
-
-  return iree_ok_status();
+  return status;
 }
 
 typedef struct iree_hal_streaming_wait_dependency_t {
@@ -607,22 +616,8 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
                                 "stream dependency crosses contexts");
       break;
     }
-    iree_slim_mutex_lock(&source_stream->mutex);
-    const bool source_is_capturing =
-        source_stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
-    iree_slim_mutex_unlock(&source_stream->mutex);
-    if (source_is_capturing) {
-      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "source stream is capturing");
-      break;
-    }
-
-    // Flush first so the captured value names all source work preceding this
-    // operation. A source that has never submitted contributes no wait.
-    status = iree_hal_streaming_stream_flush(source_stream);
-    if (!iree_status_is_ok(status)) {
-      break;
-    }
+    // Publish and capture under one lock so the dependency cannot name an
+    // intervening launch whose writes have not been released to the system.
     iree_slim_mutex_lock(&source_stream->mutex);
     uint64_t source_timeline_value = 0;
     const bool source_requires_independent_queue =
@@ -633,7 +628,10 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                                 "source stream is capturing");
     } else {
-      source_timeline_value = source_stream->pending_value;
+      status = iree_hal_streaming_stream_flush_locked(source_stream);
+      if (iree_status_is_ok(status)) {
+        source_timeline_value = source_stream->pending_value;
+      }
     }
     iree_slim_mutex_unlock(&source_stream->mutex);
     if (!iree_status_is_ok(status)) {
@@ -675,9 +673,6 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
   // barrier advances its timeline only after every captured source point.
   bool submitted = false;
   if (iree_status_is_ok(status) && dependency_count > 0) {
-    status = iree_hal_streaming_stream_flush(stream);
-  }
-  if (iree_status_is_ok(status) && dependency_count > 0) {
     iree_slim_mutex_lock(&stream->mutex);
     uint64_t destination_timeline_value = 0;
     uint64_t signal_value = 0;
@@ -689,6 +684,9 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                                 "destination stream is capturing");
     } else {
+      status = iree_hal_streaming_stream_flush_locked(stream);
+    }
+    if (iree_status_is_ok(status)) {
       status = iree_hal_streaming_stream_reserve_next_value_locked(
           stream, &destination_timeline_value, &signal_value);
     }
@@ -843,9 +841,6 @@ iree_status_t iree_hal_streaming_stream_wait_semaphores(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_stream_flush(stream);
-  }
-  if (iree_status_is_ok(status)) {
     iree_slim_mutex_lock(&stream->mutex);
     if (IREE_UNLIKELY(!stream->context || !stream->queue)) {
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -854,6 +849,8 @@ iree_status_t iree_hal_streaming_stream_wait_semaphores(
                              IREE_HAL_STREAMING_CAPTURE_STATUS_NONE)) {
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                                 "stream is capturing");
+    } else {
+      status = iree_hal_streaming_stream_flush_locked(stream);
     }
 
     // A wait on this stream's own current or earlier timeline point adds no
@@ -950,17 +947,14 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
     // has already advanced this stream's accepted tail, so retain that error
     // while still draining the published point below.
     status = iree_hal_streaming_context_flush(stream->context);
-    // Context flushing snapshots its registered streams. If that snapshot
-    // allocation fails the target stream may still own an unsubmitted command
-    // buffer, so always flush it directly before selecting the wait target.
-    // A second flush is a no-op when the context flush already handled it.
-    status = iree_status_join(status, iree_hal_streaming_stream_flush(stream));
   }
 
-  // Snapshot the synchronization target under the same mutex used to reserve
-  // timeline values. Operations submitted after this point are not part of
-  // this synchronization operation.
+  // Publish and snapshot under one lock, including when the caller already
+  // flushed: a concurrent launch may have been accepted since that flush.
+  // Always drain accepted work even when publication reports an error.
   iree_slim_mutex_lock(&stream->mutex);
+  status =
+      iree_status_join(status, iree_hal_streaming_stream_flush_locked(stream));
   const uint64_t target_value = stream->pending_value;
   uint64_t completed_value = stream->completed_value;
   const iree_async_wait_flags_t wait_flags =
@@ -1029,14 +1023,14 @@ iree_status_t iree_hal_streaming_execute_host_operation(
   IREE_ASSERT_ARGUMENT(fn);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_streaming_stream_flush(stream));
-
   uint64_t wait_value = 0;
   uint64_t signal_value = 0;
   iree_slim_mutex_lock(&stream->mutex);
-  iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
-      stream, &wait_value, &signal_value);
+  iree_status_t status = iree_hal_streaming_stream_flush_locked(stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &wait_value, &signal_value);
+  }
   if (iree_status_is_ok(status)) {
     // Claim the timeline point before waiting. Later submissions may proceed
     // concurrently, but they will wait for this operation's terminal signal.
@@ -1068,31 +1062,6 @@ iree_status_t iree_hal_streaming_execute_host_operation(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
-}
-
-iree_status_t iree_hal_streaming_stream_wait_submitted(
-    iree_hal_streaming_stream_t* stream) {
-  IREE_ASSERT_ARGUMENT(stream);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Wait for already-submitted work to complete WITHOUT flushing.
-  // Snapshot the tail of accepted work under the stream lock. New submissions
-  // after this point are outside this wait operation.
-  iree_slim_mutex_lock(&stream->mutex);
-  const uint64_t pending_value = stream->pending_value;
-  iree_slim_mutex_unlock(&stream->mutex);
-  if (pending_value > 0) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_semaphore_wait(
-            stream->timeline_semaphore, pending_value, iree_infinite_timeout(),
-            stream->context
-                ? iree_hal_streaming_context_wait_flags(stream->context)
-                : IREE_ASYNC_WAIT_FLAG_NONE));
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
 }
 
 typedef struct iree_hal_streaming_capture_event_wait_t {
@@ -1267,13 +1236,9 @@ iree_status_t iree_hal_streaming_stream_wait_event(
         stream, source_stream_id, &added_memory_reuse_dependency);
   }
 
-  // Flush the stream to ensure all prior operations are submitted.
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_stream_flush(stream);
-  }
-
   if (iree_status_is_ok(status)) {
     iree_slim_mutex_lock(&stream->mutex);
+    status = iree_hal_streaming_stream_flush_locked(stream);
 
     // Reserve the next stream timeline value and submit a barrier that
     // completes only after the event is signaled. The value is submitted, not
@@ -1281,8 +1246,10 @@ iree_status_t iree_hal_streaming_stream_wait_event(
     // semaphore.
     uint64_t wait_value = 0;
     uint64_t signal_value = 0;
-    status = iree_hal_streaming_stream_reserve_next_value_locked(
-        stream, &wait_value, &signal_value);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_stream_reserve_next_value_locked(
+          stream, &wait_value, &signal_value);
+    }
     if (iree_status_is_ok(status)) {
       // The barrier waits on the point the event was recorded at and on
       // everything already on this stream, so the value it signals stays behind
@@ -1668,9 +1635,10 @@ iree_status_t iree_hal_streaming_launch_kernel(
     }
 
     // Native input publication acquires host-authored arguments before the
-    // dispatch can execute. Each launch also acquires earlier device writes
-    // and releases results to the system before stream completion. Bound HAL
-    // operands retain their default range maintenance.
+    // dispatch can execute. The first launch after observation releases to the
+    // system in its own packet, so observing a singleton needs no extra fence.
+    // Further launches release device writes; stream observation publishes the
+    // burst to the system. Bound HAL operands retain default range maintenance.
     static const iree_hal_memory_barrier_t native_acquire = {
         .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
                         IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
@@ -1682,9 +1650,13 @@ iree_status_t iree_hal_streaming_launch_kernel(
         .memory_barrier_count = 1,
         .memory_barriers = &native_acquire,
     };
+    static const iree_hal_memory_barrier_t native_release = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+    };
     static const iree_hal_barrier_t native_after = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
-        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+        .memory_barrier_count = 1,
+        .memory_barriers = &native_release,
     };
     static const iree_hal_barrier_list_t native_before_list = {
         .count = 1,
@@ -1694,9 +1666,17 @@ iree_status_t iree_hal_streaming_launch_kernel(
         .count = 1,
         .values = &native_after,
     };
-    static const iree_hal_queue_barriers_t native_barriers = {
-        .before = &native_before_list,
-        .after = &native_after_list,
+    static const iree_hal_barrier_t native_system_after = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    static const iree_hal_barrier_list_t native_system_after_list = {
+        .count = 1,
+        .values = &native_system_after,
+    };
+    static const iree_hal_queue_barriers_t native_barriers[] = {
+        {.before = &native_before_list, .after = &native_after_list},
+        {.before = &native_before_list, .after = &native_system_after_list},
     };
 
     for (;;) {
@@ -1721,6 +1701,8 @@ iree_status_t iree_hal_streaming_launch_kernel(
         status = iree_hal_streaming_stream_flush_locked(stream);
       }
       if (iree_status_is_ok(status)) {
+        const bool release_system = stream->native_release_state ==
+                                    IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY;
         iree_hal_queue_t* dispatch_queue = stream->queue;
         if (cooperative_dispatch) {
           status = iree_hal_streaming_stream_select_cooperative_queue_locked(
@@ -1753,14 +1735,18 @@ iree_status_t iree_hal_streaming_launch_kernel(
                                         arguments.constants_size),
               arguments.bindings,
               (flags & IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)
-                  ? &native_barriers
+                  ? &native_barriers[release_system]
                   : NULL,
               flags);
         }
         iree_hal_streaming_submission_finish_locked(stream, &submission,
                                                     iree_status_is_ok(status));
         if (iree_status_is_ok(status)) {
-          status = iree_hal_queue_flush(submission.queue);
+          if (flags & IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS) {
+            stream->native_release_state =
+                release_system ? IREE_HAL_STREAMING_NATIVE_RELEASE_SYSTEM
+                               : IREE_HAL_STREAMING_NATIVE_RELEASE_DEVICE;
+          }
         }
       }
       iree_slim_mutex_unlock(&stream->mutex);

@@ -1383,6 +1383,121 @@ TEST_P(GpuNativeDispatchTest,
                      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
 }
 
+TEST_P(GpuNativeDispatchTest, FlushPublishesRunsBeforePredecessorRetirement) {
+  if (command_type() != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+    GTEST_SKIP() << "AQL finite publication runs";
+  }
+  Create();
+  if (HasFatalFailure() || IsSkipped()) {
+    return;
+  }
+  const auto* family = iree_hal_queue_family(queues_[0]);
+  const iree_hal_pool_family_access_t access = {
+      .family = family,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &access,
+      .host = {IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+               IREE_HAL_MAPPING_MODE_SCOPED},
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), pool.out()));
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), output.out()));
+  uint32_t expected = 7;
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, &expected, 4));
+  Ref<iree_hal_executable_t> executable;
+  IREE_ASSERT_OK(Load(executable.out()));
+  iree_hal_executable_function_t function;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable, IREE_SV("image_accumulate"), &function));
+  Ref<iree_hal_semaphore_t> predecessor, done;
+  CreateSemaphore(predecessor.out());
+  CreateSemaphore(done.out());
+  ASSERT_FALSE(HasFatalFailure());
+  auto* predecessor_handle = predecessor.get();
+  auto* done_handle = done.get();
+  auto* queue = reinterpret_cast<iree_hal_amd_gpu_aql_queue_t*>(queues_[0]);
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  const auto binding = iree_hal_make_buffer_ref(output, 0, 4);
+  const iree_hal_barrier_t acquire = {
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  const iree_hal_barrier_list_t before = {1, &acquire};
+  const iree_hal_barrier_list_t after = {1, &release};
+  const iree_hal_queue_barriers_t barriers = {&before, &after};
+  uint64_t completed = 0;
+  for (uint32_t caller_count : {1u, 4u}) {
+    SCOPED_TRACE(caller_count);
+    uint64_t predecessor_value = caller_count;
+    iree::hal::amd::gpu::cts::CompletionPause pause{
+        reinterpret_cast<iree_async_semaphore_t*>(predecessor_handle)};
+    IREE_ASSERT_OK(pause.Arm(predecessor_value));
+    IREE_ASSERT_OK(iree_hal_queue_barrier(
+        queues_[0], {}, {1, &predecessor_handle, &predecessor_value}, nullptr,
+        IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+    pause.entered.acquire();
+    // The native predecessor is complete, but its callback still owns host
+    // retirement. The two later dispatches therefore share an open run that
+    // the oldest-run progress rule cannot seal on its own.
+    for (uint32_t increment : {1u, 2u}) {
+      uint64_t previous = completed;
+      ++completed;
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queues_[0],
+          previous ? iree_hal_semaphore_list_t{1, &done_handle, &previous}
+                   : iree_hal_semaphore_list_t{},
+          {1, &done_handle, &completed}, executable, function, config,
+          iree_make_const_byte_span(&increment, sizeof(increment)),
+          {1, &binding}, &barriers, IREE_HAL_DISPATCH_FLAG_NONE));
+      expected += increment;
+    }
+    EXPECT_NE(iree_atomic_load(&queue->run.position, iree_memory_order_acquire),
+              0);
+    if (caller_count == 1) {
+      IREE_ASSERT_OK(iree_hal_queue_flush(queues_[0]));
+      EXPECT_EQ(
+          iree_atomic_load(&queue->run.position, iree_memory_order_acquire), 0);
+    } else {
+      // Concurrent flushes share one stable mailbox entry. A repeated request
+      // must neither relink that entry nor lose its unconditional seal.
+      std::vector<std::thread> callers;
+      for (uint32_t i = 0; i < caller_count; ++i) {
+        callers.emplace_back([&] {
+          for (uint32_t j = 0; j < 64; ++j) {
+            IREE_EXPECT_OK(iree_hal_queue_flush(queues_[0]));
+          }
+        });
+      }
+      for (auto& caller : callers) {
+        caller.join();
+      }
+    }
+    pause.Join();
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        done, completed, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    uint32_t actual = 0;
+    IREE_ASSERT_OK(
+        iree_hal_buffer_map_read(output, 0, &actual, sizeof(actual)));
+    EXPECT_EQ(actual, expected);
+    IREE_ASSERT_OK(iree_hal_queue_flush(queues_[0]));
+  }
+}
+
 TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
   options_.queue.ring_byte_length = 16384;
   options_.queue.argument_capacity = 8;

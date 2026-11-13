@@ -68,6 +68,15 @@ typedef struct iree_hal_streaming_memory_reuse_dependency_t {
   uint64_t source_timeline_value;
 } iree_hal_streaming_memory_reuse_dependency_t;
 
+// Visibility of native launches since the last stream observation. A singleton
+// carries its system release in its dispatch packet; further launches defer
+// that release until the burst is observed.
+typedef enum iree_hal_streaming_native_release_state_e {
+  IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY = 0,
+  IREE_HAL_STREAMING_NATIVE_RELEASE_SYSTEM,
+  IREE_HAL_STREAMING_NATIVE_RELEASE_DEVICE,
+} iree_hal_streaming_native_release_state_t;
+
 // Stream for asynchronous execution.
 typedef struct iree_hal_streaming_stream_t {
   // Reference counting.
@@ -97,6 +106,9 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_value_flush_timer_t* value_flush_timer;
   // Number of kernel launches recorded in |command_buffer|.
   uint32_t pending_launch_count;
+  // Visibility promised by the accepted native tail. Protected by |mutex|;
+  // DEVICE requires an accepted system release before external observation.
+  iree_hal_streaming_native_release_state_t native_release_state;
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
@@ -201,7 +213,8 @@ iree_status_t iree_hal_streaming_stream_begin(
 iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream);
 
-// Flushes pending commands.
+// Submits pending commands and publishes native writes to the system before
+// the resulting stream timeline point completes.
 // Synchronization: none (submits to queue, non-blocking).
 iree_status_t iree_hal_streaming_stream_flush(
     iree_hal_streaming_stream_t* stream);
@@ -219,11 +232,6 @@ iree_status_t iree_hal_streaming_stream_synchronize(
     iree_hal_streaming_stream_t* stream);
 // Synchronizes stream work that the caller has already flushed/submitted.
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(
-    iree_hal_streaming_stream_t* stream);
-
-// Wait for already-submitted work on this stream to complete.
-// Does NOT flush in-progress recordings - safe to call from other threads.
-iree_status_t iree_hal_streaming_stream_wait_submitted(
     iree_hal_streaming_stream_t* stream);
 
 // Waits for an event on a stream.
@@ -293,7 +301,8 @@ IREE_MUST_USE_RESULT iree_status_t
 iree_hal_streaming_stream_select_cooperative_queue_locked(
     iree_hal_streaming_stream_t* stream, iree_hal_queue_t** out_queue);
 
-// Submits the stream's pending command buffer, if any.
+// Submits pending commands and publishes native writes to the system before
+// the resulting stream timeline point completes.
 // Synchronization: caller must hold |stream->mutex|.
 IREE_MUST_USE_RESULT iree_status_t
 iree_hal_streaming_stream_flush_locked(iree_hal_streaming_stream_t* stream);

@@ -446,12 +446,6 @@ iree_status_t iree_hal_streaming_context_query(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_completion_state_t* out_completion_state);
 
-// Wait for all already-submitted work on all streams to complete.
-// Unlike context_synchronize, this does NOT flush in-progress recordings.
-// Safe to call from any thread without interfering with other threads.
-iree_status_t iree_hal_streaming_context_wait_all_submitted(
-    iree_hal_streaming_context_t* context);
-
 // Returns the current thread's borrowed streaming context, or NULL when no
 // context has been selected.
 iree_hal_streaming_context_t* iree_hal_streaming_context_current(void);

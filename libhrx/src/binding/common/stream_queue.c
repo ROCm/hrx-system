@@ -939,3 +939,60 @@ void iree_hal_streaming_submission_finish_locked(
   }
   submission->completion = NULL;
 }
+
+iree_status_t iree_hal_streaming_submission_release_system_locked(
+    iree_hal_streaming_stream_t* stream) {
+  if (stream->native_release_state == IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY) {
+    return iree_ok_status();
+  }
+  if (stream->native_release_state ==
+      IREE_HAL_STREAMING_NATIVE_RELEASE_SYSTEM) {
+    // The stream mutex pins an active independent lane. A retired lane has
+    // already completed its native publication and needs no further flush.
+    iree_hal_queue_t* queue = stream->value_wait_lane
+                                  ? stream->value_wait_lane->queue
+                                  : stream->queue;
+    IREE_RETURN_IF_ERROR(iree_hal_queue_flush(queue));
+    stream->native_release_state = IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY;
+    return iree_ok_status();
+  }
+
+  uint64_t wait_value = 0;
+  uint64_t signal_value = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_reserve_next_value_locked(
+      stream, &wait_value, &signal_value));
+  const iree_hal_semaphore_list_t waits = {
+      .count = 1,
+      .semaphores = &stream->timeline_semaphore,
+      .payload_values = &wait_value,
+  };
+  static const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  static const iree_hal_barrier_list_t before = {
+      .count = 1,
+      .values = &release,
+  };
+  static const iree_hal_barrier_list_t after = {0};
+  static const iree_hal_queue_barriers_t barriers = {
+      .before = &before,
+      .after = &after,
+  };
+  iree_hal_streaming_submission_t submission;
+  iree_status_t status = iree_hal_streaming_submission_prepare_locked(
+      stream, stream->queue, signal_value,
+      IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_queue_barrier(submission.queue, waits, submission.signals,
+                               &barriers, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+  }
+  iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                              iree_status_is_ok(status));
+  if (iree_status_is_ok(status)) {
+    stream->native_release_state = IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY;
+    status = iree_hal_queue_flush(submission.queue);
+  }
+  return status;
+}

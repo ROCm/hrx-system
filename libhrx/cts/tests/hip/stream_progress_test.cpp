@@ -16,6 +16,7 @@ namespace {
 
 enum class ProducerOperation {
   kKernel,
+  kKernelBurst,
   kFill,
   kFill8,
   kFill16,
@@ -163,7 +164,8 @@ class HipStreamProgressTest : public testing::TestWithParam<ProducerOperation> {
 TEST_P(HipStreamProgressTest, PublishesWithoutAnotherProducerCall) {
   const ProducerOperation operation = GetParam();
   hipFunction_t function = nullptr;
-  if (operation == ProducerOperation::kKernel) {
+  if (operation == ProducerOperation::kKernel ||
+      operation == ProducerOperation::kKernelBurst) {
     hipDeviceProp_t properties = {};
     ASSERT_EQ(hipSuccess, Resolve<decltype(&hipGetDevicePropertiesR0600)>(
                               "hipGetDevicePropertiesR0600")(&properties, 0));
@@ -194,15 +196,22 @@ TEST_P(HipStreamProgressTest, PublishesWithoutAnotherProducerCall) {
   }
 
   // All setup that could synchronize the context precedes the unsatisfied
-  // consumer. The producer below is exactly one ordinary public operation.
+  // consumer. No observer API is called on the producer after its final write.
   ASSERT_NO_FATAL_FAILURE(EnqueueConsumer());
   switch (operation) {
-    case ProducerOperation::kKernel: {
-      void* arguments[] = {&signal_, &expected_};
-      ASSERT_EQ(
-          hipSuccess,
-          Resolve<decltype(&hipModuleLaunchKernel)>("hipModuleLaunchKernel")(
-              function, 1, 1, 1, 1, 1, 1, 0, producer_, arguments, nullptr));
+    case ProducerOperation::kKernel:
+    case ProducerOperation::kKernelBurst: {
+      const uint32_t count = operation == ProducerOperation::kKernel ? 1 : 17;
+      for (uint32_t i = 0; i < count; ++i) {
+        // Only the final dispatch satisfies the independent consumer. Earlier
+        // publication cannot hide a finite tail waiting for another API call.
+        uint32_t value = i + 1 == count ? expected_ : 0;
+        void* arguments[] = {&signal_, &value};
+        ASSERT_EQ(
+            hipSuccess,
+            Resolve<decltype(&hipModuleLaunchKernel)>("hipModuleLaunchKernel")(
+                function, 1, 1, 1, 1, 1, 1, 0, producer_, arguments, nullptr));
+      }
       break;
     }
     case ProducerOperation::kFill:
@@ -266,18 +275,19 @@ TEST_P(HipStreamProgressTest, PublishesWithoutAnotherProducerCall) {
 
 INSTANTIATE_TEST_SUITE_P(
     Operations, HipStreamProgressTest,
-    testing::Values(ProducerOperation::kKernel, ProducerOperation::kFill,
-                    ProducerOperation::kFill8, ProducerOperation::kFill16,
-                    ProducerOperation::kFill32, ProducerOperation::kFill2D,
-                    ProducerOperation::kFill3D, ProducerOperation::kUpload,
+    testing::Values(ProducerOperation::kKernel, ProducerOperation::kKernelBurst,
+                    ProducerOperation::kFill, ProducerOperation::kFill8,
+                    ProducerOperation::kFill16, ProducerOperation::kFill32,
+                    ProducerOperation::kFill2D, ProducerOperation::kFill3D,
+                    ProducerOperation::kUpload,
                     ProducerOperation::kRegisteredUpload,
                     ProducerOperation::kCopy, ProducerOperation::kUpload2D,
                     ProducerOperation::kCopy2D),
     ([](const testing::TestParamInfo<ProducerOperation>& info) {
       static constexpr const char* names[] = {
-          "Kernel",           "Fill",   "Fill8",    "Fill16",
-          "Fill32",           "Fill2D", "Fill3D",   "Upload",
-          "RegisteredUpload", "Copy",   "Upload2D", "Copy2D"};
+          "Kernel", "KernelBurst", "Fill",   "Fill8",  "Fill16",
+          "Fill32", "Fill2D",      "Fill3D", "Upload", "RegisteredUpload",
+          "Copy",   "Upload2D",    "Copy2D"};
       return std::string(names[static_cast<size_t>(info.param)]);
     }));
 

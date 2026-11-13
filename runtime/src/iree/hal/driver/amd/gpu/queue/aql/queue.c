@@ -62,6 +62,13 @@ typedef struct iree_hal_amd_gpu_aql_frontier_request_t {
 
 static const iree_hal_queue_vtable_t iree_hal_amd_gpu_aql_queue_vtable;
 
+enum {
+  // A single stable entry is queued or being consumed by the publisher.
+  IREE_HAL_AMD_GPU_AQL_SEAL_ENQUEUED = 1u << 0,
+  // Explicit flush seals even while an older completion is outstanding.
+  IREE_HAL_AMD_GPU_AQL_SEAL_FORCE = 1u << 1,
+};
+
 static iree_status_code_t iree_hal_amd_gpu_aql_feedback_failure(
     const iree_hal_amd_gpu_aql_queue_t* queue) {
   return queue->options.feedback ? (iree_status_code_t)iree_atomic_load(
@@ -725,18 +732,23 @@ static void iree_hal_amd_gpu_aql_process_entry(
   iree_hal_amd_gpu_aql_entry_t* typed =
       iree_containerof(entry, iree_hal_amd_gpu_aql_entry_t, publication);
   switch (typed->kind) {
-    case IREE_HAL_AMD_GPU_AQL_ENTRY_SEAL:
-      iree_atomic_exchange(&queue->run.pending, 0, iree_memory_order_acq_rel);
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_SEAL: {
+      // next detached the stable entry before this exchange. A racing request
+      // can now enqueue it again without modifying any link still in use.
+      const uint32_t request = iree_atomic_exchange(&queue->run.pending, 0,
+                                                    iree_memory_order_acq_rel);
       if (!iree_atomic_load(&queue->failure, iree_memory_order_acquire) &&
           queue->run.completion &&
-          (uint64_t)iree_atomic_load(&queue->run.position,
-                                     iree_memory_order_relaxed) ==
-              (uint64_t)iree_atomic_load(&queue->completed.count,
-                                         iree_memory_order_acquire) +
-                  1) {
+          ((request & IREE_HAL_AMD_GPU_AQL_SEAL_FORCE) ||
+           (uint64_t)iree_atomic_load(&queue->run.position,
+                                      iree_memory_order_relaxed) ==
+               (uint64_t)iree_atomic_load(&queue->completed.count,
+                                          iree_memory_order_acquire) +
+                   1)) {
         iree_hal_amd_gpu_aql_publish_run(queue);
       }
       break;
+    }
     case IREE_HAL_AMD_GPU_AQL_ENTRY_ALLOCATION:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL:
@@ -960,8 +972,10 @@ static bool iree_hal_amd_gpu_aql_retire(
       if ((uint64_t)iree_atomic_load(&queue->run.position,
                                      iree_memory_order_acquire) ==
               position + 1 &&
-          !iree_atomic_exchange(&queue->run.pending, 1,
-                                iree_memory_order_acq_rel)) {
+          !(iree_atomic_fetch_or(&queue->run.pending,
+                                 IREE_HAL_AMD_GPU_AQL_SEAL_ENQUEUED,
+                                 iree_memory_order_acq_rel) &
+            IREE_HAL_AMD_GPU_AQL_SEAL_ENQUEUED)) {
         iree_hal_amd_gpu_completion_scope_unlock(scope);
         iree_hal_amd_gpu_aql_enqueue_entry(queue, &queue->run.entry);
       }
@@ -1461,8 +1475,16 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_timestamp(
 
 static iree_status_t iree_hal_amd_gpu_aql_queue_flush(iree_hal_queue_t* base) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
-  // Inline submissions publish immediately. Deferred work owns its
-  // readiness notification; flushing an idle publisher has nothing to advance.
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_acceptance(queue));
+  // Upgrade a pending retirement request without linking its entry twice.
+  // An idle caller publishes inline; an active publisher owns further progress.
+  if (!(iree_atomic_fetch_or(&queue->run.pending,
+                             IREE_HAL_AMD_GPU_AQL_SEAL_ENQUEUED |
+                                 IREE_HAL_AMD_GPU_AQL_SEAL_FORCE,
+                             iree_memory_order_acq_rel) &
+        IREE_HAL_AMD_GPU_AQL_SEAL_ENQUEUED)) {
+    iree_hal_amd_gpu_aql_enqueue_entry(queue, &queue->run.entry);
+  }
   return iree_hal_amd_gpu_aql_check_acceptance(queue);
 }
 

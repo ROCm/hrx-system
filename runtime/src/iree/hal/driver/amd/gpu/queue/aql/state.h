@@ -154,9 +154,9 @@ struct iree_hal_amd_gpu_aql_queue_t {
     uint32_t last_header;
     // First logical position plus one; zero means no open run.
     iree_atomic_int64_t position;
-    // Coalesced request to seal when the run becomes oldest outstanding work.
+    // Coalesced retirement or explicit-flush request to seal the current run.
     iree_hal_amd_gpu_aql_entry_t entry;
-    // One while the seal request is queued or being consumed.
+    // Atomic ENQUEUED/FORCE flags; only the first request links the entry.
     iree_atomic_int32_t pending;
   } run;
   // Completion credit is isolated from ordinary publisher writes.
