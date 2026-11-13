@@ -164,14 +164,14 @@ func.def @dynamic_recurrence_nonunit_step(%payload: buffer, %base: offset, %end0
   %i$33, %i_3 = index.assume %61, %32 [range(%61, 0, 15), multiple_of(%61, 3), ge(%61, %begin), lt(%61, %end), range(%32, 0, 15), multiple_of(%32, 3), ge(%32, %begin), lt(%32, %end)] : index, index
   %packet$35 = vector.load %view[%i$33, %c0] : view<17x4xi32> -> vector<4xi32>
   %value$36 = view.load %view[%i$33, %c0] : view<17x4xi32> -> i32
+  scf.schedule.fence
   test.use %packet$35 : vector<4xi32>
+  %next$37 = scalar.addi %sum$60, %value$36 : i32
+  scf.schedule.fence
   %packet_1 = vector.load %view[%i_3, %c0] : view<17x4xi32> -> vector<4xi32>
   %value_1 = view.load %view[%i_3, %c0] : view<17x4xi32> -> i32
   test.use %packet_1 : vector<4xi32>
-  scf.schedule.fence
-  %next$39 = scalar.addi %sum$60, %value$36 : i32
-  scf.schedule.fence
-  %next_1 = scalar.addi %next$39, %value_1 : i32
+  %next_1 = scalar.addi %next$37, %value_1 : i32
   %63 = index.add %61, %16 : index
   cfg.br ^_bb1(%63: index, %next_1: i32)
 ^_bb3:

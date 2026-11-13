@@ -1,0 +1,219 @@
+// RUN: pass unroll-scf-for
+
+// Expose the requested full linear body before forming the outer recurrence
+// cut. Each inner load and contribution participates in the bounded schedule.
+func.def @prepare_linear_contribution(%input: view<8xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %contribution = scf.for %part = [%begin to %count step %step](%partial = %identity : i32) -> (i32) unroll(%count) {
+      %address = index.madd %row, %count, %part : index
+      %value = view.load %input[%address] : view<8xi32> -> i32
+      %next_partial = scalar.addi %partial, %value : i32
+      scf.yield %next_partial : i32
+    }
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @prepare_linear_contribution(%input: view<8xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  %row_0 = index.constant 0 : index
+  %row_1 = index.constant 1 : index
+  %part_0 = index.constant 0 : index
+  %address = index.madd %row_0, %count, %part_0 : index
+  %value = view.load %input[%address] : view<8xi32> -> i32
+  %part_1 = index.constant 1 : index
+  %address_1$31 = index.madd %row_0, %count, %part_1 : index
+  %value_1$32 = view.load %input[%address_1$31] : view<8xi32> -> i32
+  %part_0_1 = index.constant 0 : index
+  %address_1$34 = index.madd %row_1, %count, %part_0_1 : index
+  %value_1$35 = view.load %input[%address_1$34] : view<8xi32> -> i32
+  %part_1_1 = index.constant 1 : index
+  %address_1_1 = index.madd %row_1, %count, %part_1_1 : index
+  %value_1_1 = view.load %input[%address_1_1] : view<8xi32> -> i32
+  scf.schedule.fence
+  %next_partial = scalar.addi %identity, %value : i32
+  %next_partial_1$40 = scalar.addi %next_partial, %value_1$32 : i32
+  %next = scalar.addi %initial, %next_partial_1$40 : i32
+  scf.schedule.fence
+  %next_partial_1$42 = scalar.addi %identity, %value_1$35 : i32
+  %next_partial_1_1 = scalar.addi %next_partial_1$42, %value_1_1 : i32
+  %next_1 = scalar.addi %next, %next_partial_1_1 : i32
+  func.return %next_1 : i32
+}
+
+// ====
+
+// An inner trip count that varies with the outer induction value still needs
+// parent-first specialization. The first copy has no iterations.
+func.def @specialize_inner_bound(%initial: i32, %increment: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 3 : index
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %contribution = scf.for %part = [%begin to %row step %step](%partial = %increment : i32) -> (i32) unroll {
+      %next_partial = scalar.addi %partial, %increment : i32
+      scf.yield %next_partial : i32
+    }
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @specialize_inner_bound(%initial: i32, %increment: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 3 : index
+  %row_0 = index.constant 0 : index
+  %row_1 = index.constant 1 : index
+  %row_2 = index.constant 2 : index
+  %next_partial$32 = scalar.addi %increment, %increment : i32
+  scf.schedule.fence
+  %next = scalar.addi %initial, %increment : i32
+  %next_partial$33 = scalar.addi %increment, %increment : i32
+  %next_partial_1 = scalar.addi %next_partial$33, %increment : i32
+  scf.schedule.fence
+  %next_1 = scalar.addi %next, %next_partial$32 : i32
+  scf.schedule.fence
+  %next_2 = scalar.addi %next_1, %next_partial_1 : i32
+  func.return %next_2 : i32
+}
+
+// ====
+
+// An explicitly scheduled inner loop retains its own scheduling boundaries;
+// preparing linear descendants must not flatten another recurrence policy.
+func.def @preserve_inner_recurrence(%initial: i32, %increment: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %contribution = scf.for %part = [%begin to %count step %step](%partial = %increment : i32) -> (i32) unroll schedule(recurrence) {
+      %value = scalar.muli %increment, %increment : i32
+      %next_partial = scalar.addi %partial, %value : i32
+      scf.yield %next_partial : i32
+    }
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @preserve_inner_recurrence(%initial: i32, %increment: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %value$27 = scalar.muli %increment, %increment : i32
+  %value_1$28 = scalar.muli %increment, %increment : i32
+  scf.schedule.fence
+  %next_partial$29 = scalar.addi %increment, %value$27 : i32
+  scf.schedule.fence
+  %next_partial_1$30 = scalar.addi %next_partial$29, %value_1$28 : i32
+  %value$31 = scalar.muli %increment, %increment : i32
+  %value_1$32 = scalar.muli %increment, %increment : i32
+  scf.schedule.fence
+  %next_partial$33 = scalar.addi %increment, %value$31 : i32
+  scf.schedule.fence
+  %next_partial_1$34 = scalar.addi %next_partial$33, %value_1$32 : i32
+  scf.schedule.fence
+  %next = scalar.addi %initial, %next_partial_1$30 : i32
+  scf.schedule.fence
+  %next_1 = scalar.addi %next, %next_partial_1$34 : i32
+  func.return %next_1 : i32
+}
+
+// ====
+
+// A read-only child stays grouped when the outer recurrence writes. Flattening
+// it early would enlarge the parent's bounded effect dependency table.
+func.def @preserve_effectful_grouping(%storage: view<2xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %contribution = scf.for %part = [%begin to %count step %step](%partial = %identity : i32) -> (i32) unroll {
+      %value = view.load %storage[%part] : view<2xi32> -> i32
+      %next_partial = scalar.addi %partial, %value : i32
+      scf.yield %next_partial : i32
+    }
+    view.store %contribution, %storage[%row] : i32, view<2xi32>
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @preserve_effectful_grouping(%storage: view<2xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  %row_0 = index.constant 0 : index
+  %row_1 = index.constant 1 : index
+  %part_0$30 = index.constant 0 : index
+  %value$31 = view.load %storage[%part_0$30] : view<2xi32> -> i32
+  %next_partial$32 = scalar.addi %identity, %value$31 : i32
+  %part_1$33 = index.constant 1 : index
+  %value_1$34 = view.load %storage[%part_1$33] : view<2xi32> -> i32
+  %next_partial_1$35 = scalar.addi %next_partial$32, %value_1$34 : i32
+  scf.schedule.fence
+  view.store %next_partial_1$35, %storage[%row_0] : i32, view<2xi32>
+  %next = scalar.addi %initial, %next_partial_1$35 : i32
+  scf.schedule.fence
+  %part_0$36 = index.constant 0 : index
+  %value$37 = view.load %storage[%part_0$36] : view<2xi32> -> i32
+  %next_partial$38 = scalar.addi %identity, %value$37 : i32
+  %part_1$39 = index.constant 1 : index
+  %value_1$40 = view.load %storage[%part_1$39] : view<2xi32> -> i32
+  %next_partial_1$41 = scalar.addi %next_partial$38, %value_1$40 : i32
+  view.store %next_partial_1$41, %storage[%row_1] : i32, view<2xi32>
+  %next_1 = scalar.addi %next, %next_partial_1$41 : i32
+  func.return %next_1 : i32
+}
+
+// ====
+
+// An empty read contribution remains a source unit until the parent's producer
+// contract is checked. Its body still disappears through normal full unrolling.
+func.def @empty_read_contribution(%input: view<1xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %contribution = scf.for %part = [%begin to %begin step %step](%partial = %identity : i32) -> (i32) unroll {
+      %value = view.load %input[%begin] : view<1xi32> -> i32
+      scf.yield %value : i32
+    }
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @empty_read_contribution(%input: view<1xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  scf.schedule.fence
+  %next = scalar.addi %initial, %identity : i32
+  scf.schedule.fence
+  %next_1 = scalar.addi %next, %identity : i32
+  func.return %next_1 : i32
+}

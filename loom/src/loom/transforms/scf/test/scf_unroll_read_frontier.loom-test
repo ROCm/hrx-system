@@ -1,0 +1,181 @@
+// RUN: pass unroll-scf-for
+
+// Two future reads start the rolling window. Load-dependent arithmetic stays
+// with its carried update while the next read enters the following window.
+func.def @overlap_reads_with_contributions(%input: view<3xf32>, %initial: f32, %scale: f32) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 3 : index
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : f32) -> (f32) unroll schedule(recurrence) {
+    %value = view.load %input[%row] : view<3xf32> -> f32
+    %contribution = scalar.mulf %value, %scale : f32
+    %next = scalar.addf %sum, %contribution : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.def @overlap_reads_with_contributions(%input: view<3xf32>, %initial: f32, %scale: f32) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 3 : index
+  %row_0 = index.constant 0 : index
+  %row_1 = index.constant 1 : index
+  %row_2 = index.constant 2 : index
+  %value = view.load %input[%row_0] : view<3xf32> -> f32
+  %value_1 = view.load %input[%row_1] : view<3xf32> -> f32
+  scf.schedule.fence
+  %contribution = scalar.mulf %value, %scale : f32
+  %next = scalar.addf %initial, %contribution : f32
+  %value_2 = view.load %input[%row_2] : view<3xf32> -> f32
+  scf.schedule.fence
+  %contribution_1 = scalar.mulf %value_1, %scale : f32
+  %next_1 = scalar.addf %next, %contribution_1 : f32
+  scf.schedule.fence
+  %contribution_2 = scalar.mulf %value_2, %scale : f32
+  %next_2 = scalar.addf %next_1, %contribution_2 : f32
+  func.return %next_2 : f32
+}
+
+// ====
+
+// The producer closure includes a read used by another read and a dependency
+// carried in the intermediate view's result type rather than an operand.
+func.def @read_payload_prerequisites(%lengths: view<2xi32>, %storage: buffer, %initial: i32, %scale: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %length_value = view.load %lengths[%row] : view<2xi32> -> i32
+    %length = index.cast %length_value : i32 to index
+    %input = buffer.view %storage[%origin] : buffer -> view<[%length]xi32>
+    %value = view.load %input[%begin] : view<[%length]xi32> -> i32
+    %contribution = scalar.muli %value, %scale : i32
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @read_payload_prerequisites(%lengths: view<2xi32>, %storage: buffer, %initial: i32, %scale: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  %row_0 = index.constant 0 : index
+  %row_1 = index.constant 1 : index
+  %length_value = view.load %lengths[%row_0] : view<2xi32> -> i32
+  %length = index.cast %length_value : i32 to index
+  %input = buffer.view %storage[%origin] : buffer -> view<[%length]xi32>
+  %value = view.load %input[%begin] : view<[%length]xi32> -> i32
+  %length_value_1 = view.load %lengths[%row_1] : view<2xi32> -> i32
+  %length_1 = index.cast %length_value_1 : i32 to index
+  %input_1 = buffer.view %storage[%origin] : buffer -> view<[%length_1]xi32>
+  %value_1 = view.load %input_1[%begin] : view<[%length_1]xi32> -> i32
+  scf.schedule.fence
+  %contribution = scalar.muli %value, %scale : i32
+  %next = scalar.addi %initial, %contribution : i32
+  scf.schedule.fence
+  %contribution_1 = scalar.muli %value_1, %scale : i32
+  %next_1 = scalar.addi %next, %contribution_1 : i32
+  func.return %next_1 : i32
+}
+
+// ====
+
+// A future ordinary read still waits for the preceding aliasing write. Read
+// lookahead is a scheduling partition, not permission to cross effect edges.
+func.def @aliased_read_write(%storage: view<1xi32>, %initial: i32, %scale: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %value = view.load %storage[%begin] : view<1xi32> -> i32
+    %contribution = scalar.muli %value, %scale : i32
+    view.store %contribution, %storage[%begin] : i32, view<1xi32>
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @aliased_read_write(%storage: view<1xi32>, %initial: i32, %scale: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %value = view.load %storage[%begin] : view<1xi32> -> i32
+  scf.schedule.fence
+  %contribution = scalar.muli %value, %scale : i32
+  view.store %contribution, %storage[%begin] : i32, view<1xi32>
+  %next = scalar.addi %initial, %contribution : i32
+  scf.schedule.fence
+  %value_1 = view.load %storage[%begin] : view<1xi32> -> i32
+  %contribution_1 = scalar.muli %value_1, %scale : i32
+  view.store %contribution_1, %storage[%begin] : i32, view<1xi32>
+  %next_1 = scalar.addi %next, %contribution_1 : i32
+  func.return %next_1 : i32
+}
+
+// ====
+
+// The authored fence keeps its load-dependent computation before the next
+// read, even though both reads are independent of carried state.
+func.def @fenced_read_contribution(%input: view<2xf32>, %initial: f32, %scale: f32) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : f32) -> (f32) unroll schedule(recurrence) {
+    %value = view.load %input[%row] : view<2xf32> -> f32
+    %contribution = scalar.mulf %value, %scale : f32
+    scf.schedule.fence
+    %second = view.load %input[%begin] : view<2xf32> -> f32
+    %combined = scalar.addf %contribution, %second : f32
+    %next = scalar.addf %sum, %combined : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.def @fenced_read_contribution(%input: view<2xf32>, %initial: f32, %scale: f32) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %row_0 = index.constant 0 : index
+  %row_1 = index.constant 1 : index
+  %value = view.load %input[%row_0] : view<2xf32> -> f32
+  scf.schedule.fence
+  %contribution = scalar.mulf %value, %scale : f32
+  scf.schedule.fence
+  %second = view.load %input[%begin] : view<2xf32> -> f32
+  %combined = scalar.addf %contribution, %second : f32
+  %next = scalar.addf %initial, %combined : f32
+  scf.schedule.fence
+  %value_1 = view.load %input[%row_1] : view<2xf32> -> f32
+  %contribution_1 = scalar.mulf %value_1, %scale : f32
+  scf.schedule.fence
+  %second_1 = view.load %input[%begin] : view<2xf32> -> f32
+  %combined_1 = scalar.addf %contribution_1, %second_1 : f32
+  %next_1 = scalar.addf %next, %combined_1 : f32
+  func.return %next_1 : f32
+}
+
+// ====
+
+// Read-dependent arithmetic is not itself a loop-carried recurrence.
+func.def @requires_carried_consumer(%input: view<2xf32>, %initial: f32, %scale: f32) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="one or more loop-carried-dependent consumer operations"}
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : f32) -> (f32) unroll schedule(recurrence) {
+    %value = view.load %input[%row] : view<2xf32> -> f32
+    %contribution = scalar.mulf %value, %scale : f32
+    scf.yield %contribution : f32
+  }
+  func.return %result : f32
+}
