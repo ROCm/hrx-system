@@ -56,3 +56,32 @@ int entry() { return; }
 // Rejects incomplete returns and unprojected exit joins.
 // ERROR@+1: PARSE/036 "void function should not return a value"
 void entry() { return 1; }
+
+// ====
+// A scalar or pointer cannot supply a range's iteration boundary.
+void entry(int value) {
+  // ERROR@+1: PARSE/036 "range-based for requires an array or class range"
+  for (int element : value) {}
+}
+
+// ====
+void entry(int* values) {
+  // ERROR@+1: PARSE/036 "range-based for requires an array or class range"
+  for (int element : values) {}
+}
+
+// ====
+// An array range needs a source bound to construct its one-past-end iterator.
+void entry(int (&values)[]) {
+  // ERROR@+1: PARSE/036 "range-based for requires an array with a known bound"
+  for (int element : values) {}
+}
+
+// ====
+// Implicit initializer-list backing storage is distinct from iterating an
+// already-constructed array or class range.
+#include <initializer_list>
+void entry() {
+  // ERROR@+1: LOWERING/059 "braced range initializers require initializer-list backing storage; declare an array and iterate over it instead"
+  for (unsigned value : {1u, 2u, 3u}) {}
+}

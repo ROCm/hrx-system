@@ -31,6 +31,7 @@
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/objects.h"
+#include "loom/import/cxx/source/range_loops.h"
 
 namespace loom::cxx_import {
 
@@ -993,6 +994,15 @@ bool ControlFlow::falls_through(cxx::StatementAST* statement) const {
   return paths(statement) & Fallthrough;
 }
 
+cxx::CompoundStatementAST* ControlFlow::range_scope(
+    cxx::ForRangeStatementAST* loop) const {
+  return range_loops_->scope(loop);
+}
+
+bool ControlFlow::initializes_range(cxx::InitDeclaratorAST* declaration) const {
+  return range_loops_ && range_loops_->initializes_range(declaration);
+}
+
 ExitFlow ControlFlow::continues(cxx::StatementAST* statement) const {
   return exits(statement, Continue);
 }
@@ -1075,6 +1085,11 @@ void ControlFlow::postVisit(cxx::AST* ast) {
       }
     } else if (auto* operand = explicit_reference_operand(unit_, expression)) {
       owner = object_owner(operand);
+    } else if (auto* binary =
+                   cxx::ast_cast<cxx::BinaryExpressionAST>(expression);
+               binary && !binary->symbol &&
+               binary->op == cxx::TokenKind::T_COMMA) {
+      owner = object_owner(binary->rightExpression);
     } else if (auto* subscript =
                    cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
       if (auto* selection = array_subscript(subscript)) {
@@ -1154,6 +1169,9 @@ void ControlFlow::postVisit(cxx::AST* ast) {
 }
 
 unsigned ControlFlow::classify_paths(cxx::StatementAST* statement) const {
+  if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(statement)) {
+    return paths(range_scope(range));
+  }
   if (cxx::ast_cast<cxx::ExpressionStatementAST>(statement)) {
     // The evaluated-expression walk already joins conditional and
     // short-circuit paths. Consume its continuation fact without walking the
@@ -1240,6 +1258,9 @@ unsigned ControlFlow::classify_paths(cxx::StatementAST* statement) const {
 }
 
 bool ControlFlow::classify_callable_exit(cxx::StatementAST* statement) {
+  if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(statement)) {
+    return requires_callable_exit(range_scope(range));
+  }
   if (cxx::ast_cast<cxx::ForStatementAST>(statement) ||
       cxx::ast_cast<cxx::WhileStatementAST>(statement) ||
       cxx::ast_cast<cxx::DoStatementAST>(statement) ||
@@ -1420,6 +1441,19 @@ void ControlFlow::visit(cxx::ForStatementAST* ast) {
   construction_.reach_latch();
   accept(ast->expression);
   construction_.finish_loop(std::move(condition_exit));
+}
+
+void ControlFlow::visit(cxx::ForRangeStatementAST* ast) {
+  if (cxx::ast_cast<cxx::BracedInitListAST>(ast->rangeInitializer)) {
+    diagnostics_.reject(
+        unit_, ast->rangeInitializer,
+        "braced range initializers require initializer-list backing storage; "
+        "declare an array and iterate over it instead");
+  }
+  if (!range_loops_) {
+    range_loops_ = std::make_unique<RangeLoops>(unit_);
+  }
+  accept(range_loops_->expand(ast));
 }
 
 void ControlFlow::visit(cxx::ConditionalExpressionAST* ast) {
@@ -2619,6 +2653,11 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     }
   };
   auto traits = unit_.typeTraits();
+  if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(expression);
+      binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+    collect_identity(binary->rightExpression, argument, projection);
+    return;
+  }
   if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
       cast && is_class_adjustment(cast)) {
     if (cast->castKind == cxx::ImplicitCastKind::kDerivedToBaseConversion) {
@@ -4609,6 +4648,10 @@ std::optional<Destination> ControlFlow::classify_destination(
   if (identity != expression) {
     return classify_destination(identity);
   }
+  if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(expression);
+      binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+    return retain_destination(binary->rightExpression);
+  }
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     if (auto found = reference_aliases_.find(id->symbol);
         found != reference_aliases_.end()) {
@@ -4778,6 +4821,10 @@ std::optional<Destination> ControlFlow::classify_materialized_destination(
 }
 
 bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
+  if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(expression);
+      binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+    return storage_expressions_.contains(binary->rightExpression);
+  }
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
     const bool object_member =

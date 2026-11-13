@@ -33,6 +33,7 @@ loom_check_test_suite(
         "loop_exits.cxx-test",
         "loop_schedules.cxx-test",
         "loops.cxx-test",
+        "range_loops.cxx-test",
         "structured_returns.cxx-test",
         "switches.cxx-test",
         "unreachable.cxx-test",
