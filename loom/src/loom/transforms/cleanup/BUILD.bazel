@@ -32,11 +32,13 @@ loom_cc_library(
     hdrs = ["fact_refinement.h"],
     deps = [
         ":fact_refinement_policy",
+        "//loom/src/loom/analysis:integer_relation",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:fact_relation",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
