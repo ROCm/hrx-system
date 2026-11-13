@@ -29,12 +29,6 @@ iree_status_t loom_aie2p_select_transpose_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan);
 
-// Publishes the actual source carrier for an identity transpose after its
-// producer has finalized its binding.
-iree_status_t loom_aie2p_finalize_transpose_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_low_lower_plan_t plan);
-
 // Retains the complete source carrier consumed by the selected plan.
 void loom_aie2p_mark_transpose_plan_demands(loom_low_lower_context_t* context,
                                             const loom_op_t* source_op,

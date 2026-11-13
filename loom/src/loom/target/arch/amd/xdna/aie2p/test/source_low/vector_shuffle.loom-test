@@ -1,5 +1,69 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
+// Identity permutations inherit the selected producer's carrier before the
+// loop's address recurrence causes table rules to finalize their operands.
+func.def @identity_permutations_in_memory_loop(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.noalias %input, %output : buffer, buffer
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %source[%base] : buffer -> view<4x4xi32>
+  %outputs = buffer.view %destination[%base] : buffer -> view<4x4x1xi32>
+  scf.for %row = [%begin to %end step %step] {
+    %words = vector.load %inputs[%row, 0] : view<4x4xi32> -> vector<4xi32>
+    %indices = vector.index_cast %words : vector<4xi32> to vector<4xindex>
+    %shuffled = vector.shuffle<[0, 1, 2, 3]> %indices : vector<4xindex>
+    %matrix = vector.bitcast %shuffled : vector<4xindex> to vector<1x4xindex>
+    %transposed = vector.transpose<[1, 0]> %matrix : vector<1x4xindex> -> vector<4x1xindex>
+    %result = vector.index_cast %transposed : vector<4x1xindex> to vector<4x1xi32>
+    vector.store %result, %outputs[%row, 0, 0] : vector<4x1xi32>, view<4x4x1xi32>
+  }
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @identity_permutations_in_memory_loop() asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %begin = mov.short 0
+  %end = mov.short 4
+  %step = mov.short 1
+  low.br ^_bb1(%begin: reg<aie2p.er>)
+^_bb1(%row: reg<aie2p.er>):
+  %60 = lt %row, %end
+  low.cond_br %60, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %61 = mov.i32 4
+  %62 = lshl %row, %61
+  %63 = mov.address-index %62
+  %64 = lda.i32.index %source, %63
+  %65 = add.address-index.immediate %62, 4
+  %66 = lda.i32.index %source, %65
+  %67 = add.address-index.immediate %62, 8
+  %68 = lda.i32.index %source, %67
+  %69 = add.address-index.immediate %62, 12
+  %70 = lda.i32.index %source, %69
+  %71 = vbcst.32 %70
+  %72 = vpush.lo.32 %68, %71
+  %73 = vpush.lo.32 %66, %72
+  %result = vpush.lo.32 %64, %73
+  %75 = vextract.32.imm %result, 0
+  %76 = vextract.32.imm %result, 1
+  %77 = vextract.32.imm %result, 2
+  %78 = vextract.32.imm %result, 3
+  st.i32.index %75, %destination, %63
+  st.i32.index %76, %destination, %65
+  st.i32.index %77, %destination, %67
+  st.i32.index %78, %destination, %69
+  %83 = add.nc %row, %step
+  low.br ^_bb1(%83: reg<aie2p.er>)
+^_bb3:
+  return
+}
+
+// ====
+
 func.def @shuffle_i1_family(%value: vector<3xi1>) -> (vector<3xi1>) {
   %result = vector.shuffle<[1, 0, 1]> %value : vector<3xi1>
   func.return %result : vector<3xi1>

@@ -517,3 +517,143 @@ check.scenario @wide_lane_transpose_bits {
   }
   check.return
 }
+
+// Dense 256-byte payloads exercise packet-local, paired, and full-width
+// permutations. The address cases retain only 35 or 63 words; bytes outside
+// their logical extents must remain untouched. Address casts round-trip i32
+// payloads independently of the target's address width.
+func.def @matrix_lane_transposes(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.noalias %input, %output : buffer, buffer
+  %base = index.constant 0 : offset
+  %integer_base = index.constant 256 : offset
+  %pair_base = index.constant 512 : offset
+  %offset_base = index.constant 768 : offset
+  %index_base = index.constant 1024 : offset
+  %identity_base = index.constant 1280 : offset
+  %floats = buffer.view %source[%base] : buffer -> view<8x8xf32>
+  %float_output = buffer.view %destination[%base] : buffer -> view<8x8xf32>
+  %float_matrix = vector.load %floats[0, 0] : view<8x8xf32> -> vector<8x8xf32>
+  %float_transposed = vector.transpose<[1, 0]> %float_matrix : vector<8x8xf32> -> vector<8x8xf32>
+  vector.store %float_transposed, %float_output[0, 0] : vector<8x8xf32>, view<8x8xf32>
+
+  %integers = buffer.view %source[%base] : buffer -> view<4x4x4xi32>
+  %integer_output = buffer.view %destination[%integer_base] : buffer -> view<4x4x4xi32>
+  %integer_tiles = vector.load %integers[0, 0, 0] : view<4x4x4xi32> -> vector<4x4x4xi32>
+  %integer_transposed = vector.transpose<[0, 2, 1]> %integer_tiles : vector<4x4x4xi32> -> vector<4x4x4xi32>
+  vector.store %integer_transposed, %integer_output[0, 0, 0] : vector<4x4x4xi32>, view<4x4x4xi32>
+
+  %pairs = buffer.view %source[%base] : buffer -> view<2x2x8xi64>
+  %pair_output = buffer.view %destination[%pair_base] : buffer -> view<2x8x2xi64>
+  %pair_tiles = vector.load %pairs[0, 0, 0] : view<2x2x8xi64> -> vector<2x2x8xi64>
+  %pair_transposed = vector.transpose<[0, 2, 1]> %pair_tiles : vector<2x2x8xi64> -> vector<2x8x2xi64>
+  vector.store %pair_transposed, %pair_output[0, 0, 0] : vector<2x8x2xi64>, view<2x8x2xi64>
+
+  %offset_words = buffer.view %source[%base] : buffer -> view<5x7xi32>
+  %offset_output = buffer.view %destination[%offset_base] : buffer -> view<7x5xi32>
+  %offset_bits = vector.load %offset_words[0, 0] : view<5x7xi32> -> vector<5x7xi32>
+  %offsets = vector.index_cast %offset_bits : vector<5x7xi32> to vector<5x7xoffset>
+  %offset_transposed = vector.transpose<[1, 0]> %offsets : vector<5x7xoffset> -> vector<7x5xoffset>
+  %offset_result = vector.index_cast %offset_transposed : vector<7x5xoffset> to vector<7x5xi32>
+  vector.store %offset_result, %offset_output[0, 0] : vector<7x5xi32>, view<7x5xi32>
+
+  %index_words = buffer.view %source[%base] : buffer -> view<7x9xi32>
+  %index_output = buffer.view %destination[%index_base] : buffer -> view<9x7xi32>
+  %index_bits = vector.load %index_words[0, 0] : view<7x9xi32> -> vector<7x9xi32>
+  %indices = vector.index_cast %index_bits : vector<7x9xi32> to vector<7x9xindex>
+  %index_transposed = vector.transpose<[1, 0]> %indices : vector<7x9xindex> -> vector<9x7xindex>
+  %index_result = vector.index_cast %index_transposed : vector<9x7xindex> to vector<9x7xi32>
+  vector.store %index_result, %index_output[0, 0] : vector<9x7xi32>, view<9x7xi32>
+
+  %identity_words = buffer.view %source[%base] : buffer -> view<1x64xi32>
+  %identity_output = buffer.view %destination[%identity_base] : buffer -> view<64x1xi32>
+  %identity_bits = vector.load %identity_words[0, 0] : view<1x64xi32> -> vector<1x64xi32>
+  %identity_indices = vector.index_cast %identity_bits : vector<1x64xi32> to vector<1x64xindex>
+  %identity_transposed = vector.transpose<[1, 0]> %identity_indices : vector<1x64xindex> -> vector<64x1xindex>
+  %identity_result = vector.index_cast %identity_transposed : vector<64x1xindex> to vector<64x1xi32>
+  vector.store %identity_result, %identity_output[0, 0] : vector<64x1xi32>, view<64x1xi32>
+  func.return
+}
+
+// Flat byte addressing provides an independent oracle for a batch of row-major
+// matrices, including the two ordered words in each 64-bit element.
+func.def inline @transpose_matrix_bytes(%input: buffer, %output: buffer, %output_base: offset, %batch_count: index, %rows: index, %columns: index, %element_bytes: index) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<256xi8>
+  %destination = buffer.view %output[%output_base] : buffer -> view<256xi8>
+  %matrix_elements = index.mul %rows, %columns : index
+  %total_elements = index.mul %batch_count, %matrix_elements : index
+  %total_bytes = index.mul %total_elements, %element_bytes : index
+  scf.for %i = [%begin to %total_bytes step %step] {
+    %element = index.div %i, %element_bytes : index
+    %byte = index.rem %i, %element_bytes : index
+    %batch = index.div %element, %matrix_elements : index
+    %lane = index.rem %element, %matrix_elements : index
+    %row = index.rem %lane, %rows : index
+    %column = index.div %lane, %rows : index
+    %source_row = index.mul %row, %columns : index
+    %source_lane = index.add %source_row, %column : index
+    %batch_base = index.mul %batch, %matrix_elements : index
+    %source_element = index.add %batch_base, %source_lane : index
+    %source_base = index.mul %source_element, %element_bytes : index
+    %source_byte = index.add %source_base, %byte : index
+    %value = view.load %source[%source_byte] : view<256xi8> -> i8
+    view.store %value, %destination[%i] : i8, view<256xi8>
+  }
+  func.return
+}
+
+func.def @matrix_lane_transposes_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %integer_base = index.constant 256 : offset
+  %pair_base = index.constant 512 : offset
+  %offset_base = index.constant 768 : offset
+  %index_base = index.constant 1024 : offset
+  %identity_base = index.constant 1280 : offset
+  %single = index.constant 1 : index
+  %square_side = index.constant 8 : index
+  %integer_batch_count = index.constant 4 : index
+  %integer_side = index.constant 4 : index
+  %pair_batch_count = index.constant 2 : index
+  %pair_rows = index.constant 2 : index
+  %pair_columns = index.constant 8 : index
+  %offset_rows = index.constant 5 : index
+  %offset_columns = index.constant 7 : index
+  %index_rows = index.constant 7 : index
+  %index_columns = index.constant 9 : index
+  %identity_columns = index.constant 64 : index
+  %word_bytes = index.constant 4 : index
+  %pair_bytes = index.constant 8 : index
+  func.call @transpose_matrix_bytes(%input, %output, %base, %single, %square_side, %square_side, %word_bytes) : (buffer, buffer, offset, index, index, index, index)
+  func.call @transpose_matrix_bytes(%input, %output, %integer_base, %integer_batch_count, %integer_side, %integer_side, %word_bytes) : (buffer, buffer, offset, index, index, index, index)
+  func.call @transpose_matrix_bytes(%input, %output, %pair_base, %pair_batch_count, %pair_rows, %pair_columns, %pair_bytes) : (buffer, buffer, offset, index, index, index, index)
+  func.call @transpose_matrix_bytes(%input, %output, %offset_base, %single, %offset_rows, %offset_columns, %word_bytes) : (buffer, buffer, offset, index, index, index, index)
+  func.call @transpose_matrix_bytes(%input, %output, %index_base, %single, %index_rows, %index_columns, %word_bytes) : (buffer, buffer, offset, index, index, index, index)
+  func.call @transpose_matrix_bytes(%input, %output, %identity_base, %single, %single, %identity_columns, %word_bytes) : (buffer, buffer, offset, index, index, index, index)
+  func.return
+}
+
+check.scenario @matrix_lane_transpose_bits {
+  // Distinct NaN payloads must survive movement without canonicalization.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(2143289344) step(1) : tensor<64xi32>
+    %storage = check.generate.fill value(91) : tensor<1552xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<1552xi8> -> tensor<1536xi8>
+    check.compare<@matrix_lane_transposes, @matrix_lane_transposes_oracle>(%input, %output) : (tensor<64xi32>, tensor<1536xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1552xi8>
+    }
+  }
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<256xi8>
+    %storage = check.generate.fill value(91) : tensor<1552xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<1552xi8> -> tensor<1536xi8>
+    check.compare<@matrix_lane_transposes, @matrix_lane_transposes_oracle>(%input, %output) : (tensor<256xi8>, tensor<1536xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<256xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1552xi8>
+    }
+  }
+  check.return
+}
