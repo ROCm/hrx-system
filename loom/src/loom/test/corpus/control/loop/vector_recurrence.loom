@@ -44,3 +44,62 @@ check.scenario @vector_recurrence_values {
   }
   check.return
 }
+
+// A packed row-major history crosses both the loop boundary and a native packet
+// boundary. Each step drops one row and appends the current row. Compare raw
+// bits so every BF16 payload, including NaNs, is preserved without arithmetic.
+func.def @packed_history(%input: buffer, %output: buffer, %count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<10x4xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<9x4xbf16>
+  %initial = vector.load %source[0, 0] : view<10x4xbf16> -> vector<9x4xbf16>
+  %current = vector.load %source[9, 0] : view<10x4xbf16> -> vector<4xbf16>
+  %final = scf.for %iteration = [%c0 to %count step %c1](%old = %initial : vector<9x4xbf16>) -> (vector<9x4xbf16>) {
+    %tail = vector.slice %old[1, 0] : vector<9x4xbf16> -> vector<8x4xbf16>
+    %row = vector.broadcast %current : vector<4xbf16> -> vector<1x4xbf16>
+    %next = vector.concat<0> %tail, %row : vector<8x4xbf16>, vector<1x4xbf16> -> vector<9x4xbf16>
+    scf.yield %next : vector<9x4xbf16>
+  }
+  vector.store %final, %destination[0, 0] : vector<9x4xbf16>, view<9x4xbf16>
+  func.return
+}
+
+// Select the surviving source row directly, without vector operations or a
+// recurrence. Counts past the history depth replace every row.
+func.def @packed_history_oracle(%input: buffer, %output: buffer, %count: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %width = index.constant 4 : index
+  %depth = index.constant 9 : index
+  %elements = index.constant 36 : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<40xi16>
+  %destination = buffer.view %output[%base] : buffer -> view<36xi16>
+  %nonnegative = index.max %count, %c0 : index
+  %distance = index.min %nonnegative, %depth : index
+  scf.for %position = [%c0 to %elements step %c1] {
+    %row = index.div %position, %width : index
+    %column = index.rem %position, %width : index
+    %shifted_row = index.add %row, %distance : index
+    %source_row = index.min %shifted_row, %depth : index
+    %source_position = index.madd %source_row, %width, %column : index
+    %value = view.load %source[%source_position] : view<40xi16> -> i16
+    view.store %value, %destination[%position] : i16, view<36xi16>
+  }
+  func.return
+}
+
+check.scenario @packed_history_values {
+  check.trial[11](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(1680) : tensor<40xi16>
+    %storage = check.generate.fill value(23130) : tensor<44xi16>
+    %output = check.tensor.view %storage offset(8) : tensor<44xi16> -> tensor<36xi16>
+    check.compare<@packed_history, @packed_history_oracle>(%input, %output, %count) : (tensor<40xi16>, tensor<36xi16>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<40xi16>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<44xi16>
+    }
+  }
+  check.return
+}
