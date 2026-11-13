@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "iree/vm/bytecode/wire/core.h"
-#include "loom/analysis/storage_layout.h"
 #include "loom/codegen/low/allocation/move_sequence.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/storage_layout.h"
@@ -875,10 +874,11 @@ iree_status_t loom_vm_function_plan_write(
         storage.move_locations[i] = (uint16_t)local_ref_count;
         local_ref_count += cell->byte_length / ref_cell_bytes;
       } else {
-        uint64_t byte_offset = 0;
-        IREE_RETURN_IF_ERROR(
-            loom_storage_layout_append(cell->byte_length, cell->byte_alignment,
-                                       &local_byte_length, &byte_offset));
+        // The authored frame is bounded above before these register-sized
+        // temporaries are appended. Their u32 count cannot overflow u64.
+        const uint64_t byte_offset =
+            iree_align_uint64(local_byte_length, cell->byte_alignment);
+        local_byte_length = byte_offset + cell->byte_length;
         storage.move_locations[i] = (uint16_t)byte_offset;
       }
     }
@@ -923,9 +923,9 @@ iree_status_t loom_vm_function_plan_write(
     }
   }
   if (needs_value_scratch) {
-    uint64_t byte_offset = 0;
-    IREE_RETURN_IF_ERROR(loom_storage_layout_append(
-        sizeof(uint64_t), sizeof(uint64_t), &local_byte_length, &byte_offset));
+    const uint64_t byte_offset =
+        iree_align_uint64(local_byte_length, sizeof(uint64_t));
+    local_byte_length = byte_offset + sizeof(uint64_t);
     storage.borrowed_value = (uint16_t)byte_offset;
   }
   if (needs_ref_scratch) {

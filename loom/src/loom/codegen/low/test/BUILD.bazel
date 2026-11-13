@@ -41,6 +41,7 @@ loom_check_test_suite(
         "guarded_motion.loom-test",
         "packet.loom-test",
         "register_parts.loom-test",
+        "storage_overflow.loom-test",
         "storage_transport.loom-test",
     ],
 )

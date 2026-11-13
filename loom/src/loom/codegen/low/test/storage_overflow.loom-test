@@ -1,0 +1,59 @@
+// RUN: verify
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @stack_overflow() asm {
+  %first = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<stack>
+  %second = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<stack>
+  // ERROR@+1: TARGET/096 {function_name="stack_overflow", storage_space="stack"}
+  %overflow = storage {byte_alignment = 1, byte_length = 2} : low.storage<stack>
+  return
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @scratch_overflow() asm {
+  %first = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<scratch>
+  %second = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<scratch>
+  // ERROR@+1: TARGET/096 {function_name="scratch_overflow", storage_space="scratch"}
+  %overflow = storage {byte_alignment = 1, byte_length = 2} : low.storage<scratch>
+  return
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @private_overflow() asm {
+  %first = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<private>
+  %second = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<private>
+  // ERROR@+1: TARGET/096 {function_name="private_overflow", storage_space="private"}
+  %overflow = storage {byte_alignment = 1, byte_length = 2} : low.storage<private>
+  return
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @workgroup_overflow() asm {
+  %first = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<workgroup>
+  %second = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<workgroup>
+  // ERROR@+1: TARGET/096 {function_name="workgroup_overflow", storage_space="workgroup"}
+  %overflow = storage {byte_alignment = 1, byte_length = 2} : low.storage<workgroup>
+  return
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @alignment_overflow() asm {
+  %first = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<stack>
+  %second = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<stack>
+  // ERROR@+1: TARGET/096 {function_name="alignment_overflow", storage_space="stack"}
+  %overflow = storage {byte_alignment = 4, byte_length = 1} : low.storage<stack>
+  return
+}

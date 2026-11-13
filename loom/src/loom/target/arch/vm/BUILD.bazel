@@ -65,7 +65,6 @@ loom_cc_library(
     srcs = ["function_plan.c"],
     hdrs = ["function_plan.h"],
     deps = [
-        "//loom/src/loom/analysis:storage_layout",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:storage_layout",

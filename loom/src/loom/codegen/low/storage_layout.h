@@ -104,8 +104,8 @@ typedef struct loom_low_storage_layout_reservation_t {
 // Packs one verified reservation shape into |sizes| and returns its stable
 // generic-space placement. This is the common primitive for authored storage
 // ops and compiler-planned reservations that do not yet have SSA handles.
-// Aggregate byte-size overflow is returned as status.
-iree_status_t loom_low_storage_layout_pack_reservation(
+// Verification and reservation producers establish that the aggregate fits u64.
+void loom_low_storage_layout_pack_reservation(
     loom_storage_space_t space, uint64_t byte_size, uint64_t byte_alignment,
     loom_low_storage_layout_space_sizes_t* sizes,
     loom_low_storage_layout_reservation_t* out_reservation);
@@ -216,7 +216,8 @@ void loom_low_storage_layout_builder_initialize(
 // Captures one verified low.storage.reserve or low.storage.view in |builder|.
 // Each handle must be appended exactly once before finish. Reservations retain
 // declaration order; views need not follow their sources in declaration order.
-// Aggregate byte-size overflow and arena growth are returned as status.
+// Verification and reservation producers establish that the aggregate fits u64.
+// Only arena growth can fail.
 iree_status_t loom_low_storage_layout_builder_append(
     const loom_module_t* module, const loom_op_t* op,
     iree_arena_allocator_t* arena, loom_low_storage_layout_builder_t* builder);
@@ -228,8 +229,9 @@ iree_status_t loom_low_storage_layout_builder_finish(
     iree_arena_allocator_t* arena, loom_low_storage_layout_t* out_layout);
 
 // Accumulates one verified low.storage.reserve into |sizes| without retaining a
-// record. Aggregate byte-size overflow is returned as status.
-iree_status_t loom_low_storage_layout_accumulate_reservation(
+// record. Returns false on aggregate overflow, leaving |sizes| unchanged. The
+// owning verifier or reservation producer diagnoses the failing operation.
+bool loom_low_storage_layout_accumulate_reservation(
     const loom_module_t* module, const loom_op_t* reserve_op,
     loom_low_storage_layout_space_sizes_t* sizes);
 

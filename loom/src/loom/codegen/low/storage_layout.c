@@ -87,21 +87,19 @@ static uint64_t* loom_low_storage_layout_space_size(
   }
 }
 
-iree_status_t loom_low_storage_layout_pack_reservation(
+void loom_low_storage_layout_pack_reservation(
     loom_storage_space_t space, uint64_t byte_size, uint64_t byte_alignment,
     loom_low_storage_layout_space_sizes_t* sizes,
     loom_low_storage_layout_reservation_t* out_reservation) {
   uint64_t* space_size = loom_low_storage_layout_space_size(sizes, space);
-  uint64_t byte_offset = 0;
-  IREE_RETURN_IF_ERROR(loom_storage_layout_append(byte_size, byte_alignment,
-                                                  space_size, &byte_offset));
+  const uint64_t byte_offset = iree_align_uint64(*space_size, byte_alignment);
+  *space_size = byte_offset + byte_size;
   *out_reservation = (loom_low_storage_layout_reservation_t){
       .space = space,
       .byte_offset = byte_offset,
       .byte_size = byte_size,
       .byte_alignment = byte_alignment,
   };
-  return iree_ok_status();
 }
 
 void loom_low_storage_layout_builder_initialize(
@@ -143,10 +141,10 @@ iree_status_t loom_low_storage_layout_builder_append(
   const loom_value_id_t storage_value_id = loom_low_storage_reserve_storage(op);
   const loom_storage_space_t storage_space =
       loom_type_storage_space(loom_module_value_type(module, storage_value_id));
-  IREE_RETURN_IF_ERROR(loom_low_storage_layout_pack_reservation(
+  loom_low_storage_layout_pack_reservation(
       storage_space, (uint64_t)loom_low_storage_reserve_byte_length(op),
       (uint64_t)loom_low_storage_reserve_byte_alignment(op),
-      &builder->space_sizes, &reservation));
+      &builder->space_sizes, &reservation);
   const iree_host_size_t minimum_capacity = builder->record_count + 1;
   if (minimum_capacity > builder->record_capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
@@ -275,17 +273,18 @@ iree_status_t loom_low_storage_layout_builder_finish(
   return iree_ok_status();
 }
 
-iree_status_t loom_low_storage_layout_accumulate_reservation(
+bool loom_low_storage_layout_accumulate_reservation(
     const loom_module_t* module, const loom_op_t* reserve_op,
     loom_low_storage_layout_space_sizes_t* sizes) {
   const loom_value_id_t storage_value_id =
       loom_low_storage_reserve_storage(reserve_op);
-  loom_low_storage_layout_reservation_t reservation;
-  return loom_low_storage_layout_pack_reservation(
-      loom_type_storage_space(loom_module_value_type(module, storage_value_id)),
+  uint64_t* space_size = loom_low_storage_layout_space_size(
+      sizes, loom_type_storage_space(
+                 loom_module_value_type(module, storage_value_id)));
+  return loom_storage_layout_append(
       (uint64_t)loom_low_storage_reserve_byte_length(reserve_op),
-      (uint64_t)loom_low_storage_reserve_byte_alignment(reserve_op), sizes,
-      &reservation);
+      (uint64_t)loom_low_storage_reserve_byte_alignment(reserve_op), space_size,
+      NULL);
 }
 
 void loom_low_storage_layout_lookup_reference(

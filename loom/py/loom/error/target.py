@@ -1649,6 +1649,21 @@ ERR_TARGET_095 = ErrorDef(
     ),
 )
 
+ERR_TARGET_096 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=96,
+    severity=Severity.ERROR,
+    summary="Function storage layout exceeds its address space.",
+    message=(
+        "{storage_space} storage layout in '@{function_name}' exceeds the "
+        "64-bit byte address space"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("storage_space", ParamKind.STRING),
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1728,4 +1743,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_093,
     ERR_TARGET_094,
     ERR_TARGET_095,
+    ERR_TARGET_096,
 )

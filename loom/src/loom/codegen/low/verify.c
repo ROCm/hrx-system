@@ -23,6 +23,7 @@
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/low/schedule_scope.h"
+#include "loom/ops/type_builders.h"
 #include "loom/target/function_version.h"
 #include "loom/target/registers.h"
 #include "loom/util/walk.h"
@@ -2172,9 +2173,20 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
   }
   if (loom_low_storage_reserve_isa(op) && op->parent_block != NULL &&
       op->parent_block->parent_region == function_state->body) {
-    IREE_RETURN_IF_ERROR(loom_low_storage_layout_accumulate_reservation(
-        function_state->state->module, op,
-        &function_state->storage_space_sizes));
+    if (!loom_low_storage_layout_accumulate_reservation(
+            function_state->state->module, op,
+            &function_state->storage_space_sizes)) {
+      const loom_storage_space_t space = loom_type_storage_space(
+          loom_module_value_type(function_state->state->module,
+                                 loom_low_storage_reserve_storage(op)));
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(function_state->function_name),
+          loom_param_string(loom_low_storage_type_space_name(space)),
+      };
+      return loom_low_verify_emit(function_state->state, op,
+                                  LOOM_ERR_TARGET_096, params,
+                                  IREE_ARRAYSIZE(params), NULL, 0);
+    }
   }
 
   loom_low_descriptor_packet_t packet = {0};
