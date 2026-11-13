@@ -21,6 +21,8 @@ extern "C" {
 struct loom_low_function_model_t;
 
 typedef struct loom_low_storage_transport_binding_t {
+  // Source transfer retained for target diagnostics after boundary folding.
+  const loom_op_t* op;
   // Function-local space projected by the target's invocation frame.
   uint8_t space;
   // The boundary transfers and clears this cell after reading all its aliases.

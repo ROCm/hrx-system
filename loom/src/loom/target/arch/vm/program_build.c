@@ -682,11 +682,6 @@ static iree_status_t loom_vm_program_build_functions(
       continue;
     }
     const iree_io_stream_pos_t offset = iree_io_stream_offset(stream);
-    if (offset > UINT32_MAX) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "VM bytecode offset exceeds u32");
-      continue;
-    }
     iree_vm_bytecode_v0_function_row_t row = {
         .callable_type_ordinal_u16 = entry->callable_ordinal,
         .bytecode_offset_u32 = (uint32_t)offset,
@@ -699,9 +694,18 @@ static iree_status_t loom_vm_program_build_functions(
     iree_arena_reset(scratch_arena);
     if (iree_status_is_ok(status) && function_accepted &&
         row.bytecode_length_u32 > UINT32_MAX - (uint32_t)offset) {
-      status = iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "VM aggregate function bytecode exceeds the u32 extent");
+      function_accepted = false;
+      loom_diagnostic_export_scope_t scope = {
+          .export_name = loom_target_facts_export_name(
+              entry->function_version
+                  ? entry->function_version->function_target_facts
+                  : NULL),
+          .target = diagnostic_emitter,
+      };
+      status = loom_target_artifact_emit_limit(
+          loom_diagnostic_export_scope_emitter(&scope), entry->function.op,
+          IREE_SV("VM"), IREE_SV("aggregate function bytecode length"),
+          (uint64_t)offset + row.bytecode_length_u32, UINT32_MAX);
     }
     if (iree_status_is_ok(status) && function_accepted) {
       rows[entry->ordinal] = row;

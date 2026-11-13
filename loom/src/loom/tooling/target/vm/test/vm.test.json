@@ -544,7 +544,7 @@
         "args": ["{srcdir}/../testdata/invalid_storage.loom", "--root=oversized", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
-      "stderr": {"contains": ["VM local storage exceeds 65535 bytes"]}
+      "stderr": {"contains": ["invalid_storage.loom:3:1: error [BACKEND/055] in export 'oversized': VM artifact requires at most 65535 bytes of local storage including call packets"]}
     },
     {
       "name": "rejects a narrow scalar spill that does not hold a complete value cell",
@@ -553,7 +553,7 @@
         "args": ["{srcdir}/../testdata/invalid_storage.loom", "--root=short", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
-      "stderr": {"contains": ["VM register transfer exceeds its storage span"]}
+      "stderr": {"contains": ["invalid_storage.loom:10:3: error [BACKEND/055] in export 'short': VM artifact requires a register transfer that fits within its storage span"]}
     },
     {
       "name": "rejects workgroup storage in a Core host function",
@@ -562,7 +562,7 @@
         "args": ["{srcdir}/../testdata/invalid_storage.loom", "--root=wrong_space", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
-      "stderr": {"contains": ["VM local storage requires stack or private space"]}
+      "stderr": {"contains": ["invalid_storage.loom:14:1: error [BACKEND/055] in export 'wrong_space': VM artifact requires stack or private local storage"]}
     }
   ]
 }
