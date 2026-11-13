@@ -19,6 +19,78 @@
 #include "loom/util/fact_relation.h"
 #include "loom/util/fact_vector_partition.h"
 
+struct loom_value_fact_definition_distributions_t {
+  // Uniform-scope ordinals; zero withdraws a definition's stronger proof.
+  uint8_t* scopes;
+  // Module-local value-ID span covered by scopes.
+  loom_value_fact_range_t range;
+};
+
+static uint8_t* loom_value_fact_table_definition_scope_entry(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  loom_value_fact_definition_distributions_t* definitions =
+      table->definition_distributions;
+  if (!definitions ||
+      !loom_value_fact_range_contains(definitions->range, value_id)) {
+    return NULL;
+  }
+  return &definitions->scopes[loom_value_fact_range_offset(definitions->range,
+                                                           value_id)];
+}
+
+loom_value_fact_uniform_scope_t loom_value_fact_table_definition_uniform_scope(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  const uint8_t* entry =
+      loom_value_fact_table_definition_scope_entry(table, value_id);
+  return entry ? (loom_value_fact_uniform_scope_t)*entry
+               : LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE;
+}
+
+loom_value_facts_t loom_value_fact_table_lookup_at(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_value_id_t value_id, const loom_op_t* observer) {
+  loom_value_facts_t facts = loom_value_fact_table_lookup(table, value_id);
+  const loom_value_fact_uniform_scope_t scope =
+      loom_value_fact_table_definition_uniform_scope(table, value_id);
+  if (scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
+    return facts;
+  }
+  const loom_value_t* value = loom_module_value(module, value_id);
+  const loom_block_t* definition = loom_value_is_block_arg(value)
+                                       ? loom_value_def_block(value)
+                                       : loom_value_def_op(value)->parent_block;
+  if (definition == observer->parent_block) {
+    loom_value_facts_mark_uniform_at_scope(&facts, scope);
+  } else if (definition->parent_region ==
+             observer->parent_block->parent_region) {
+    const loom_value_fact_cfg_region_t* region =
+        loom_value_fact_table_lookup_cfg_region(table,
+                                                definition->parent_region);
+    if (region && region->loops.reducible) {
+      // Builder inference can precede publication of a CFG edit. Only blocks
+      // owned by the retained snapshot have a cross-block observation proof.
+      const iree_host_size_t definition_index =
+          loom_cfg_graph_block_index(&region->graph, definition);
+      const iree_host_size_t observation_index =
+          loom_cfg_graph_block_index(&region->graph, observer->parent_block);
+      if (definition_index == IREE_HOST_SIZE_MAX ||
+          observation_index == IREE_HOST_SIZE_MAX) {
+        return facts;
+      }
+      const uint16_t loop = loom_cfg_loop_nest_innermost(
+          &region->loops, (uint16_t)definition_index);
+      // Verified SSA visibility supplies dominance. A use inside the same
+      // natural loop cannot combine values from different exits of that loop.
+      if (loop == LOOM_CFG_LOOP_NEST_NONE ||
+          loom_cfg_loop_nest_contains(&region->loops, loop,
+                                      (uint16_t)observation_index)) {
+        loom_value_facts_mark_uniform_at_scope(&facts, scope);
+      }
+    }
+  }
+  return facts;
+}
+
 loom_value_id_t loom_value_fact_table_lookup_inference_value(
     const loom_value_fact_table_t* table, loom_value_id_t value,
     loom_value_facts_t* out_facts) {
@@ -352,6 +424,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->regions.has_independent_targets = false;
   table->layout_origins = NULL;
   table->integer_casts = NULL;
+  table->definition_distributions = NULL;
   table->vector_partitions = NULL;
   table->select_dependencies.index = NULL;
   table->select_dependencies.pages = NULL;
@@ -934,6 +1007,38 @@ static void loom_value_fact_table_advance_generation(
   }
 }
 
+iree_status_t loom_value_fact_table_define_uniform_scope(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_fact_uniform_scope_t scope) {
+  uint8_t* entry =
+      loom_value_fact_table_definition_scope_entry(table, value_id);
+  if ((entry ? *entry : 0) == scope) {
+    return iree_ok_status();
+  }
+  if (!entry) {
+    if (!table->definition_distributions) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          table->transient_arena, sizeof(*table->definition_distributions),
+          (void**)&table->definition_distributions));
+      memset(table->definition_distributions, 0,
+             sizeof(*table->definition_distributions));
+    }
+    loom_value_fact_definition_distributions_t* definitions =
+        table->definition_distributions;
+    IREE_RETURN_IF_ERROR(loom_value_fact_range_grow(
+        table->transient_arena, value_id, sizeof(*definitions->scopes), NULL,
+        &definitions->range, (void**)&definitions->scopes));
+    entry = loom_value_fact_table_definition_scope_entry(table, value_id);
+  }
+  *entry = (uint8_t)scope;
+  if (table->replay.generation) {
+    loom_value_fact_table_advance_generation(table);
+    loom_value_fact_table_set_replay_generation(
+        table, value_id, table->replay.generation | UINT32_C(1));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
                                            loom_value_id_t value_id,
                                            loom_value_facts_t facts) {
@@ -941,7 +1046,14 @@ iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
   IREE_RETURN_IF_ERROR(loom_value_fact_table_touch(table, value_id));
   loom_value_facts_t* entry =
       loom_value_fact_table_mutable_entry(table, value_id);
-  if (table->replay.generation && !loom_value_facts_equal(*entry, facts)) {
+  uint8_t* definition_scope =
+      loom_value_fact_table_definition_scope_entry(table, value_id);
+  const bool clears_definition = definition_scope && *definition_scope != 0;
+  if (definition_scope) {
+    *definition_scope = 0;
+  }
+  if (table->replay.generation &&
+      (clears_definition || !loom_value_facts_equal(*entry, facts))) {
     loom_value_fact_table_advance_generation(table);
     // Loop arguments, seeds, and resets publish without evaluating an ordinary
     // equation. Its defining operation must establish this result before reuse.
@@ -960,6 +1072,11 @@ void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
   loom_value_fact_loop_replay_invalidate(table);
   loom_value_fact_integer_relations_undefine(table, value_id);
   loom_value_fact_table_clear_origins(table, value_id);
+  uint8_t* definition_scope =
+      loom_value_fact_table_definition_scope_entry(table, value_id);
+  if (definition_scope) {
+    *definition_scope = 0;
+  }
   if (table->vector_partitions) {
     loom_value_fact_table_clear_vector_partition(table, value_id);
   }

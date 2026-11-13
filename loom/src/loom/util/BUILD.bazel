@@ -617,6 +617,11 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "fact_uniformity_test",
+    src = "fact_uniformity_test.loom-test",
+)
+
+loom_check_test(
     name = "fact_remainder_test",
     src = "fact_remainder_test.loom-test",
 )

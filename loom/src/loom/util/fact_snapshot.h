@@ -32,6 +32,8 @@ typedef struct loom_value_fact_auxiliary_snapshot_t {
   loom_value_id_t identity;
   // Canonical set of transitive select-condition dependencies.
   loom_value_set_id_t selectors;
+  // Per-execution uniformity independent of conservative global distribution.
+  uint8_t definition_uniform_scope;
 } loom_value_fact_auxiliary_snapshot_t;
 
 // Captures value facts not represented in loom_value_facts_t. This performs

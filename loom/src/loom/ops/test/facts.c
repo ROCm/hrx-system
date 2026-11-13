@@ -200,6 +200,16 @@ iree_status_t loom_test_fact_subgroup_uniform_facts(
   return iree_ok_status();
 }
 
+iree_status_t loom_test_fact_observation_scope_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_exact_i64(
+      loom_value_facts_uniform_scope(loom_value_fact_table_lookup_at(
+          context->table, module, loom_op_const_operands(op)[0], op)));
+  return iree_ok_status();
+}
+
 iree_status_t loom_test_fact_workgroup_uniform_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,

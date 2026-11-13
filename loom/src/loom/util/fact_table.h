@@ -77,6 +77,8 @@ typedef struct loom_cfg_graph_t loom_cfg_graph_t;
 typedef struct loom_target_facts_t loom_target_facts_t;
 typedef struct loom_value_fact_loop_replay_t loom_value_fact_loop_replay_t;
 typedef struct loom_value_fact_loop_reads_t loom_value_fact_loop_reads_t;
+typedef struct loom_value_fact_definition_distributions_t
+    loom_value_fact_definition_distributions_t;
 
 enum {
   LOOM_VALUE_FACT_SEGMENT_SHIFT = 6,
@@ -277,6 +279,10 @@ struct loom_value_fact_table_t {
   // Sparse interpretations for conversions that can change numeric value.
   // Allocated only when inferred and released with the populated scope.
   loom_value_fact_integer_casts_t* integer_casts;
+
+  // Stronger per-execution uniformity, retained independently of global facts.
+  // Allocated only when temporal projection weakens a result's distribution.
+  loom_value_fact_definition_distributions_t* definition_distributions;
 
   // Region execution context and optional CFG structure retained by the fact
   // owner. Entries and buckets have transient scope lifetime.
@@ -646,6 +652,24 @@ static inline loom_value_facts_t loom_value_fact_table_lookup(
   }
   return *entry;
 }
+
+// Returns a retained per-execution uniform scope, or NONE when unavailable.
+loom_value_fact_uniform_scope_t loom_value_fact_table_definition_uniform_scope(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id);
+
+// Publishes one result's complete per-execution proof. NONE withdraws it.
+iree_status_t loom_value_fact_table_define_uniform_scope(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_fact_uniform_scope_t scope);
+
+// Projects distribution at a particular observation while preserving numeric
+// facts. The ordinary value-only lookup remains valid for every observation.
+// The verified SSA value must be visible at observer. Stronger proofs apply
+// inside the definition's block or natural loop, without crossing loop exits.
+// Cross-region and irreducible cross-block observations retain global facts.
+loom_value_facts_t loom_value_fact_table_lookup_at(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_value_id_t value_id, const loom_op_t* observer);
 
 // Resolves a referenced value in the active inference operation's scope.
 // Returns its numeric representative and writes the scoped numeric facts.

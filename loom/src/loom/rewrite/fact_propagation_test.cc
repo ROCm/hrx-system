@@ -906,6 +906,7 @@ TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
   loom_op_t* use = nullptr;
   IREE_ASSERT_OK(loom_test_use_build(&builder_, &allocation_id, 1,
                                      LOOM_LOCATION_UNKNOWN, &use));
+  loom_op_t* allocation_use = use;
   loom_op_t* nested_owner = nullptr;
   IREE_ASSERT_OK(loom_test_block_args_build(
       &builder_, nullptr, 0, LOOM_LOCATION_UNKNOWN, &nested_owner));
@@ -923,6 +924,7 @@ TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
       loom_buffer_alloca_result(nested_allocation);
   IREE_ASSERT_OK(loom_test_use_build(&builder_, &nested_id, 1,
                                      LOOM_LOCATION_UNKNOWN, &use));
+  loom_op_t* nested_use = use;
   loom_op_t* terminator = nullptr;
   IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
                                        LOOM_LOCATION_UNKNOWN, &terminator));
@@ -963,7 +965,25 @@ TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
           module_, buffer, facts, loom_value_fact_table_lookup(facts, compared),
           fresh, loom_value_fact_table_lookup(fresh, compared)))
           << "value " << compared;
+      EXPECT_EQ(loom_value_fact_table_definition_uniform_scope(facts, compared),
+                loom_value_fact_table_definition_uniform_scope(fresh, compared))
+          << "value " << compared;
     }
+    for (loom_op_t* observer : {allocation_use, nested_use}) {
+      const auto observed = loom_op_const_operands(observer)[0];
+      const auto local =
+          loom_value_fact_table_lookup_at(facts, module_, observed, observer);
+      EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(local));
+      EXPECT_EQ(loom_value_facts_uniform_scope(local),
+                loom_value_facts_uniform_scope(loom_value_fact_table_lookup_at(
+                    fresh, module_, observed, observer)));
+    }
+    // The same surviving definition can become an escaping observation when
+    // a backedge is restored. Its local proof must not leak across that exit.
+    EXPECT_EQ(loom_value_facts_uniform_scope(loom_value_fact_table_lookup_at(
+                  facts, module_, allocation_id, exit->last_op)),
+              loom_value_facts_uniform_scope(loom_value_fact_table_lookup_at(
+                  fresh, module_, allocation_id, exit->last_op)));
     EXPECT_EQ(loom_value_facts_is_workgroup_uniform(
                   loom_value_fact_table_lookup(facts, value)),
               expected_uniform);
