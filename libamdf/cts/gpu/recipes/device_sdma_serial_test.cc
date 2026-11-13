@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -255,38 +254,6 @@ void DeviceGeneratedSdmaSerialTest<DispatchTest>::RunDependentCopies() {
   std::array<uint32_t, kAllocationWordCount> observed_destination;
   std::array<uint32_t, kAllocationWordCount> observed_source;
   std::array<uint32_t, kAllocationWordCount> observed_control;
-  // Sample only after failed progress. Ring consumption, payload completion,
-  // and dispatch completion are distinct boundaries; none implies the others.
-  const auto progress = [&] {
-    std::ostringstream description;
-    const auto queue_progress = [&](const char* name,
-                                    const GpuUserQueue& queue) {
-      description << "\n  " << name << " read="
-                  << GpuLoadAcquire<uint64_t>(queue.host.read_index_address)
-                  << " write="
-                  << GpuLoadAcquire<uint64_t>(queue.host.write_index_address);
-      amdf_user_queue_status_t native = {
-          .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
-          .structure_size = sizeof(native),
-      };
-      const amdf_status_t query =
-          this->api_->user_queue_query_status(queue.queue, &native);
-      description << " status_query=" << query;
-      if (amdf_status_is_ok(query)) {
-        description << " state=" << native.state
-                    << " terminal_status=" << native.terminal_status;
-      }
-    };
-    queue_progress("SDMA bytes", *transfer);
-    description << "\n  completed copy="
-                << GpuLoadAcquire<uint32_t>(
-                       reinterpret_cast<uintptr_t>(completion))
-                << " expected=" << kRoundCount;
-    if constexpr (std::is_same_v<DispatchTest, AqlDispatchTest>) {
-      queue_progress("producer AQL packets", *producer.queue);
-    }
-    return description.str();
-  };
   if constexpr (std::is_same_v<DispatchTest, AqlDispatchTest>) {
     const auto dispatch = aql::Dispatch(
         aql::HeaderBarrier::kDisabled, {1, {1, 1, 1}, {1, 1, 1}},
@@ -300,7 +267,9 @@ void DeviceGeneratedSdmaSerialTest<DispatchTest>::RunDependentCopies() {
     auto& signal = *static_cast<aql::Signal*>(control->host.pointer);
     ASSERT_TRUE(
         GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signal.value), 0))
-        << progress();
+        << this->DescribeNativeProgress(
+               *transfer, reinterpret_cast<uintptr_t>(completion), kRoundCount,
+               expected_frontier, producer.queue);
   } else {
     ASSERT_GE(producer.queue->words().size(), 128u);
     Pm4CommandWriter commands(producer.queue->words().data(),
@@ -315,7 +284,9 @@ void DeviceGeneratedSdmaSerialTest<DispatchTest>::RunDependentCopies() {
                                                     commands.word_count()));
     ASSERT_TRUE(GpuWaitEqual<uint32_t>(
         reinterpret_cast<uintptr_t>(control->host.pointer), 1))
-        << progress();
+        << this->DescribeNativeProgress(
+               *transfer, reinterpret_cast<uintptr_t>(completion), kRoundCount,
+               expected_frontier, nullptr);
     this->RecordProperty("device_sdma_pm4_command_bytes",
                          commands.word_count() * sizeof(uint32_t));
   }

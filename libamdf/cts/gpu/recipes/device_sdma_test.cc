@@ -247,7 +247,12 @@ TEST_P(DeviceGeneratedSdmaBatchTest, SeparateCommandAndPayloadCredits) {
   GpuStoreRelease(producer->host.write_index_address, packet_index + 1);
   ASSERT_TRUE(aql::Publish(*producer, packet_index++, dispatch));
   ASSERT_TRUE(
-      GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signal.value), 0));
+      GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signal.value), 0))
+      << DescribeNativeProgress(
+             *transfer, reinterpret_cast<uintptr_t>(completion),
+             test_case.round_count, frontiers.back(), producer)
+      << "\n  first batch end="
+      << frontiers[std::min(test_case.round_count, kBatchSize)];
   std::memcpy(observed_records.data(), records->host.pointer,
               record_byte_length);
   std::memcpy(observed_destination.data(), destination->host.pointer,

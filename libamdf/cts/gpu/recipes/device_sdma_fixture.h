@@ -7,6 +7,8 @@
 #ifndef AMDF_CTS_GPU_RECIPES_DEVICE_SDMA_FIXTURE_H_
 #define AMDF_CTS_GPU_RECIPES_DEVICE_SDMA_FIXTURE_H_
 
+#include <string>
+
 #include "libamdf/cts/gpu/aql/dispatch_fixture.h"
 #include "libamdf/cts/gpu/pm4/dispatch_fixture.h"
 
@@ -37,6 +39,13 @@ class DeviceSdmaTest : public DispatchTest {
 
   void QueryDownloadCacheFlags(GpuMemory* output, GpuMemory* readback,
                                uint32_t* out_flags);
+
+  // Describes independent native progress boundaries after a failed join.
+  std::string DescribeNativeProgress(const GpuUserQueue& transfer_queue,
+                                     uint64_t completion_address,
+                                     uint32_t expected_completion,
+                                     uint64_t expected_write_index,
+                                     const GpuUserQueue* producer_queue) const;
 
   // Exact transfer family selected before borrowing the cached native device.
   amdf_queue_family_info_t sdma_family_ = {};
