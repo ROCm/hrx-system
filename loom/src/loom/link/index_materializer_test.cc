@@ -1737,26 +1737,9 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
         TryMaterializeWithOptions(index.get(), &options, &materialization));
     Verify(materialization.product.module);
 
-    ASSERT_EQ(materialization.product.target_sources.count,
-              loom_link_module_index_module_count(index.get()));
-    for (iree_host_size_t i = 0;
-         i < materialization.product.target_sources.count; ++i) {
-      const auto* input = loom_link_module_index_module_at(index.get(), i);
-      const auto& sources = materialization.product.target_sources.values[i];
-      if (!input->materialized_module) {
-        EXPECT_EQ(sources.count, 0u);
-        continue;
-      }
-      ASSERT_EQ(sources.count, input->materialized_module->sources.count);
-      for (iree_host_size_t j = 0; j < sources.count; ++j) {
-        ASSERT_LT(sources.values[j],
-                  materialization.product.module->sources.count);
-        EXPECT_TRUE(iree_string_view_equal(
-            input->materialized_module->sources.entries[j],
-            materialization.product.module->sources
-                .entries[sources.values[j]]));
-      }
-    }
+    // This embedding supplies no source snapshots. Recorded locations remain
+    // in the linked IR without allocating a snapshot table.
+    EXPECT_EQ(materialization.product.sources.count, 0u);
 
     EXPECT_EQ(loom_link_plan_symbol_count(materialization.plan), 10u);
     EXPECT_EQ(materialization.product.module->symbols.count, 7u);

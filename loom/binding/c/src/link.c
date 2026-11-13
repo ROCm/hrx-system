@@ -430,93 +430,18 @@ static void loomc_link_module_overlay_deinitialize(
   *overlay = (loomc_link_module_overlay_t){0};
 }
 
-static loomc_status_t loomc_link_capture_source_table(
-    const loom_source_table_resolver_t* source_table,
-    const loom_link_source_projection_t* projection,
+// Copies the source-ID-indexed snapshots retained while linking. Source bytes
+// remain borrowed until this final transfer into the public module's storage.
+static loomc_status_t loomc_link_capture_source_snapshots(
+    const loom_source_table_resolver_t* sources,
     loomc_module_t* target_module) {
-  for (iree_host_size_t i = 0; i < source_table->count; ++i) {
-    const loom_source_entry_t* entry = &source_table->entries[i];
+  for (iree_host_size_t i = 0; i < sources->count; ++i) {
+    const loom_source_entry_t* entry = &sources->entries[i];
     if (entry->source_id == LOOM_SOURCE_ID_INVALID) {
       continue;
     }
-    IREE_ASSERT_LT(entry->source_id, projection->count);
-    const loom_source_id_t target_source_id =
-        projection->values[entry->source_id];
-    if (target_source_id == LOOM_SOURCE_ID_INVALID) {
-      continue;
-    }
     LOOMC_RETURN_IF_ERROR(loomc_module_insert_source_snapshot(
-        target_module, target_source_id, entry->filename, entry->source));
-  }
-  return loomc_ok_status();
-}
-
-// Copies exact source snapshots through the source-ID projection produced by
-// linking. Bytecode providers have no source projection because their container
-// does not carry authored source contents.
-static loomc_status_t loomc_link_capture_source_snapshots(
-    loomc_context_t* context, const loomc_link_index_t* link_index,
-    const loomc_link_module_provider_t* module_providers,
-    loomc_host_size_t module_provider_count,
-    const loomc_link_module_overlay_t* overlay,
-    const loom_link_plan_materialization_t* materialization,
-    loomc_module_t* target_module) {
-  if (loomc_context_source_retention(context) ==
-      LOOMC_SOURCE_RETENTION_METADATA_ONLY) {
-    return loomc_ok_status();
-  }
-
-  for (iree_host_size_t i = 0; i < materialization->target_sources.count; ++i) {
-    const loom_link_source_projection_t* projection =
-        &materialization->target_sources.values[i];
-    if (projection->count == 0) {
-      continue;
-    }
-    const loom_link_module_index_module_t* indexed_module =
-        loom_link_module_index_module_at(overlay->module_index, i);
-    if (indexed_module == NULL || indexed_module->materialized_module == NULL) {
-      continue;
-    }
-
-    if (indexed_module->provider_ordinal >= overlay->base_provider_count) {
-      const iree_host_size_t provider_index =
-          indexed_module->provider_ordinal - overlay->base_provider_count;
-      IREE_ASSERT_LT(provider_index, module_provider_count);
-      LOOMC_RETURN_IF_ERROR(loomc_link_capture_source_table(
-          loomc_module_source_table(module_providers[provider_index].module),
-          projection, target_module));
-      continue;
-    }
-
-    const loomc_module_t* snapshot = loomc_link_index_module_for_provider(
-        link_index, indexed_module->provider_ordinal);
-    if (snapshot != NULL) {
-      LOOMC_RETURN_IF_ERROR(loomc_link_capture_source_table(
-          loomc_module_source_table(snapshot), projection, target_module));
-      continue;
-    }
-
-    const loomc_source_t* source = loomc_link_index_source_for_provider(
-        link_index, indexed_module->provider_ordinal);
-    if (source == NULL) {
-      continue;
-    }
-
-    if (indexed_module->primary_source_id == LOOM_SOURCE_ID_INVALID) {
-      continue;
-    }
-    const loom_source_id_t target_source_id =
-        projection->values[indexed_module->primary_source_id];
-    if (target_source_id == LOOM_SOURCE_ID_INVALID) {
-      continue;
-    }
-    const iree_string_view_t identifier =
-        iree_string_view_from_loomc(loomc_source_identifier(source));
-    const loomc_byte_span_t contents = loomc_source_contents(source);
-    LOOMC_RETURN_IF_ERROR(loomc_module_insert_source_snapshot(
-        target_module, target_source_id, identifier,
-        iree_make_string_view((const char*)contents.data,
-                              contents.data_length)));
+        target_module, entry->source_id, entry->filename, entry->source));
   }
   return loomc_ok_status();
 }
@@ -801,6 +726,12 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
               : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
   };
 
+  materialization_state.composition.sources.module_providers =
+      options->module_providers;
+  materialization_state.composition.sources.module_provider_base =
+      overlay.base_provider_count;
+  materialization_state.composition.sources.module_provider_count =
+      options->module_provider_count;
   const loom_link_plan_materialization_environment_t environment =
       loomc_link_materialization_state_environment(&materialization_state);
   loomc_host_size_t before_diagnostics = loomc_result_diagnostic_count(result);
@@ -827,9 +758,7 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_link_capture_source_snapshots(
-        linker->context, options->link_index, options->module_providers,
-        options->module_provider_count, &overlay,
-        &index_materialization.product, module);
+        &index_materialization.product.sources, module);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     loomc_module_set_loom_module(module, index_materialization.product.module,

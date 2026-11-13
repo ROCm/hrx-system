@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/error/diagnostic.h"
+#include "loom/error/source.h"
 #include "loom/format/low_repr.h"
 #include "loom/link/module_index.h"
 
@@ -25,6 +26,13 @@ typedef struct loom_link_plan_materialization_t
 // Returns the diagnostic sink for one indexed bytecode provider.
 typedef loom_diagnostic_sink_t (*loom_link_plan_diagnostic_sink_fn_t)(
     void* user_data, const loom_link_module_index_provider_t* provider);
+
+// Returns one borrowed exact snapshot by indexed input identity. An invalid
+// source ID denotes unavailable text. Returned strings outlive materialization
+// and its output's borrowed source table.
+typedef loom_source_entry_t (*loom_link_plan_source_entry_fn_t)(
+    void* user_data, const loom_link_module_index_module_t* module,
+    loom_source_id_t source_id);
 
 // Applies caller-owned specialization to a newly linked module.
 //
@@ -55,9 +63,11 @@ typedef struct loom_link_plan_materialization_environment_t {
   loom_link_plan_diagnostic_sink_fn_t diagnostic_sink;
   // Structured link-contract diagnostics, independent of semantic acceptance.
   iree_diagnostic_emitter_t diagnostic_emitter;
+  // Optional indexed snapshot lookup. NULL omits all snapshot row storage.
+  loom_link_plan_source_entry_fn_t source_entry;
   // Optional caller-owned specialization applied to the linked output.
   loom_link_plan_prepare_module_fn_t prepare_module;
-  // User data passed to diagnostic_sink and prepare_module.
+  // User data passed to diagnostic_sink, source_entry, and prepare_module.
   void* user_data;
   // Host allocator for transient readers, link state, and the output module.
   iree_allocator_t allocator;

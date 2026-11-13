@@ -13,43 +13,8 @@
 #include "loom/link/kernel_config_materializer.h"
 #include "loom/link/linker.h"
 #include "loom/link/plan_projection.h"
+#include "loom/link/source_snapshots.h"
 #include "loom/ops/op_defs.h"
-
-// Per-add source identity, retained before the linker releases its scratch map.
-typedef struct loom_link_plan_source_capture_t {
-  // Original indexed module currently being materialized.
-  const loom_link_module_index_module_t* input;
-  // Original-to-intermediate source IDs for a kernel projection, if present.
-  const loom_source_id_t* projected_sources;
-  // Final source correspondence indexed by index module ordinal.
-  loom_link_source_projection_t* projections;
-  // Product arena owning the final source correspondence.
-  iree_arena_allocator_t* arena;
-} loom_link_plan_source_capture_t;
-
-static iree_status_t loom_link_plan_capture_sources(
-    void* user_data, const loom_module_t* source_module,
-    const loom_module_t* target_module,
-    const loom_source_id_t* target_sources) {
-  loom_link_plan_source_capture_t* capture = user_data;
-  const loom_module_t* original = capture->input->materialized_module;
-  if (!original || original->sources.count == 0) {
-    return iree_ok_status();
-  }
-  loom_source_id_t* values = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(capture->arena, original->sources.count,
-                                sizeof(*values), (void**)&values));
-  for (iree_host_size_t i = 0; i < original->sources.count; ++i) {
-    values[i] = target_sources[capture->projected_sources
-                                   ? capture->projected_sources[i]
-                                   : i];
-  }
-  capture->projections[capture->input->ordinal] =
-      (loom_link_source_projection_t){.values = values,
-                                      .count = original->sources.count};
-  return iree_ok_status();
-}
 
 static loom_diagnostic_sink_t loom_link_plan_materialization_diagnostic_sink(
     const loom_link_plan_materialization_environment_t* environment,
@@ -193,7 +158,7 @@ static iree_status_t loom_link_plan_materialize_module(
     iree_host_size_t* target_source_definitions,
     loom_symbol_ref_t* target_template_families,
     loom_symbol_ref_t* target_kernel_configurations, loom_linker_t* linker,
-    loom_link_plan_source_capture_t* source_capture, bool* out_accepted) {
+    loom_link_source_snapshots_t* source_capture, bool* out_accepted) {
   *out_accepted = false;
   const loom_link_module_index_module_t* module = selection->source_module;
   source_capture->input = module;
@@ -351,7 +316,7 @@ static iree_status_t loom_link_plan_materialize_modules(
     iree_host_size_t* target_source_definitions,
     loom_symbol_ref_t* target_template_families,
     loom_symbol_ref_t* target_kernel_configurations, loom_linker_t* linker,
-    loom_link_plan_source_capture_t* source_capture, bool* out_accepted) {
+    loom_link_source_snapshots_t* source_capture, bool* out_accepted) {
   *out_accepted = true;
   const iree_host_size_t max_module_symbol_count =
       projection->maximum_materialized_symbol_count;
@@ -449,23 +414,19 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
     }
   }
 
-  const iree_host_size_t module_count =
-      loom_link_module_index_module_count(index);
-  loom_link_source_projection_t* source_projections = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(product_arena, module_count,
-                                                 sizeof(*source_projections),
-                                                 (void**)&source_projections));
-  memset(source_projections, 0, module_count * sizeof(*source_projections));
-  loom_link_plan_source_capture_t source_capture = {
-      .projections = source_projections,
-      .arena = product_arena,
-  };
+  loom_link_source_snapshots_t source_capture;
+  IREE_RETURN_IF_ERROR(loom_link_source_snapshots_initialize(
+      index, &module_projection, environment, scratch_arena, product_arena,
+      &source_capture));
 
   const loom_linker_options_t linker_options = {
       .module_name = module_name,
       .planned_symbol_capacity = planned_symbol_capacity,
-      .diagnostic_emitter = environment->diagnostic_emitter,
-      .source_callback = {.fn = loom_link_plan_capture_sources,
+      .diagnostic_emitter = {.fn = loom_link_source_snapshots_emit,
+                             .user_data = &source_capture},
+      .source_callback = {.fn = environment->source_entry
+                                    ? loom_link_source_snapshots_capture
+                                    : NULL,
                           .user_data = &source_capture},
   };
   loom_linker_t* linker = NULL;
@@ -492,8 +453,7 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
     return status;
   }
   out_materialization->module = output_module;
-  out_materialization->target_sources.values = source_projections;
-  out_materialization->target_sources.count = module_count;
+  out_materialization->sources = source_capture.target;
   out_materialization->target_symbols.values = target_symbols;
   out_materialization->target_symbols.count = index_symbol_count;
   out_materialization->target_source_definitions.values =
@@ -512,6 +472,7 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
         environment->user_data, index, environment->block_pool,
         environment->allocator, out_materialization, &accepted);
   }
+  out_materialization->sources.module = out_materialization->module;
   if (iree_status_is_ok(status) && accepted &&
       target_kernel_configurations != NULL) {
     output_module = out_materialization->module;

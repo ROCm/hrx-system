@@ -37,13 +37,15 @@ typedef struct loom_linker_t loom_linker_t;
 // scratch storage is released. The array is indexed by source-module source
 // ID and has source_module->sources.count entries. Callers can retain external
 // source snapshots using this mapping; neither the array nor the source module
-// is retained by the linker. Allocation or conflicting source snapshots may
-// fail the add through this callback.
+// is retained by the linker. A consumer may diagnose conflicting snapshots and
+// reject the add through |out_accepted|. Status carries infrastructure failure.
 typedef struct loom_linker_source_callback_t {
-  // Optional callback invoked after successfully cloning each input module.
+  // Optional callback invoked after remapping source IDs and before cloning
+  // any input operations, so their diagnostics can resolve exact snapshots.
   iree_status_t (*fn)(void* user_data, const loom_module_t* source_module,
                       const loom_module_t* target_module,
-                      const loom_source_id_t* target_sources);
+                      const loom_source_id_t* target_sources,
+                      bool* out_accepted);
   // Caller-owned state that remains valid until the linker is freed.
   void* user_data;
 } loom_linker_source_callback_t;

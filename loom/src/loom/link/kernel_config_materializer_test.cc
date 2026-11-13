@@ -515,24 +515,7 @@ kernel.def retain target(@dispatch_target) export("native_rows") linkage(dso_loc
         configuration_module(configuration_materialization.module,
                              loom_module_free);
     Verify(configuration_module.get());
-    ASSERT_EQ(configuration_materialization.target_sources.count, 1u);
-    const auto& source_projection =
-        configuration_materialization.target_sources.values[0];
-    const auto* indexed_module =
-        loom_link_module_index_module_at(index.get(), 0)->materialized_module;
-    if (indexed_module) {
-      ASSERT_EQ(source_projection.count, indexed_module->sources.count);
-      for (iree_host_size_t i = 0; i < source_projection.count; ++i) {
-        ASSERT_LT(source_projection.values[i],
-                  configuration_module->sources.count);
-        EXPECT_TRUE(
-            iree_string_view_equal(indexed_module->sources.entries[i],
-                                   configuration_module->sources
-                                       .entries[source_projection.values[i]]));
-      }
-    } else {
-      EXPECT_EQ(source_projection.count, 0u);
-    }
+    EXPECT_EQ(configuration_materialization.sources.count, 0u);
     ASSERT_EQ(configuration_module->symbols.count, 3u);
     const loom_symbol_ref_t configuration_kernel =
         configuration_materialization.target_symbols.values[kernel->ordinal];

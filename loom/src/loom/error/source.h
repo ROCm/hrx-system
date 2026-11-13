@@ -107,14 +107,6 @@ typedef struct loom_source_storage_t {
   iree_host_size_t capacity;
 } loom_source_storage_t;
 
-// Copies one link input's source snapshots into target-owned storage.
-typedef struct loom_source_storage_projection_t {
-  // Input snapshots borrowed for the duration of the linker callback.
-  const loom_source_table_resolver_t* source;
-  // Destination storage owned by the linked module.
-  loom_source_storage_t* target;
-} loom_source_storage_projection_t;
-
 // Initializes empty owned source storage using |allocator|.
 void loom_source_storage_initialize(iree_allocator_t allocator,
                                     loom_source_storage_t* out_storage);
@@ -123,18 +115,13 @@ void loom_source_storage_initialize(iree_allocator_t allocator,
 void loom_source_storage_deinitialize(loom_source_storage_t* storage);
 
 // Copies a source snapshot into |storage| at a module-owned source ID.
-// Repeated admission of the same identity requires identical name and bytes.
+// The producer owns source identity: repeated insertion names the same
+// snapshot. Linking admits cross-input snapshot conflicts before publishing
+// this storage.
 iree_status_t loom_source_storage_insert(loom_source_storage_t* storage,
                                          loom_source_id_t source_id,
                                          iree_string_view_t filename,
                                          iree_string_view_t source);
-
-// Linker source callback for a loom_source_storage_projection_t. Copies
-// snapshots through the producer-owned source correspondence. Inputs without
-// snapshots allocate nothing; invalid target IDs represent omitted sources.
-iree_status_t loom_source_storage_project(
-    void* user_data, const loom_module_t* source_module,
-    const loom_module_t* target_module, const loom_source_id_t* target_sources);
 
 // Returns a resolver borrowing |storage| and its source snapshots.
 loom_source_resolver_t loom_source_storage_resolver(
@@ -147,7 +134,8 @@ loom_source_resolver_t loom_source_storage_resolver(
 iree_status_t loom_source_table_project(void* user_data,
                                         const loom_module_t* source_module,
                                         const loom_module_t* target_module,
-                                        const loom_source_id_t* target_sources);
+                                        const loom_source_id_t* target_sources,
+                                        bool* out_accepted);
 
 // Resolves file locations against a loom_source_table_resolver_t passed as
 // |user_data|. Other modules, unknown, non-file, and missing sources return

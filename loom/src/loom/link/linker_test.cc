@@ -1184,10 +1184,11 @@ TEST_F(LinkerTest, PublishesCompleteSourceMappingWithoutLocations) {
   const loom_linker_options_t options = {
       .source_callback =
           {
-              .fn =
-                  [](void* user_data, const loom_module_t* source,
-                     const loom_module_t* target,
-                     const loom_source_id_t* target_sources) -> iree_status_t {
+              .fn = [](void* user_data, const loom_module_t* source,
+                       const loom_module_t* target,
+                       const loom_source_id_t* target_sources,
+                       bool* out_accepted) -> iree_status_t {
+                *out_accepted = true;
                 EXPECT_EQ(source->sources.count, 1u);
                 EXPECT_EQ(target->sources.count, 1u);
                 EXPECT_NE(target_sources, nullptr);

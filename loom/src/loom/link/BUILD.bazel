@@ -284,7 +284,26 @@ loom_cc_library(
     deps = [
         ":module_index",
         "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:source",
         "//loom/src/loom/format:low_repr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "source_snapshots",
+    srcs = ["source_snapshots.c"],
+    hdrs = ["source_snapshots.h"],
+    deps = [
+        ":materialization_environment",
+        ":module_index",
+        ":plan_projection",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/error:source",
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -300,7 +319,9 @@ loom_cc_library(
         ":materialization_environment",
         ":plan_projection",
         ":planner",
+        ":source_snapshots",
         "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:source",
         "//loom/src/loom/format:low_repr",
         "//loom/src/loom/format/bytecode:reader",
         "//loom/src/loom/format/bytecode:selected_reader",

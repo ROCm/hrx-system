@@ -253,6 +253,15 @@ ERR_SYMBOL_018 = ErrorDef(
     params=(),
 )
 
+ERR_SYMBOL_019 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=19,
+    severity=Severity.ERROR,
+    summary="Linked source snapshots disagree.",
+    message="linked inputs contain different source contents for '{filename}'",
+    params=(ErrorParam("filename", ParamKind.STRING),),
+)
+
 ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_001,
     ERR_SYMBOL_002,
@@ -272,4 +281,5 @@ ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_016,
     ERR_SYMBOL_017,
     ERR_SYMBOL_018,
+    ERR_SYMBOL_019,
 )

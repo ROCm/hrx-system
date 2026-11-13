@@ -613,8 +613,12 @@ static iree_status_t loom_linker_capture_sources(loom_linker_source_t* source) {
   loom_ir_remap_t* remap = NULL;
   IREE_RETURN_IF_ERROR(loom_linker_get_source_remap(source, &remap));
   IREE_RETURN_IF_ERROR(loom_ir_remap_sources(remap));
-  return callback.fn(callback.user_data, source->module,
-                     source->linker->target_module, remap->target_sources);
+  bool accepted = false;
+  iree_status_t status = callback.fn(callback.user_data, source->module,
+                                     source->linker->target_module,
+                                     remap->target_sources, &accepted);
+  source->linker->rejected |= !accepted;
+  return status;
 }
 
 static bool loom_link_op_symbol_ref(const loom_module_t* module,
@@ -1788,10 +1792,10 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
     status = loom_linker_resolve_live_symbols(&source);
   }
   if (iree_status_is_ok(status) && !linker->rejected) {
-    status = loom_linker_clone_module_body(&source);
-  }
-  if (iree_status_is_ok(status)) {
     status = loom_linker_capture_sources(&source);
+  }
+  if (iree_status_is_ok(status) && !linker->rejected) {
+    status = loom_linker_clone_module_body(&source);
   }
   iree_arena_deinitialize(&source_arena);
   return status;
@@ -1950,7 +1954,10 @@ static iree_status_t loom_linker_add_exact_selection(
         &source, source_symbol_id, &source.target_symbols[i], &target_ref);
   }
 
-  if (iree_status_is_ok(status) && selection.dense) {
+  if (iree_status_is_ok(status)) {
+    status = loom_linker_capture_sources(&source);
+  }
+  if (iree_status_is_ok(status) && !linker->rejected && selection.dense) {
     const loom_block_t* source_block =
         loom_region_const_entry_block(source_module->body);
     for (const loom_op_t* source_op = source_block->first_op;
@@ -1969,13 +1976,10 @@ static iree_status_t loom_linker_add_exact_selection(
                                              /*before_op=*/NULL, &cloned_op);
       }
     }
-  } else if (iree_status_is_ok(status)) {
+  } else if (iree_status_is_ok(status) && !linker->rejected) {
     status = loom_linker_clone_exact_symbol_ops(&source);
   }
 
-  if (iree_status_is_ok(status)) {
-    status = loom_linker_capture_sources(&source);
-  }
   iree_arena_deinitialize(&source_arena);
   return status;
 }

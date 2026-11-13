@@ -1802,50 +1802,108 @@ func.def public @broken(%x: i32) -> (i32) {
 }
 
 TEST(LinkTest, DuplicatePublicDefinitionsProduceFailedResult) {
-  ContextPtr context = CreateContext(LOOMC_SOURCE_RETENTION_METADATA_ONLY);
-  BuilderPtr builder = CreateBuilder(context.get());
-  SourcePtr first = CreateTextSource("first.loom", R"(
+  for (loomc_source_retention_t retention : {
+           LOOMC_SOURCE_RETENTION_EXACT,
+           LOOMC_SOURCE_RETENTION_METADATA_ONLY,
+       }) {
+    SCOPED_TRACE(retention);
+    ContextPtr context = CreateContext(retention);
+    BuilderPtr builder = CreateBuilder(context.get());
+    SourcePtr first = CreateTextSource("first.loom", R"(
 func.def public @entry(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )");
-  SourcePtr second = CreateTextSource("second.loom", R"(
+    SourcePtr second = CreateTextSource("second.loom", R"(
 func.def public @entry(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )");
-  AddSource(builder.get(), first.get(), "first",
-            LOOMC_LINK_PROVIDER_ROLE_INPUT);
-  AddSource(builder.get(), second.get(), "second",
-            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+    AddSource(builder.get(), first.get(), "first",
+              LOOMC_LINK_PROVIDER_ROLE_INPUT);
+    AddSource(builder.get(), second.get(), "second",
+              LOOMC_LINK_PROVIDER_ROLE_INPUT);
 
-  LinkIndexPtr link_index;
-  FinishIndex(builder.get(), &link_index);
-  LinkerPtr linker = CreateLinker(context.get());
-  WorkspacePtr workspace = CreateWorkspace();
-  ResultPtr result;
-  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
-                               nullptr, &result);
+    LinkIndexPtr link_index;
+    FinishIndex(builder.get(), &link_index);
+    LinkerPtr linker = CreateLinker(context.get());
+    WorkspacePtr workspace = CreateWorkspace();
+    ResultPtr result;
+    ModulePtr module = LinkIndex(linker.get(), workspace.get(),
+                                 link_index.get(), nullptr, &result);
 
-  EXPECT_EQ(module.get(), nullptr);
-  ASSERT_FALSE(loomc_result_succeeded(result.get()));
-  ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
-  const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
-  EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/005");
-  ASSERT_NE(diagnostic->range.source, nullptr);
-  EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
-            "second.loom");
-  EXPECT_EQ(diagnostic->range.start_line, 2u);
-  EXPECT_EQ(diagnostic->range.start_column, 1u);
-  EXPECT_EQ(diagnostic->range.end_line, 4u);
-  EXPECT_EQ(loomc_source_contents(diagnostic->range.source).data_length, 0u);
-  ASSERT_EQ(diagnostic->related_location_count, 1u);
-  const auto& previous = diagnostic->related_locations[0].range;
-  ASSERT_NE(previous.source, nullptr);
-  EXPECT_EQ(ToString(loomc_source_identifier(previous.source)), "first.loom");
-  EXPECT_EQ(previous.start_line, 2u);
-  EXPECT_EQ(previous.start_column, 1u);
-  EXPECT_EQ(previous.end_line, 4u);
+    first.reset();
+    second.reset();
+    builder.reset();
+    link_index.reset();
+    EXPECT_EQ(module.get(), nullptr);
+    ASSERT_FALSE(loomc_result_succeeded(result.get()));
+    ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+    const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+    EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/005");
+    ASSERT_NE(diagnostic->range.source, nullptr);
+    EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+              "second.loom");
+    EXPECT_EQ(diagnostic->range.start_line, 2u);
+    EXPECT_EQ(diagnostic->range.start_column, 1u);
+    EXPECT_EQ(diagnostic->range.end_line, 4u);
+    EXPECT_EQ(loomc_source_contents(diagnostic->range.source).data_length != 0,
+              retention == LOOMC_SOURCE_RETENTION_EXACT);
+    ASSERT_EQ(diagnostic->related_location_count, 1u);
+    const auto& previous = diagnostic->related_locations[0].range;
+    ASSERT_NE(previous.source, nullptr);
+    EXPECT_EQ(ToString(loomc_source_identifier(previous.source)), "first.loom");
+    EXPECT_EQ(previous.start_line, 2u);
+    EXPECT_EQ(previous.start_column, 1u);
+    EXPECT_EQ(previous.end_line, 4u);
+    EXPECT_EQ(loomc_source_contents(previous.source).data_length != 0,
+              retention == LOOMC_SOURCE_RETENTION_EXACT);
+  }
+}
+
+TEST(LinkTest, ConflictingSourceSnapshotsRejectBeforePublication) {
+  for (loomc_source_retention_t retention : {
+           LOOMC_SOURCE_RETENTION_EXACT,
+           LOOMC_SOURCE_RETENTION_METADATA_ONLY,
+       }) {
+    SCOPED_TRACE(retention);
+    ContextPtr context = CreateContext(retention);
+    BuilderPtr builder = CreateBuilder(context.get());
+    SourcePtr first = CreateTextSource("input.loom", R"(
+func.def public @first(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+    SourcePtr second = CreateTextSource("input.loom", R"(
+func.def public @second(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+    AddSource(builder.get(), first.get(), "first",
+              LOOMC_LINK_PROVIDER_ROLE_INPUT);
+    AddSource(builder.get(), second.get(), "second",
+              LOOMC_LINK_PROVIDER_ROLE_INPUT);
+    LinkIndexPtr index;
+    FinishIndex(builder.get(), &index);
+    LinkerPtr linker = CreateLinker(context.get());
+    WorkspacePtr workspace = CreateWorkspace();
+    ResultPtr result;
+    ModulePtr module =
+        LinkIndex(linker.get(), workspace.get(), index.get(), nullptr, &result);
+    if (retention == LOOMC_SOURCE_RETENTION_METADATA_ONLY) {
+      EXPECT_TRUE(loomc_result_succeeded(result.get()));
+      EXPECT_NE(module.get(), nullptr);
+    } else {
+      EXPECT_EQ(module.get(), nullptr);
+      ASSERT_FALSE(loomc_result_succeeded(result.get()));
+      ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+      const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+      EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/019");
+      EXPECT_EQ(diagnostic->range.source, nullptr);
+      EXPECT_NE(ToString(diagnostic->message).find("input.loom"),
+                std::string::npos);
+    }
+  }
 }
 
 TEST(LinkTest, SourceRetentionProjectsOnlySelectedTextProviders) {
