@@ -15,6 +15,7 @@
 #include "iree/async/event.h"
 #include "iree/async/proactor_platform.h"
 #include "iree/hal/cts/util/profile_test_util.h"
+#include "iree/hal/driver/amd/gpu/kernarg.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/signal.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/state.h"
 #include "iree/hal/driver/amd/gpu/queue/byte_storage_pool.h"
@@ -26,7 +27,7 @@ namespace {
 // Publication, capture ownership, and native timelines are real. Only the
 // device-owned ring and completion allocations are supplied by the fixture.
 class AqlPublicationTest
-    : public ::testing::TestWithParam<std::tuple<int, bool>> {
+    : public ::testing::TestWithParam<std::tuple<int, bool, bool>> {
  protected:
   struct Signals {
     // Stable queue identity consumed by dependency admission.
@@ -72,6 +73,16 @@ class AqlPublicationTest
     iree_hal_amd_gpu_aql_ring_initialize(
         packets_.data(), 0x10000, packets_.size(), &read_index_, &write_index_,
         &doorbell_, AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &queue_.producer.ring);
+    if (std::get<2>(GetParam())) {
+      queue_.storage.capabilities =
+          AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION;
+      queue_.storage.host_publish_executor =
+          AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT;
+      queue_.storage.host_publish_fence = IREE_HAL_HOST_CACHE_FENCE_X86_SFENCE;
+      queue_.producer.ring.host_publish_executor =
+          AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT;
+      queue_.producer.argument_streaming = true;
+    }
     iree_hal_amd_gpu_capture_pool_initialize(512, iree_allocator_system(),
                                              &queue_.captures);
     function_.base.metadata = &metadata_;
@@ -102,6 +113,7 @@ class AqlPublicationTest
       iree_hal_amd_gpu_signal_release(action.signal);
       iree_hal_amd_gpu_aql_submission_release(action.submission);
     }
+    iree_hal_amd_gpu_kernarg_layout_free(cooperative_layout_);
     for (auto* semaphore : semaphores_) {
       iree_hal_semaphore_release(semaphore);
     }
@@ -247,6 +259,9 @@ class AqlPublicationTest
   iree_hal_amd_gpu_metadata_kernel_t metadata_ = {};
   // Empty native argument layout.
   iree_hal_amd_gpu_kernarg_layout_t layout_ = {.alignment = 1};
+  // Metadata-derived cooperative ABI, retained through captured work
+  // retirement.
+  iree_hal_amd_gpu_kernarg_layout_t* cooperative_layout_ = nullptr;
   // Placed descriptor used by actual dispatch encoding.
   iree_hal_amd_gpu_aql_function_t function_ = {};
   // Admitted ordinary raw-native launch.
@@ -422,7 +437,8 @@ TEST_P(AqlPublicationTest, FullRunHasOnePhysicalCompletionAcrossEightGroups) {
 }
 
 TEST_P(AqlPublicationTest, TerminalReleaseSharesTheUnpublishedFinalDispatch) {
-  const auto [release_kind, multiple_packets] = GetParam();
+  const int release_kind = std::get<0>(GetParam());
+  const bool multiple_packets = std::get<1>(GetParam());
   const uint32_t terminal_release =
       release_kind ? IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM : 1u << 11;
   const uint32_t run_length = multiple_packets ? 3 : 1;
@@ -487,7 +503,8 @@ TEST_P(AqlPublicationTest, TerminalReleaseSharesTheUnpublishedFinalDispatch) {
 }
 
 TEST_P(AqlPublicationTest, TerminalReleasePreservesForeignWaitsAndAcquires) {
-  const auto [other_count, acquire] = GetParam();
+  const int other_count = std::get<0>(GetParam());
+  const bool acquire = std::get<1>(GetParam());
   std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
   Publish(Semaphore(), waits, false, 0, 0);
   auto* tail = Semaphore();
@@ -552,7 +569,8 @@ TEST_P(AqlPublicationTest, ProfiledBarriersRetainIndependentCompletions) {
 }
 
 TEST_P(AqlPublicationTest, EmitsOnlyRequiredDependenciesAndCacheBoundaries) {
-  auto [other_count, reverse_scopes] = GetParam();
+  const int other_count = std::get<0>(GetParam());
+  const bool reverse_scopes = std::get<1>(GetParam());
   auto* first = Semaphore();
   auto* second = Semaphore();
   std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
@@ -784,9 +802,18 @@ TEST_P(AqlPublicationTest, CooperativeCommandsAndKernargsHaveDistinctOwners) {
       iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
   arguments_.address = 0x7000;
   arguments_.capacity = argument_bytes.size();
-  layout_.byte_length = 8;
-  layout_.alignment = 8;
-  layout_.requirements = IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC;
+  const iree_hal_amd_gpu_metadata_argument_t argument = {
+      .size = 8,
+      .kind = IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_MULTIGRID_SYNC_ARG,
+  };
+  metadata_.kernarg_segment_size = 8;
+  metadata_.kernarg_segment_alignment = 8;
+  metadata_.has_argument_metadata = true;
+  metadata_.arguments = &argument;
+  metadata_.argument_count = 1;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_kernarg_layout_allocate(
+      &metadata_, iree_allocator_system(), &cooperative_layout_));
+  function_.base.kernarg = cooperative_layout_;
   request_.flags |= IREE_HAL_DISPATCH_FLAG_COOPERATIVE;
   queue_.grid.memory = reinterpret_cast<amdf_memory_t*>(&queue_.grid);
   queue_.grid.address = 0x123400005000;
@@ -919,6 +946,7 @@ TEST_P(AqlPublicationTest, EmptyDispatchKeepsMetadataWithoutNativeSamples) {
 
 INSTANTIATE_TEST_SUITE_P(NativeDependencies, AqlPublicationTest,
                          ::testing::Combine(::testing::Values(0, 1, 5, 6),
+                                            ::testing::Bool(),
                                             ::testing::Bool()));
 
 }  // namespace

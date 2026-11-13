@@ -158,7 +158,7 @@ TEST_F(RingTest, CapacityPressureChangesNoReservationOrNativeBytes) {
             0x123400001000u);
 }
 
-TEST_F(RingTest, LocalPayloadAcquireIsPartOfHeaderPublication) {
+TEST_F(RingTest, NativePublicationPreservesProducerPayloadScopes) {
   const iree_hal_amd_gpu_user_queue_t storage = {
       .capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION,
       .host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT,
@@ -174,9 +174,7 @@ TEST_F(RingTest, LocalPayloadAcquireIsPartOfHeaderPublication) {
     ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(&ring_, &storage,
                                                        position, header),
               AMDF_STATUS_OK);
-    EXPECT_EQ(
-        packets_[position].words[0],
-        (header & ~(3u << 9)) | IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
+    EXPECT_EQ(packets_[position].words[0], header);
   }
 }
 

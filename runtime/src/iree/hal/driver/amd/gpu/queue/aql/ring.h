@@ -71,8 +71,10 @@ void iree_hal_amd_gpu_aql_ring_write_body(
     const iree_hal_amd_gpu_aql_packet_t* packet);
 
 // Release-publishes one host-owned header after its body is complete. Device
-// fixup slots are never passed here. The enclosing chunk's notification follows
-// all host header stores and explicitly permits later GPU-owned INVALID slots.
+// fixup slots are never passed here. The producer supplies the acquisition for
+// separately referenced payloads; native ring release preserves those scopes.
+// The enclosing chunk's notification follows all host header stores and
+// explicitly permits later GPU-owned INVALID slots.
 // A failed native release leaves this header INVALID. The owner retains
 // accepted work, stops publication, and propagates failure through its terminal
 // path.

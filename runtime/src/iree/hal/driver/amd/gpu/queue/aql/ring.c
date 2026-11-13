@@ -60,14 +60,8 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_publish_header(
     uint32_t header) {
   uint32_t* words = ring->packets[position & (ring->capacity - 1)].words;
   if (ring->host_publish_executor != AMDF_CACHE_TRANSITION_EXECUTOR_NONE) {
-    // LOCAL payload publication requires the native host release. This first
-    // visible packet acquires every ABI prepared behind it; requested stronger
-    // boundaries remain present on later packets.
-    if (storage->capabilities &
-        AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) {
-      header =
-          (header & ~(3u << 9)) | IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
-    }
+    // The producer supplies payload acquisition in the packet header. Native
+    // release here orders the ring body before that header becomes visible.
     const amdf_status_t status = iree_hal_amd_gpu_user_queue_flush(storage);
     if (IREE_UNLIKELY(!amdf_status_is_ok(status))) {
       return status;
