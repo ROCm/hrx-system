@@ -707,9 +707,9 @@ iree_status_t loom_serve_image_load_allocate(
     iree_allocator_t host_allocator, loom_serve_image_load_t** out_load) {
   *out_load = NULL;
   if (!options->height || !options->width ||
-      (uint64_t)options->height * options->width > SIZE_MAX / 12) {
+      (uint64_t)options->height * options->width > SIZE_MAX / 4) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "output RGB geometry must fit host storage");
+                            "output RGBA8 geometry must fit host storage");
   }
   loom_serve_image_load_t* load = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1333,14 +1333,14 @@ iree_const_byte_span_t loom_serve_image_model_complete(
 iree_status_t loom_serve_image_model_generate(
     loom_serve_image_model_t* model, const loom_serve_image_request_t* request,
     loom_service_image_prepared_t* out_prepared,
-    iree_const_byte_span_t* out_rgb) {
-  *out_rgb = iree_const_byte_span_empty();
+    iree_const_byte_span_t* out_rgba) {
+  *out_rgba = iree_const_byte_span_empty();
   *out_prepared = (loom_service_image_prepared_t){0};
   loom_service_prepared_request_t prepared_request = {0};
   IREE_RETURN_IF_ERROR(loom_serve_image_model_prepare_request(
       model, request, &prepared_request));
   const iree_host_size_t output_length =
-      (iree_host_size_t)request->width * request->height * 12;
+      (iree_host_size_t)request->width * request->height * 4;
   iree_status_t status = loom_serve_image_model_prepare_batch(
       model, 1, &prepared_request, &output_length, out_prepared);
   iree_vm_buffer_release(prepared_request.bytes);
@@ -1388,7 +1388,7 @@ iree_status_t loom_serve_image_model_generate(
     status = loom_runtime_execution_drain(model->execution);
   }
   if (iree_status_is_ok(status)) {
-    *out_rgb = loom_serve_image_model_complete(model);
+    *out_rgba = loom_serve_image_model_complete(model);
   }
   return status;
 }

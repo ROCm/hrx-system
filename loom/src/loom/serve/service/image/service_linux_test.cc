@@ -54,8 +54,8 @@ struct loom_serve_test_image_gate_t {
   bool* occupied = nullptr;
   // Borrowed model execution domain held by an explicit queue dependency.
   loom_runtime_execution_t* execution = nullptr;
-  // Borrowed valid CHW F32 result, outliving the joined service.
-  float pixel[3] = {};
+  // Borrowed valid RGBA8 result, outliving the joined service.
+  uint8_t pixel[4] = {128, 128, 128, 255};
   // Successful completions consumed by the scheduler, read after service join.
   uint32_t completed = 0;
   // Request-selected dependency outcome, published by CPU preparation.

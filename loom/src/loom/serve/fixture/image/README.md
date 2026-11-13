@@ -4,7 +4,7 @@ This small package implements the same source ABI as learned image models.
 It needs no downloaded weights. `prepare.loom` declares one command stage;
 `control.loom` tokenizes the prompt and constructs a request payload. Two device
 kernels exchange a palette through compiler-reflected private workspace and
-write F32 CHW pixels. The ordinary image service encodes those pixels as PNG.
+write row-major RGBA8 pixels with opaque alpha. The ordinary image service encodes those pixels as PNG.
 
 The tokenizer recognizes `a`, `b`, and `x`, with one token per character. Red
 depends on seed parity, green on token-count parity, and blue on pixel parity.

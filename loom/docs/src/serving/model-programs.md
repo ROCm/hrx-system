@@ -18,7 +18,7 @@ The important distinction is the shape of state and output, not the model name:
 | Contract | Source responsibilities | Starting package |
 | --- | --- | --- |
 | Retained text | Token framing, paged state geometry, mixed prompt/decode math, progress, sampling and chat policy. | [Tiny text model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/text) |
-| Staged image | Prompt preparation, parameter domains, numerical stages, invocation continuation and final RGB. | [Image model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/image) |
+| Staged image | Prompt preparation, parameter domains, numerical stages, invocation continuation and final RGBA8. | [Image model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/image) |
 | Finite embeddings | Input preparation, cohort cost/compatibility, pooling/projection and final vectors. | [Embedding model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/embedding) |
 | Finite decisions | Structured question framing and compact normalized answer distributions. | [Decision model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/decision) |
 | Streaming speech | Voice conditioning, independent request state, compatible next-work batches and continuous waveform blocks. | [Speech model](https://github.com/ROCm/hrx-system/tree/main/loom/src/loom/serve/fixture/speech) |
@@ -415,14 +415,15 @@ checkpoint declarations select retained banks or prepare independent banks on
 demand; omitted declarations preserve the cold parameter layout. Stages within
 one cohort share a parameter binding map.
 
-Image control then drives command parts to final RGB. It returns a continuation
+Image control then drives command parts to final RGBA8. It returns a continuation
 cursor; another invocation occurs only after the previous accepted frontiers
 retire. Compiler-reflected workspace remains live across barrier-aligned parts.
-RGB and compiler-aligned workspace share one cohort-sized pool allocation,
-retained through final feedback. Each request keeps a stable output slice even
+RGBA8 output and compiler-aligned workspace have separate cohort-sized pool
+allocations. Final feedback retains the output after workspace retirement. Each request keeps a stable output slice even
 if a peer is cancelled. Neither storage nor pixel geometry belongs to the
-executable cache. Final output is F32 CHW RGB in `[-1,1]` before native image
-encoding uses each request's dimensions.
+executable cache. Final output is row-major RGBA8: four bytes per pixel in R, G, B, A
+order. Models perform their final quantization on device; native PNG encoding
+preserves those bytes, including alpha, using each request's dimensions.
 The [image source contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/image/model.h)
 defines entry signatures, alignment and cancellation.
 

@@ -130,16 +130,15 @@ class ImageParameterTest : public loom_runtime::testing::WeightsTest {
           .height = 1,
       };
       loom_service_image_prepared_t prepared = {};
-      iree_const_byte_span_t rgb = iree_const_byte_span_empty();
+      iree_const_byte_span_t rgba = iree_const_byte_span_empty();
       IREE_ASSERT_OK(
-          loom_serve_image_model_generate(model_, &request, &prepared, &rgb));
-      ASSERT_EQ(rgb.data_length, 3 * sizeof(float));
-      const std::array<float, 3> expected = {
-          static_cast<float>(14 + seed) / 256,
-          static_cast<float>(114 + seed) / 256,
-          static_cast<float>(127 + seed) / 256};
-      std::array<float, 3> actual;
-      memcpy(actual.data(), rgb.data, rgb.data_length);
+          loom_serve_image_model_generate(model_, &request, &prepared, &rgba));
+      const std::array<uint8_t, 4> expected = {
+          static_cast<uint8_t>(14 + seed), static_cast<uint8_t>(114 + seed),
+          static_cast<uint8_t>(127 + seed), 255};
+      ASSERT_EQ(rgba.data_length, expected.size());
+      std::array<uint8_t, 4> actual;
+      memcpy(actual.data(), rgba.data, rgba.data_length);
       EXPECT_EQ(actual, expected);
     }
     const auto activity = loom_serve_image_model_parameters(model_).activity;

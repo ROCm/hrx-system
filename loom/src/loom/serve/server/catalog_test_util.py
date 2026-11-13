@@ -77,7 +77,7 @@ def check_png(encoded, prompt, seed):
         if kind == b"IDAT":
             compressed.extend(payload)
         position += 12 + length
-    assert header == (7, 5, 8, 2, 0, 0, 0), header
+    assert header == (7, 5, 8, 6, 0, 0, 0), header
     assert position == len(image)
     expected = bytearray()
     for row in range(5):
@@ -88,6 +88,7 @@ def check_png(encoded, prompt, seed):
                     255 * (seed & 1),
                     255 * (len(prompt) & 1),
                     255 * ((row * 7 + column) & 1),
+                    255,
                 )
             )
     assert zlib.decompress(compressed) == expected

@@ -103,7 +103,7 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load);
 //                 buffer bytes) -> (i32 stage, buffer payload)
 //   bind_parameters(buffer state, buffer payload, buffer bank_offsets)
 //   generate(i32 first_part, i32 part_count, i32 cursor, i64 output_bytes,
-//            hal.buffer payload, hal.buffer rgb, hal.buffer workspace) -> i32
+//            hal.buffer payload, hal.buffer rgba, hal.buffer workspace) -> i32
 // The cursor starts at zero. Each invocation submits its next part and returns
 // a cursor for continuation, or a negative value after final feedback. The
 // owner invokes it again only after both accepted frontiers retire. State is
@@ -114,7 +114,7 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load);
 // Ranges are little-endian [offset, length] i64 pairs into bytes. The bytes
 // buffer begins with a copy of ranges followed by the concatenated prepared
 // inputs; payload may forward this allocation directly. Output is concatenated
-// F32 CHW RGB in the same stable request order. A cancelled peer never changes
+// packed RGBA8 in the same stable request order. A cancelled peer never changes
 // this layout. The warm program imports input/JSON capabilities,
 // invocation-only prepare declarations, and runner.execute_N/feedback. Request
 // stage ordinals follow the immutable cold table. Explicit checkpoint
@@ -129,27 +129,26 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load);
 // in parameter_bank declaration order. The source patches its opaque payload,
 // retaining item order and strengths. The invocation retains selected banks
 // through actual execution retirement. Each command has three dynamic bindings:
-// opaque request bytes, output F32 CHW RGB
-// [-1,1], and workspace. External input/output roots promise only byte
-// alignment; stronger private storage and parameter alignments come from their
-// compiler-reflected contracts. Input capacity comes from source; compiler
-// reflection supplies the workspace extent and alignment. One queue allocation
-// transaction acquires independent output and private workspace roots.
-// execute_3 receives both. Final work or cancellation queue-releases workspace;
-// feedback retains only output through its actual retirement. Private
-// storage belongs to the shared workspace pool, not this model's residency.
-// This model owns independent work and feedback timelines over the device
-// queues. The cold constructor drives the asynchronous load and joins on its
-// outer application caller, never a shared worker. Live registration uses
-// load_advance. Creation indexes parameters and records commands without
-// reading weight payloads. The device and pool outlive the model; the caller
-// serializes all model calls. The pool backs parameter roots independently of
-// cached commands. First generation or explicit activation streams/prepares
-// weights. Active weights remain shared across request specializations; an
-// exact code-cache hit does no JIT or parameter preparation.
-// Failure releases partial ownership and leaves *out_model NULL. Compilation
-// evidence is available through load_report; this wrapper performs no
-// process-global output.
+// opaque request bytes, output packed RGBA8, and workspace. External
+// input/output roots promise only byte alignment; stronger private storage and
+// parameter alignments come from their compiler-reflected contracts. Input
+// capacity comes from source; compiler reflection supplies the workspace extent
+// and alignment. One queue allocation transaction acquires independent output
+// and private workspace roots. execute_3 receives both. Final work or
+// cancellation queue-releases workspace; feedback retains only output through
+// its actual retirement. Private storage belongs to the shared workspace pool,
+// not this model's residency. This model owns independent work and feedback
+// timelines over the device queues. The cold constructor drives the
+// asynchronous load and joins on its outer application caller, never a shared
+// worker. Live registration uses load_advance. Creation indexes parameters and
+// records commands without reading weight payloads. The device and pool outlive
+// the model; the caller serializes all model calls. The pool backs parameter
+// roots independently of cached commands. First generation or explicit
+// activation streams/prepares weights. Active weights remain shared across
+// request specializations; an exact code-cache hit does no JIT or parameter
+// preparation. Failure releases partial ownership and leaves *out_model NULL.
+// Compilation evidence is available through load_report; this wrapper performs
+// no process-global output.
 iree_status_t loom_serve_image_model_allocate(
     loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_image_model_options_t* options,
@@ -226,7 +225,7 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
 // request storage, which remains live through batch preparation. Multiple
 // prepared requests may coexist without capturing executables or checkpoint
 // banks. INVALID_ARGUMENT rejects the request without retaining ownership.
-// Width/height are positive and their F32 RGB extent fits host storage and i64;
+// Width/height are positive and their RGBA8 extent fits host storage and i64;
 // the public request parser establishes this representational boundary. Source
 // preparation validates model-specific geometry before any output allocation.
 // Returns source work/compatibility facts and owned bytes, or zeros on failure.
@@ -235,7 +234,7 @@ iree_status_t loom_serve_image_model_prepare_request(
     loom_service_prepared_request_t* out_prepared);
 
 // CPU-only preparation of one compatible cohort in stable client order. The
-// caller supplies protocol-validated F32 RGB byte lengths in the same order.
+// caller supplies protocol-validated RGBA8 byte lengths in the same order.
 // Captures one executable generation and the complete checkpoint bank union;
 // there must be no preceding invocation. Failure leaves no prepared cohort.
 // Prepared request bytes remain caller-owned and can be released on return.
@@ -270,7 +269,7 @@ iree_status_t loom_serve_image_model_submit(
     loom_runtime_execution_frontier_t* out_frontier, bool* out_complete);
 
 // Consumes successful completion of both terminal frontiers on the scheduler
-// owner. Releases the request payload and residency pin. Returned F32 CHW RGB
+// owner. Releases the request payload and residency pin. Returned packed RGBA8
 // remains borrowed until another preparation or model destruction. Failed
 // readiness never calls this function: teardown joins actual queue ownership.
 // Cancelled invocations return storage without valid output; callers discard
@@ -282,14 +281,14 @@ iree_const_byte_span_t loom_serve_image_model_complete(
 // payload is kept alive through both accepted execution frontiers, including
 // failures after partial submission. Request errors before submission leave
 // the model reusable; execution failure is terminal. Request is borrowed only
-// for this call. Success returns little-endian F32 CHW RGB, borrowed until the
-// next generate call or destruction. Failure leaves *out_rgb empty.
+// for this call. Success returns packed RGBA8, borrowed until the
+// next generate call or destruction. Failure leaves *out_rgba empty.
 // out_prepared retains source-selected facts if preparation succeeded, even
 // when subsequent admission or device work fails.
 iree_status_t loom_serve_image_model_generate(
     loom_serve_image_model_t* model, const loom_serve_image_request_t* request,
     loom_service_image_prepared_t* out_prepared,
-    iree_const_byte_span_t* out_rgb);
+    iree_const_byte_span_t* out_rgba);
 
 #ifdef __cplusplus
 }  // extern "C"
