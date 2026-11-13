@@ -1871,7 +1871,8 @@ static iree_status_t loom_scf_unroll_prepare_descendants(
     loom_scf_unroll_trip_count_t domain = {0};
     if (worklist->items[i].prepare &&
         loom_scf_unroll_plan_full_domain(context, worklist->items[i].op,
-                                         &domain)) {
+                                         &domain) &&
+        domain.count != 0) {
       preparations[preparation_count++] = (loom_scf_unroll_preparation_t){
           .op = worklist->items[i].op, .domain = domain};
     }

@@ -133,3 +133,87 @@ func.def @preserve_inner_recurrence(%initial: i32, %increment: i32) -> (i32) {
   %next_1 = scalar.addi %next, %next_partial_1$34 : i32
   func.return %next_1 : i32
 }
+
+// ====
+
+// A read-only child stays grouped when the outer recurrence writes. Flattening
+// it early would enlarge the parent's bounded effect dependency table.
+func.def @preserve_effectful_grouping(%storage: view<2xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %contribution = scf.for %part = [%begin to %count step %step](%partial = %identity : i32) -> (i32) unroll {
+      %value = view.load %storage[%part] : view<2xi32> -> i32
+      %next_partial = scalar.addi %partial, %value : i32
+      scf.yield %next_partial : i32
+    }
+    view.store %contribution, %storage[%row] : i32, view<2xi32>
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @preserve_effectful_grouping(%storage: view<2xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  %row_0 = index.constant 0 : index
+  %row_1 = index.constant 1 : index
+  %part_0$30 = index.constant 0 : index
+  %value$31 = view.load %storage[%part_0$30] : view<2xi32> -> i32
+  %next_partial$32 = scalar.addi %identity, %value$31 : i32
+  %part_1$33 = index.constant 1 : index
+  %value_1$34 = view.load %storage[%part_1$33] : view<2xi32> -> i32
+  %next_partial_1$35 = scalar.addi %next_partial$32, %value_1$34 : i32
+  scf.schedule.fence
+  view.store %next_partial_1$35, %storage[%row_0] : i32, view<2xi32>
+  %next = scalar.addi %initial, %next_partial_1$35 : i32
+  scf.schedule.fence
+  %part_0$36 = index.constant 0 : index
+  %value$37 = view.load %storage[%part_0$36] : view<2xi32> -> i32
+  %next_partial$38 = scalar.addi %identity, %value$37 : i32
+  %part_1$39 = index.constant 1 : index
+  %value_1$40 = view.load %storage[%part_1$39] : view<2xi32> -> i32
+  %next_partial_1$41 = scalar.addi %next_partial$38, %value_1$40 : i32
+  view.store %next_partial_1$41, %storage[%row_1] : i32, view<2xi32>
+  %next_1 = scalar.addi %next, %next_partial_1$41 : i32
+  func.return %next_1 : i32
+}
+
+// ====
+
+// An empty read contribution remains a source unit until the parent's producer
+// contract is checked. Its body still disappears through normal full unrolling.
+func.def @empty_read_contribution(%input: view<1xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  %result = scf.for %row = [%begin to %count step %step](%sum = %initial : i32) -> (i32) unroll schedule(recurrence) {
+    %contribution = scf.for %part = [%begin to %begin step %step](%partial = %identity : i32) -> (i32) unroll {
+      %value = view.load %input[%begin] : view<1xi32> -> i32
+      scf.yield %value : i32
+    }
+    %next = scalar.addi %sum, %contribution : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @empty_read_contribution(%input: view<1xi32>, %initial: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %identity = scalar.constant 0 : i32
+  scf.schedule.fence
+  %next = scalar.addi %initial, %identity : i32
+  scf.schedule.fence
+  %next_1 = scalar.addi %next, %identity : i32
+  func.return %next_1 : i32
+}

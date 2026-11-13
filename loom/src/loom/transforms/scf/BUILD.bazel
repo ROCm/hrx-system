@@ -156,6 +156,7 @@ loom_cc_library(
         "scf_unroll_worklist.h",
     ],
     deps = [
+        ":scf_body",
         ":scf_unroll_bounds",
         ":scf_unroll_tile",
         "//loom/src/loom/error:emitter",

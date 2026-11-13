@@ -17,7 +17,7 @@ extern "C" {
 typedef struct loom_scf_unroll_work_item_t {
   // Borrowed source loop, in parent-before-child traversal order.
   loom_op_t* op;
-  // An enclosing recurrence needs this loop's contents exposed before its cut.
+  // Read-containing descendant eligible to be exposed before a recurrence cut.
   bool prepare;
 } loom_scf_unroll_work_item_t;
 
@@ -38,8 +38,12 @@ bool loom_scf_unroll_policy_present(const loom_op_t* op);
 // Captures loop handles and recurrence ancestry in one source traversal. The
 // ordinary rewrite order stays parent-first: inner bounds may need an outer
 // iteration's specialization. Preparation candidates still require an original
-// fact proof of a full linear unroll before they may precede their parent.
-// Storage belongs to |arena| and source handles remain valid until rewritten.
+// fact proof of a nonempty full linear unroll before they may precede their
+// parent. Pure and empty bodies stay grouped until the parent policy is
+// checked. Effectful recurrence bodies retain their source grouping and
+// pair-table bound; preparation only exposes operations within pure or
+// read-only recurrences. Storage belongs to |arena| and source handles remain
+// valid until rewritten.
 iree_status_t loom_scf_unroll_worklist_build(
     loom_module_t* module, loom_func_like_t function,
     iree_arena_allocator_t* arena, loom_scf_unroll_worklist_t* out_worklist);
