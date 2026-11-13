@@ -11,6 +11,7 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco_test_util.h"
 #include "iree/testing/gtest.h"
@@ -46,6 +47,39 @@ class KernargTest : public ::testing::Test {
     kernel_.kernarg_segment_size = size;
     return iree_hal_amd_gpu_kernarg_layout_allocate(
         &kernel_, iree_allocator_system(), &layout_);
+  }
+
+  // Independent ABI byte oracles also cover every aligned destination residue
+  // and the padding owned by the streaming writer's final DWORD.
+  template <typename Expected>
+  void ExpectStreaming(iree_const_byte_span_t constants,
+                       const uint64_t* bindings,
+                       const iree_hal_amd_gpu_kernarg_inputs_t* inputs,
+                       const Expected& expected, bool native = false) {
+    ASSERT_EQ(expected.size(), layout_->byte_length);
+    const size_t extent = (expected.size() + 3) & ~size_t{3};
+    for (size_t offset = 4; offset <= 16; offset += 4) {
+      std::vector<uint32_t> words((offset + extent + 16) / 4,
+                                  UINT32_C(0xa5a5a5a5));
+      auto* bytes = reinterpret_cast<uint8_t*>(words.data());
+      if (native) {
+        iree_hal_amd_gpu_kernarg_layout_emplace_native_stream(
+            layout_, constants, inputs, bytes + offset);
+      } else {
+        iree_hal_amd_gpu_kernarg_layout_emplace_stream(
+            layout_, constants.data, bindings, inputs, bytes + offset);
+      }
+#if defined(IREE_ARCH_X86_64)
+      _mm_sfence();
+#endif  // IREE_ARCH_X86_64
+      for (size_t i = 0; i < words.size() * 4; ++i) {
+        const uint8_t value = i < offset || i >= offset + extent ? 0xa5
+                              : i - offset < expected.size()
+                                  ? expected[i - offset]
+                                  : 0;
+        ASSERT_EQ(bytes[i], value) << "offset=" << offset << " index=" << i;
+      }
+    }
   }
   // Input records borrowed only during layout construction.
   std::vector<Argument> arguments_;
@@ -226,6 +260,9 @@ TEST_F(KernargTest, EveryHiddenFieldUsesItsDeclaredDestinationAndWidth) {
     iree_hal_amd_gpu_kernarg_layout_emplace_native(
         layout_, iree_const_byte_span_empty(), &inputs, actual.data());
     EXPECT_EQ(actual, expected);
+    ExpectStreaming(iree_const_byte_span_empty(), nullptr, &inputs, expected);
+    ExpectStreaming(iree_const_byte_span_empty(), nullptr, &inputs, expected,
+                    true);
   }
 }
 
@@ -311,6 +348,8 @@ TEST_F(KernargTest, NativePrefixPreservesExplicitHolesAndPopulatesRuntime) {
       0xaa, 0xbb, 0xcc, 0xdd, 1, 2, 3, 4, 0,  0, 0, 0,
       7,    0,    0,    0,    0, 0, 0, 0, 32, 0, 0, 0};
   EXPECT_EQ(bytes, expected);
+  ExpectStreaming(iree_make_const_byte_span(native, sizeof(native)), nullptr,
+                  &inputs, expected, true);
   std::array<uint8_t, 40> full;
   full.fill(0x5a);
   iree_hal_amd_gpu_kernarg_layout_emplace_native(
@@ -320,6 +359,8 @@ TEST_F(KernargTest, NativePrefixPreservesExplicitHolesAndPopulatesRuntime) {
   EXPECT_EQ(iree_unaligned_load_le_u16(bytes.data() + 20), 32u);
   EXPECT_EQ(bytes[0], 0x5a);
   EXPECT_EQ(bytes[23], 0x5a);
+  ExpectStreaming(iree_make_const_byte_span(full.data(), full.size()), nullptr,
+                  &inputs, bytes, true);
 }
 
 TEST_F(KernargTest, EmptyLayoutsNeedNoDispatchStorage) {
@@ -331,6 +372,10 @@ TEST_F(KernargTest, EmptyLayoutsNeedNoDispatchStorage) {
     iree_hal_amd_gpu_kernarg_layout_emplace(layout_, nullptr, nullptr, nullptr,
                                             nullptr);
     iree_hal_amd_gpu_kernarg_layout_emplace_native(
+        layout_, iree_const_byte_span_empty(), nullptr, nullptr);
+    iree_hal_amd_gpu_kernarg_layout_emplace_stream(layout_, nullptr, nullptr,
+                                                   nullptr, nullptr);
+    iree_hal_amd_gpu_kernarg_layout_emplace_native_stream(
         layout_, iree_const_byte_span_empty(), nullptr, nullptr);
   }
 }
@@ -378,6 +423,87 @@ TEST_F(KernargTest, SupportsLargestRepresentableByValueArgument) {
   iree_hal_amd_gpu_kernarg_layout_emplace(layout_, source.data(), nullptr,
                                           nullptr, target.data());
   EXPECT_EQ(target, source);
+}
+
+TEST_F(KernargTest, StreamingInterleavesFieldsWithoutDestinationPatches) {
+  IREE_ASSERT_OK(Build(
+      {Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE, 0, 1),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GROUP_SIZE_X, 2, 2),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE, 4, 3),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_GLOBAL_BUFFER, 8, 8),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X, 16, 4),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE, 20, 2),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_GLOBAL_BUFFER, 24, 8),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_GROUP_SIZE_Y, 32, 2)},
+      35));
+  EXPECT_EQ(layout_->span_count, 8u);
+  const uint8_t constants[] = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26};
+  const uint64_t bindings[] = {UINT64_C(0x0807060504030201),
+                               UINT64_C(0x1817161514131211)};
+  const iree_hal_amd_gpu_kernarg_inputs_t inputs = {
+      .block_count = {0x12345678, 0, 0},
+      .group_size = {0x0506, 0x0708, 0},
+  };
+  std::array<uint8_t, 35> expected = {
+      0x21, 0,    6,    5,    0x22, 0x23, 0x24, 0,    1,    2,    3, 4,
+      5,    6,    7,    8,    0x78, 0x56, 0x34, 0x12, 0x25, 0x26, 0, 0,
+      0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 8,    7,    0};
+  ExpectStreaming(iree_make_const_byte_span(constants, sizeof(constants)),
+                  bindings, &inputs, expected);
+  std::fill(expected.begin() + 8, expected.begin() + 16, 0);
+  std::fill(expected.begin() + 24, expected.begin() + 32, 0);
+  ExpectStreaming(iree_make_const_byte_span(constants, sizeof(constants)),
+                  nullptr, &inputs, expected);
+}
+
+TEST_F(KernargTest, StreamingCoversEveryTailAndMaximumAbiExtent) {
+  std::vector<uint32_t> lengths;
+  for (uint32_t i = 0; i <= 65; ++i) {
+    lengths.push_back(i);
+  }
+  for (uint32_t i : {1023, 1024, 1025, 4095, 4096, 4097, 65533, 65534, 65535}) {
+    lengths.push_back(i);
+  }
+  for (uint32_t length : lengths) {
+    SCOPED_TRACE(length);
+    IREE_ASSERT_OK(Build(
+        {Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE, 0, length)},
+        length));
+    for (uint32_t offset = 0; offset < 4; ++offset) {
+      // The source ends exactly at its ABI extent to catch widened tail loads.
+      std::vector<uint8_t> source(length + offset);
+      std::vector<uint8_t> expected(length);
+      for (uint32_t i = 0; i < length; ++i) {
+        expected[i] = source[offset + i] = (i * 37 + length) & 0xff;
+      }
+      const auto input = iree_make_const_byte_span(
+          source.empty() ? nullptr : source.data() + offset, length);
+      ExpectStreaming(input, nullptr, nullptr, expected);
+      ExpectStreaming(input, nullptr, nullptr, expected, true);
+    }
+  }
+}
+
+TEST_F(KernargTest, NativeStreamingPreservesOrPadsTheSuppliedPrefix) {
+  for (uint32_t length : {1, 3, 4, 12, 16, 63, 64, 65, 1025}) {
+    SCOPED_TRACE(length);
+    IREE_ASSERT_OK(Build(
+        {Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE, 0, length)},
+        length));
+    for (uint32_t prefix : {0u, 1u, length / 2, length, length + 7}) {
+      SCOPED_TRACE(prefix);
+      std::vector<uint8_t> source(prefix + 1);
+      std::vector<uint8_t> expected(length);
+      for (uint32_t i = 0; i < prefix; ++i) {
+        source[i + 1] = (i * 37 + length) & 0xff;
+        if (i < length) {
+          expected[i] = source[i + 1];
+        }
+      }
+      ExpectStreaming(iree_make_const_byte_span(source.data() + 1, prefix),
+                      nullptr, nullptr, expected, true);
+    }
+  }
 }
 
 TEST_F(KernargTest, AllocationFailureLeavesNoOwner) {

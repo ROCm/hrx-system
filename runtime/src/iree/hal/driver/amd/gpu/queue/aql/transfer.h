@@ -66,11 +66,13 @@ uint64_t iree_hal_amd_gpu_aql_transfer_staging_length(
 // retirement action; the next different operation ends that contiguous run.
 // arguments has room for packet_capacity ABI records. staging is independent
 // payload storage and may be empty for device copies/fills. Every initialized
-// byte is published before the first valid header.
+// byte is published before the first valid header. stream_arguments selects
+// non-temporal ABI stores into a four-byte-aligned argument span; the caller
+// owns the release fence and SYSTEM acquisition before GPU consumption.
 iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
     const iree_hal_amd_gpu_transfer_t* transfer, uint64_t kernel,
     uint32_t packet_capacity, iree_byte_span_t arguments,
-    uint64_t argument_address, iree_byte_span_t staging,
+    uint64_t argument_address, bool stream_arguments, iree_byte_span_t staging,
     uint64_t staging_address, iree_hal_amd_gpu_aql_transfer_chunk_t* out_chunk);
 
 #ifdef __cplusplus

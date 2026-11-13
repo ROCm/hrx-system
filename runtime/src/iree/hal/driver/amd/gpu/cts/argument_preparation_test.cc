@@ -51,6 +51,15 @@ class ArgumentPreparationTest : public GpuNativeTest {
       return;
     }
     const auto* family = iree_hal_queue_family(queues_[0]);
+    const auto* queue =
+        reinterpret_cast<iree_hal_amd_gpu_aql_queue_t*>(queues_[0]);
+    const bool local =
+        (queue->storage.capabilities &
+         AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0;
+    EXPECT_EQ(queue->producer.argument_streaming, local);
+    EXPECT_EQ(queue->producer.arguments->memory.info.memory_class,
+              local ? AMDF_MEMORY_CLASS_LOCAL : AMDF_MEMORY_CLASS_SYSTEM);
+    RecordProperty("kernarg_memory_class", local ? "LOCAL" : "SYSTEM");
     const iree_hal_pool_family_access_t access = {
         .family = family,
         .usage = IREE_HAL_BUFFER_USAGE_STORAGE,

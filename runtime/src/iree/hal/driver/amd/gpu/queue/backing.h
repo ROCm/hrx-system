@@ -212,6 +212,8 @@ iree_status_t iree_hal_amd_gpu_backing_allocate(
 // Allocates only host ownership and the native release descriptor. The caller
 // acquires storage->memory asynchronously, then initializes its address and
 // monotonic extent on the publication owner. Failure returns NULL storage.
+// Byte generations inherit their caller's qualified allocation and visibility
+// policy; unlike coherent control cells, they impose no CPU cache policy.
 iree_status_t iree_hal_amd_gpu_byte_storage_prepare(
     uint64_t capacity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_byte_storage_t** out_storage);

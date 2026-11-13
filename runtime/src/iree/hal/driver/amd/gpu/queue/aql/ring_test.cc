@@ -134,6 +134,28 @@ TEST_F(RingTest, CapacityPressureChangesNoReservationOrNativeBytes) {
             0x123400001000u);
 }
 
+TEST_F(RingTest, LocalPayloadAcquireIsPartOfHeaderPublication) {
+  const iree_hal_amd_gpu_user_queue_t storage = {
+      .capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION,
+      .host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT,
+      .host_publish_fence = IREE_HAL_HOST_CACHE_FENCE_X86_SFENCE,
+  };
+  ring_.host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT;
+  for (uint32_t scope : {0u, 1u << 9, 2u << 9}) {
+    uint64_t position = 0;
+    ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 1, &position));
+    const uint32_t header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+                            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                            IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM | scope;
+    ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(&ring_, &storage,
+                                                       position, header),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(
+        packets_[position].words[0],
+        (header & ~(3u << 9)) | IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
+  }
+}
+
 TEST_F(RingTest, BatchReleaseSeesWholeSpanBeforeFirstHeader) {
   struct Publication {
     // Actual reserved ring observed by the native release dependency.

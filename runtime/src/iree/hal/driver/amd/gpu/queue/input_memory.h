@@ -18,7 +18,7 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_input_memory_t {
   // Persistent use-specific GPU attachment requirements borrowed by options.
   amdf_memory_device_access_t access;
-  // Qualified cached SYSTEM backing and write-only CPU mapping access.
+  // Qualified shader-cached backing and write-only CPU mapping access.
   iree_hal_amd_fabric_memory_options_t options;
 } iree_hal_amd_gpu_input_memory_t;
 
@@ -30,6 +30,16 @@ typedef struct iree_hal_amd_gpu_input_memory_t {
 // queue and native acquisition callback using the policy.
 iree_status_t iree_hal_amd_gpu_input_memory_initialize(
     const iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
+    amdf_memory_access_t device_access,
+    iree_hal_amd_gpu_input_memory_t* out_memory);
+
+// Selects owned, host-writable LOCAL backing for a queue that achieved
+// HOST_NON_TEMPORAL_PUBLICATION. The caller supplies that queue's all-byte
+// non-temporal authoring, SYSTEM acquisition, and execution ownership protocol.
+// Generic memory-pair recipes are unchanged. The resulting self-referencing
+// policy outlives every initial and asynchronous backing acquisition.
+iree_status_t iree_hal_amd_gpu_input_memory_initialize_local(
+    const iree_hal_amd_gpu_context_t* context,
     amdf_memory_access_t device_access,
     iree_hal_amd_gpu_input_memory_t* out_memory);
 

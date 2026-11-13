@@ -235,8 +235,11 @@ iree_status_t iree_hal_amd_gpu_byte_storage_prepare(
 iree_status_t iree_hal_amd_gpu_byte_storage_initialize(
     iree_hal_amd_gpu_context_t* context, uint64_t begin,
     iree_hal_amd_gpu_byte_storage_t* storage) {
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_backing_query_address(
-      context, &storage->memory, &storage->address));
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      context->api->memory_query_address(storage->memory.handle, 0,
+                                         AMDF_MEMORY_ADDRESS_GPU,
+                                         &storage->address),
+      "memory_query_address(byte storage)"));
   storage->begin = begin;
   storage->end = begin;
   return iree_ok_status();

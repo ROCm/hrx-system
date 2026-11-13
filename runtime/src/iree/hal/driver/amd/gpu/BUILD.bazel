@@ -387,6 +387,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/image:metadata",
     ],
@@ -399,6 +400,7 @@ iree_runtime_cc_test(
         ":kernarg",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/image",
         "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
@@ -583,6 +585,7 @@ iree_runtime_cc_test(
         ":dispatch",
         ":kernarg",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/image:metadata",
         "//runtime/src/iree/testing:gtest",

@@ -902,7 +902,8 @@ static IREE_ATTRIBUTE_NOINLINE iree_status_t
 iree_hal_amd_gpu_aql_command_invocation_write_host(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    uint64_t command_address, void* commands, void* host_contents) {
+    bool stream_arguments, uint64_t command_address, void* commands,
+    void* host_contents) {
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
@@ -924,9 +925,23 @@ iree_hal_amd_gpu_aql_command_invocation_write_host(
       (const void*)(contents + host_template->fixup_offset);
   iree_hal_amd_gpu_fixup_apply(fixups, host_template->fixup_count, values,
                                host_contents);
-  iree_memcpy_write_only(
-      upload, (const uint8_t*)host_contents + host_template->data_offset,
-      host_template->command_data_offset - host_template->data_offset);
+  const void* argument_data =
+      (const uint8_t*)host_contents + host_template->data_offset;
+  const uint32_t argument_length =
+      host_template->command_data_offset - host_template->data_offset;
+  if (stream_arguments) {
+    const uint32_t aligned_length = argument_length & ~UINT32_C(3);
+    iree_memcpy_stream_dst(upload, argument_data, aligned_length);
+    if (argument_length != aligned_length) {
+      uint32_t tail = 0;
+      memcpy(&tail, (const uint8_t*)argument_data + aligned_length,
+             argument_length - aligned_length);
+      iree_memcpy_stream_dst((uint8_t*)upload + aligned_length, &tail,
+                             sizeof(tail));
+    }
+  } else {
+    iree_memcpy_write_only(upload, argument_data, argument_length);
+  }
   if (host_template->command_data_offset < host_template->byte_length) {
     iree_memcpy_write_only(
         commands,
@@ -939,8 +954,8 @@ iree_hal_amd_gpu_aql_command_invocation_write_host(
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    uint64_t command_address, void* commands, void* host_contents,
-    uint64_t* values) {
+    bool stream_arguments, uint64_t command_address, void* commands,
+    void* host_contents, uint64_t* values) {
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_command_program_t* program = invocation->program;
@@ -959,8 +974,8 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
   }
   if (IREE_UNLIKELY(host_template)) {
     return iree_hal_amd_gpu_aql_command_invocation_write_host(
-        invocation, queue_ordinal, upload_address, upload, command_address,
-        commands, host_contents);
+        invocation, queue_ordinal, upload_address, upload, stream_arguments,
+        command_address, commands, host_contents);
   }
   // An already repaired immutable instance needs no value table.
   if (!values) {

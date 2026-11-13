@@ -68,7 +68,7 @@ uint64_t iree_hal_amd_gpu_aql_argument_length(
   if (request->flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
     arguments = iree_align_uint64(arguments, 8) + grid_length;
   }
-  return arguments;
+  return iree_align_uint64(arguments, 4);
 }
 
 // A reservation calculation changes no ring state. Completion prefixes include
@@ -258,8 +258,8 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
                      (indirect ||
                       (request->flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE))
                          ? 8u
-                         : 1u)
-          : 1;
+                         : 4u)
+          : 4;
   iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
   uint64_t argument_offset = 0, argument_end = 0;
   const iree_hal_amd_gpu_aql_publish_result_t argument_result =
@@ -359,41 +359,56 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     }
     *inout_submission = submission;
   }
+  const uint64_t grid_offset = iree_align_uint64(
+      indirect ? iree_align_uint64(kernarg_length, 8) +
+                     sizeof(iree_hal_amd_gpu_aql_indirect_arguments_t)
+               : kernarg_length,
+      8);
+  const uint64_t grid_address =
+      cooperative ? (queue->grid.memory
+                         ? queue->grid.address
+                         : arguments->address + argument_offset + grid_offset)
+                  : 0;
   if (kernarg_length) {
-    iree_hal_amd_gpu_dispatch_emplace_arguments(
-        &request->function->base, &request->geometry, request->constants,
-        addresses, request->flags,
-        arguments->memory.contents.data + argument_offset);
+    if (queue->producer.argument_streaming) {
+      iree_hal_amd_gpu_dispatch_emplace_arguments_stream(
+          &request->function->base, &request->geometry, request->constants,
+          addresses, request->flags, grid_address,
+          arguments->memory.contents.data + argument_offset);
+    } else {
+      iree_hal_amd_gpu_dispatch_emplace_arguments(
+          &request->function->base, &request->geometry, request->constants,
+          addresses, request->flags,
+          arguments->memory.contents.data + argument_offset);
+    }
   }
   iree_hal_amd_gpu_aql_packet_t grid_packet;
   if (cooperative) {
+    iree_hal_amd_gpu_grid_sync_t grid =
+        iree_hal_amd_gpu_dispatch_grid_sync(&request->geometry);
+    if (!queue->producer.argument_streaming) {
+      iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+          layout, &request->geometry, grid_address,
+          arguments->memory.contents.data + argument_offset, &grid);
+    }
     if (queue->grid.memory) {
       const uint64_t command_offset =
           (position & (queue->options.retirement_capacity - 1)) *
           IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
-      iree_hal_amd_gpu_grid_sync_t grid;
-      iree_hal_amd_gpu_dispatch_emplace_grid_sync(
-          layout, &request->geometry, queue->grid.address,
-          arguments->memory.contents.data + argument_offset, &grid);
       grid_packet = iree_hal_amd_gpu_aql_grid_sync_write_packet(
           queue->context->target_info.topology.xcc_count, queue->grid.address,
           &grid, queue->commands->address + command_offset,
           (void*)(queue->commands->memory.contents.data + command_offset));
     } else {
-      const uint64_t grid_offset = iree_align_uint64(
-          indirect ? iree_align_uint64(kernarg_length, 8) +
-                         sizeof(iree_hal_amd_gpu_aql_indirect_arguments_t)
-                   : kernarg_length,
-          8);
-      const uint64_t upload_address =
-          arguments->address + argument_offset + grid_offset;
-      iree_hal_amd_gpu_dispatch_emplace_grid_sync(
-          layout, &request->geometry, upload_address,
-          arguments->memory.contents.data + argument_offset,
-          (void*)(arguments->memory.contents.data + argument_offset +
-                  grid_offset));
+      void* target =
+          arguments->memory.contents.data + argument_offset + grid_offset;
+      if (queue->producer.argument_streaming) {
+        iree_memcpy_stream_dst(target, &grid, sizeof(grid));
+      } else {
+        memcpy(target, &grid, sizeof(grid));
+      }
       grid_packet = iree_hal_amd_gpu_aql_grid_sync_packet(
-          queue->options.programs->grid_sync, upload_address);
+          queue->options.programs->grid_sync, grid_address);
     }
   }
   if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
@@ -450,11 +465,18 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     const uint64_t target_position = ring->reserved +
                                      (counts.native_count + 4) / 5 + prefix +
                                      cooperative + 1;
+    iree_hal_amd_gpu_aql_indirect_arguments_t indirect_inputs;
     iree_hal_amd_gpu_aql_indirect_prepare(
         layout, &request->geometry, request->flags,
         iree_hal_amd_gpu_aql_ring_packet_address(ring, target_position),
-        counts_address, argument_address, payload.words[0],
-        (void*)(arguments->memory.contents.data + patch_offset));
+        counts_address, argument_address, payload.words[0], &indirect_inputs);
+    if (queue->producer.argument_streaming) {
+      iree_memcpy_stream_dst(arguments->memory.contents.data + patch_offset,
+                             &indirect_inputs, sizeof(indirect_inputs));
+    } else {
+      memcpy(arguments->memory.contents.data + patch_offset, &indirect_inputs,
+             sizeof(indirect_inputs));
+    }
     patch = iree_hal_amd_gpu_aql_indirect_packet(
         queue->options.programs->indirect, arguments->address + patch_offset);
   }
@@ -605,11 +627,15 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_control(
   const uint64_t completion = suffix ? 0 : signal->device_address;
   iree_hal_amd_gpu_aql_packet_t packet;
   if (program) {
-    *(iree_hal_amd_gpu_control_program_arguments_t*)(arguments->memory.contents
-                                                         .data +
-                                                     offset) =
+    const iree_hal_amd_gpu_control_program_arguments_t inputs =
         iree_hal_amd_gpu_control_program_arguments(target,
                                                    submission->control.command);
+    if (queue->producer.argument_streaming) {
+      iree_memcpy_stream_dst(arguments->memory.contents.data + offset, &inputs,
+                             sizeof(inputs));
+    } else {
+      memcpy(arguments->memory.contents.data + offset, &inputs, sizeof(inputs));
+    }
     packet = iree_hal_amd_gpu_aql_control_program_packet(
         queue->options.programs->control[iree_hal_amd_gpu_control_program_index(
             submission->control.command)],
@@ -682,7 +708,8 @@ uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       invocation->program->host_template;
   if (host_template) {
-    return host_template->command_data_offset - host_template->data_offset;
+    return iree_align_uint64(
+        host_template->command_data_offset - host_template->data_offset, 4);
   }
   uint64_t length = invocation->block_ordinal
                         ? sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
@@ -851,6 +878,7 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
     *out_status = iree_hal_amd_gpu_aql_command_invocation_write(
         invocation, queue->options.queue_ordinal,
         arguments->address + argument_offset, upload,
+        queue->producer.argument_streaming,
         command_data ? queue->commands->address + command_offset : 0,
         command_data ? queue->commands->memory.contents.data + command_offset
                      : NULL,
@@ -1072,7 +1100,7 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_transfer(
       transfer, queue->options.programs->blit, capacity,
       iree_make_byte_span(arguments->memory.contents.data + argument_offset,
                           argument_length),
-      arguments->address + argument_offset,
+      arguments->address + argument_offset, queue->producer.argument_streaming,
       transfers ? iree_make_byte_span(
                       transfers->memory.contents.data + staging_offset,
                       staging_length)

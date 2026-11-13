@@ -82,6 +82,11 @@ iree_status_t iree_hal_amd_gpu_grid_sync_program_query(
     iree_hal_amd_gpu_gfxip_version_t gfxip, iree_const_byte_span_t* out_code,
     iree_hal_amd_gpu_image_kernel_t* out_kernel);
 
+// Computes the complete private grid state from admitted geometry. The caller
+// owns the state allocation and supplies its address when authoring kernargs.
+iree_hal_amd_gpu_grid_sync_t iree_hal_amd_gpu_dispatch_grid_sync(
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch);
+
 // Initializes a private invocation's grid state and its prepared hidden-pointer
 // destination. Geometry and residency were admitted by the queue. This neither
 // allocates nor scans argument metadata; no caller-owned arguments are changed.
@@ -138,6 +143,16 @@ void iree_hal_amd_gpu_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
     iree_hal_dispatch_flags_t flags, void* target);
+
+// Streams the same admitted ABI with the cooperative grid address incorporated
+// before any destination byte is written. target owns an aligned, rounded-up
+// DWORD extent as required by kernarg_layout_emplace_stream. External native
+// arguments bypass host writes. Publication and retirement remain caller-owned.
+void iree_hal_amd_gpu_dispatch_emplace_arguments_stream(
+    const iree_hal_amd_gpu_function_t* function,
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
+    iree_const_byte_span_t constants, const uint64_t* binding_addresses,
+    iree_hal_dispatch_flags_t flags, uint64_t grid_sync_address, void* target);
 
 // Resolves a prepared direct buffer binding at the point execution is ready.
 // Dispatch admission has checked the captured range. This checks its native

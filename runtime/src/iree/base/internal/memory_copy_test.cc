@@ -55,6 +55,78 @@ TEST(WriteOnlyCopy, ExactExtentAtEveryAlignment) {
   }
 }
 
+void FinishStreamingCopy() {
+#if defined(IREE_ARCH_X86_64)
+  _mm_sfence();
+#endif  // IREE_ARCH_X86_64
+}
+
+TEST(StreamingCopy, Empty) {
+  iree_memcpy_stream_dst(nullptr, nullptr, 0);
+  iree_memset_stream_dst(nullptr, 0xff, 0);
+  FinishStreamingCopy();
+}
+
+TEST(StreamingCopy, ExactExtentAtEveryDwordAlignment) {
+  auto lengths = CopyLengths();
+  lengths.insert(lengths.end(), {65532, 65536});
+  for (size_t length : lengths) {
+    if (length % 4) {
+      continue;
+    }
+    for (size_t source_offset = 0; source_offset < 16; ++source_offset) {
+      std::vector<uint8_t> source(length + source_offset);
+      for (size_t i = 0; i < source.size(); ++i) {
+        source[i] = static_cast<uint8_t>(i * 37 + length);
+      }
+      const auto original = source;
+      for (size_t target_offset = 0; target_offset < 16; target_offset += 4) {
+        std::vector<uint32_t> target((length + target_offset + 16) / 4,
+                                     UINT32_C(0x5a5a5a5a));
+        auto* bytes = reinterpret_cast<uint8_t*>(target.data());
+        const uint8_t* input =
+            source.empty() ? nullptr : source.data() + source_offset;
+        iree_memcpy_stream_dst(bytes + target_offset, input, length);
+        FinishStreamingCopy();
+        for (size_t i = 0; i < target.size() * 4; ++i) {
+          const uint8_t expected =
+              i >= target_offset && i - target_offset < length
+                  ? source[source_offset + i - target_offset]
+                  : 0x5a;
+          ASSERT_EQ(bytes[i], expected)
+              << "length=" << length << " source=" << source_offset
+              << " target=" << target_offset << " index=" << i;
+        }
+        ASSERT_EQ(source, original);
+      }
+    }
+  }
+}
+
+TEST(StreamingFill, ExactExtentAtEveryDwordAlignment) {
+  auto lengths = CopyLengths();
+  lengths.insert(lengths.end(), {65532, 65536});
+  for (size_t length : lengths) {
+    if (length % 4) {
+      continue;
+    }
+    for (size_t offset = 0; offset < 16; offset += 4) {
+      for (uint8_t value : {0x00, 0x01, 0xa5, 0xff}) {
+        std::vector<uint32_t> words((length + offset + 16) / 4,
+                                    UINT32_C(0x5a5a5a5a));
+        auto* bytes = reinterpret_cast<uint8_t*>(words.data());
+        iree_memset_stream_dst(bytes + offset, value, length);
+        FinishStreamingCopy();
+        for (size_t i = 0; i < words.size() * 4; ++i) {
+          ASSERT_EQ(bytes[i], i >= offset && i - offset < length ? value : 0x5a)
+              << "length=" << length << " offset=" << offset
+              << " value=" << static_cast<int>(value) << " index=" << i;
+        }
+      }
+    }
+  }
+}
+
 TEST(WriteOnlyFill, Empty) { iree_memset_write_only(nullptr, 0xff, 0); }
 
 TEST(WriteOnlyFill, ExactExtentAtEveryAlignment) {

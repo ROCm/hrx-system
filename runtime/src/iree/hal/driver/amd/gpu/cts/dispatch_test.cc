@@ -798,16 +798,27 @@ TEST_P(GpuNativeDispatchTest,
   }
   const auto check_arguments = [&]() {
     for (uint32_t i = 0; i < GetParam().queue_count; ++i) {
-      const auto* storage =
+      const auto* aql_queue =
           command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
               ? reinterpret_cast<iree_hal_amd_gpu_aql_queue_t*>(queues_[i])
-                    ->producer.arguments
+              : nullptr;
+      const bool local =
+          aql_queue &&
+          (aql_queue->storage.capabilities &
+           AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0;
+      const auto* storage =
+          aql_queue
+              ? aql_queue->producer.arguments
               : reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[i])
                     ->producer.arguments;
       ASSERT_NE(storage, nullptr);
       EXPECT_EQ(storage->memory.host_access, AMDF_MEMORY_MAP_FLAG_WRITE);
-      EXPECT_TRUE(storage->memory.host_properties &
-                  IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK);
+      EXPECT_EQ(storage->memory.info.memory_class,
+                local ? AMDF_MEMORY_CLASS_LOCAL : AMDF_MEMORY_CLASS_SYSTEM);
+      if (!local) {
+        EXPECT_TRUE(storage->memory.host_properties &
+                    IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK);
+      }
       amdf_memory_access_info_t info = {
           .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
           .structure_size = sizeof(info),
@@ -818,7 +829,12 @@ TEST_P(GpuNativeDispatchTest,
       EXPECT_EQ(info.access,
                 AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
       EXPECT_FALSE(info.flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
-      EXPECT_TRUE(info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT);
+      if (!local) {
+        EXPECT_TRUE(info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT);
+      } else {
+        EXPECT_TRUE(storage->memory.info.flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL);
+        EXPECT_TRUE(aql_queue->producer.argument_streaming);
+      }
     }
   };
   check_arguments();

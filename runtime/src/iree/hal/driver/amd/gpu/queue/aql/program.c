@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/aql/program.h"
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/status.h"
 
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_control_program_packet(
@@ -230,6 +231,20 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
     uint64_t argument_address, uint64_t values_address, uint64_t signal_address,
     void* upload, iree_hal_amd_gpu_aql_program_flags_t flags) {
   const bool profiling = (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE) != 0;
+  // Builtin ABIs have a fixed bound. Prepare their optional fields before the
+  // sole write to LOCAL backing; no caller-sized argument mirror is needed.
+  iree_alignas(8) uint8_t
+      inputs[sizeof(iree_hal_amd_gpu_aql_program_arguments_t) +
+             sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
+             sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)] = {0};
+  void* target = upload;
+  const bool stream_arguments =
+      ring->host_publish_executor != AMDF_CACHE_TRANSITION_EXECUTOR_NONE &&
+      (storage->capabilities &
+       AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0;
+  if (stream_arguments) {
+    upload = inputs;
+  }
   iree_hal_amd_gpu_aql_packet_t prefix[3];
   uint32_t count = 0;
   iree_hal_amd_gpu_aql_materialize_arguments_t* materialize = upload;
@@ -298,6 +313,17 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
       IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
           IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
   // Every argument is complete before a valid header can run ahead of the host.
+  if (stream_arguments) {
+    const size_t length =
+        (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST
+             ? sizeof(iree_hal_amd_gpu_aql_program_arguments_t)
+             : sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)) +
+        (profiling
+             ? sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
+                   sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
+             : 0);
+    iree_memcpy_stream_dst(target, inputs, length);
+  }
   amdf_status_t status = AMDF_STATUS_OK;
   for (uint32_t i = 0; i < count && amdf_status_is_ok(status); ++i) {
     iree_hal_amd_gpu_aql_ring_write_body(ring, position + i, &prefix[i]);

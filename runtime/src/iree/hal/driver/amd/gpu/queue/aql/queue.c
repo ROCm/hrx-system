@@ -1905,7 +1905,14 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       .next = &service,
       .queue_family_ordinal = options->family_ordinal,
       .priority = iree_hal_amd_gpu_user_queue_native_priority(params->priority),
-      .placement = (amdf_queue_placement_t)params->placement,
+      .placement =
+          params->placement == IREE_HAL_QUEUE_PLACEMENT_DEFAULT &&
+                  (native_family->user_queue_capabilities &
+                   AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) &&
+                  (context->device_info.features &
+                   AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY)
+              ? AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL
+              : (amdf_queue_placement_t)params->placement,
       .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
       .required_capabilities =
           AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
@@ -1922,6 +1929,17 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
   }
   if (iree_status_is_ok(status)) {
     queue->base.placement = queue->storage.placement;
+    queue->producer.argument_streaming =
+        (queue->storage.capabilities &
+         AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0;
+    if (queue->producer.argument_streaming) {
+      status = iree_hal_amd_gpu_input_memory_initialize_local(
+          context, AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+          &queue->argument_memory);
+      queue->growth.argument_memory = &queue->argument_memory.options;
+    }
+  }
+  if (iree_status_is_ok(status)) {
     if (host_mapping.index_bits != 64 || host_mapping.doorbell_bits != 64 ||
         !host_mapping.read_index_address || !host_mapping.write_index_address ||
         !host_mapping.doorbell_address || !device_mapping.ring_address) {
@@ -1942,7 +1960,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
           &queue->growth, queue->storage.queue, options->scratch_memory,
           &queue->scratch);
       status = iree_hal_amd_gpu_byte_storage_allocate(
-          context, options->argument_memory, options->argument_capacity, 0,
+          context, queue->growth.argument_memory, options->argument_capacity, 0,
           host_allocator, &queue->producer.arguments);
     }
   }

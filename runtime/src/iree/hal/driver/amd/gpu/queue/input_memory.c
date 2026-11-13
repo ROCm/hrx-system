@@ -8,6 +8,82 @@
 
 #include "iree/hal/driver/amd/status.h"
 
+iree_status_t iree_hal_amd_gpu_input_memory_initialize_local(
+    const iree_hal_amd_gpu_context_t* context,
+    amdf_memory_access_t device_access,
+    iree_hal_amd_gpu_input_memory_t* out_memory) {
+  const amdf_memory_device_access_t access = {
+      .device = context->device,
+      .requirements = {.access = device_access,
+                       .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+                       .address_kinds = UINT64_C(1)
+                                        << AMDF_MEMORY_ADDRESS_GPU}};
+  iree_hal_amd_fabric_memory_options_t options = {
+      .access_count = 1,
+      .accesses = &access,
+      .required_flags =
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+      .host_access = AMDF_MEMORY_MAP_FLAG_WRITE};
+  iree_status_t status = iree_ok_status();
+  bool found = false;
+  for (uint32_t scope = 0; scope < context->memory_scope_count && !found &&
+                           iree_status_is_ok(status);
+       ++scope) {
+    options.scope = context->memory_scopes[scope];
+    amdf_memory_scope_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(info)};
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        context->api->memory_scope_query_info(options.scope, &info),
+        "memory_scope_query_info(LOCAL shader inputs)");
+    for (uint32_t i = 0;
+         i < info.memory_profile_count && !found && iree_status_is_ok(status);
+         ++i) {
+      amdf_memory_profile_t profile = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+          .structure_size = sizeof(profile)};
+      amdf_memory_access_capabilities_t capabilities = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+          .structure_size = sizeof(capabilities)};
+      const amdf_status_t native_status =
+          context->api->memory_scope_query_device_profile(
+              options.scope, i, 1, &access, &profile, &capabilities);
+      if (native_status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+        continue;
+      }
+      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+          native_status,
+          "memory_scope_query_device_profile(LOCAL shader inputs)");
+      if (iree_status_is_ok(status) &&
+          amdf_status_is_ok(profile.availability) &&
+          profile.memory_class == AMDF_MEMORY_CLASS_LOCAL &&
+          iree_all_bits_set(profile.roles,
+                            AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                                AMDF_MEMORY_PROFILE_ROLE_HOST_MAP) &&
+          iree_all_bits_set(profile.supported_flags, options.required_flags) &&
+          iree_any_bit_set(profile.host_mapping.supported_access,
+                           AMDF_MEMORY_MAP_FLAG_WRITE) &&
+          !iree_any_bit_set(capabilities.guaranteed_flags,
+                            AMDF_MEMORY_FLAG_DEVICE_UNCACHED)) {
+        options.profile = profile;
+        found = true;
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    if (found) {
+      out_memory->access = access;
+      out_memory->options = options;
+      out_memory->options.accesses = &out_memory->access;
+    } else {
+      status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                "AQL payload publication has no host-writable "
+                                "LOCAL shader-input profile");
+    }
+  }
+  return status;
+}
+
 iree_status_t iree_hal_amd_gpu_input_memory_initialize(
     const iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
     amdf_memory_access_t device_access,

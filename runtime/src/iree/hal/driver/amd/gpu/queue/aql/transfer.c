@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/aql/transfer.h"
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/buffer.h"
 
 uint64_t iree_hal_amd_gpu_aql_transfer_staging_length(
@@ -46,7 +47,7 @@ iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
 iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
     const iree_hal_amd_gpu_transfer_t* transfer, uint64_t kernel,
     uint32_t packet_capacity, iree_byte_span_t argument_storage,
-    uint64_t argument_address, iree_byte_span_t staging,
+    uint64_t argument_address, bool stream_arguments, iree_byte_span_t staging,
     uint64_t staging_address,
     iree_hal_amd_gpu_aql_transfer_chunk_t* out_chunk) {
   *out_chunk = (iree_hal_amd_gpu_aql_transfer_chunk_t){
@@ -112,8 +113,13 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
       }
       const uint32_t argument_offset =
           out_chunk->packet_count * sizeof(arguments);
-      memcpy(argument_storage.data + argument_offset, &arguments,
-             sizeof(arguments));
+      if (stream_arguments) {
+        iree_memcpy_stream_dst(argument_storage.data + argument_offset,
+                               &arguments, sizeof(arguments));
+      } else {
+        memcpy(argument_storage.data + argument_offset, &arguments,
+               sizeof(arguments));
+      }
       out_chunk->packets[out_chunk->packet_count++] =
           iree_hal_amd_gpu_aql_transfer_packet(
               kernel, argument_address + argument_offset, arguments.length, 0);

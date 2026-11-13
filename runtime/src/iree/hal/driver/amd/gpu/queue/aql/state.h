@@ -22,6 +22,7 @@
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
 #include "iree/hal/driver/amd/gpu/queue/host_wait.h"
+#include "iree/hal/driver/amd/gpu/queue/input_memory.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
@@ -109,6 +110,8 @@ struct iree_hal_amd_gpu_aql_queue_t {
   iree_host_size_t pending_size;
   // Native backing acquisition, independent of execution publication.
   iree_hal_amd_gpu_aql_growth_context_t growth;
+  // Optional owned LOCAL kernarg policy, borrowed by initial and grown backing.
+  iree_hal_amd_gpu_input_memory_t argument_memory;
   // Demand-driven firmware private memory.
   iree_hal_amd_gpu_aql_scratch_t scratch;
   // Publisher-owned native storage and accepted causal prefix.
@@ -132,6 +135,9 @@ struct iree_hal_amd_gpu_aql_queue_t {
     // CPU-only replay workspace, reused under exclusive publication. Its
     // capacity is independent of all GPU-visible storage and execution credit.
     iree_byte_span_t preparation;
+    // Every ABI byte uses non-temporal stores under the achieved native
+    // contract.
+    bool argument_streaming;
   } producer;
   // A finite packet run held behind its first INVALID header. Only the current
   // publisher touches its packet coordinates and physical completion.
