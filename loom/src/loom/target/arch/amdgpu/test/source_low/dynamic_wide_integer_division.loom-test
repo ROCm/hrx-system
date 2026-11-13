@@ -1,174 +1,194 @@
 // RUN: emit source-low @unsigned_pair target=amdgpu:gfx11-generic output=low
-func.def @unsigned_pair(%dividend: i64, %divisor: i64) -> (i64, i64) {
+kernel.def @unsigned_pair() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%dividend: i64, %divisor: i64, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xi64>
   %quotient, %remainder = scalar.divremui %dividend, %divisor : i64
-  func.return %quotient, %remainder : i64, i64
+  view.store %quotient, %captured[0, %capture_lane] : i64, view<2x64xi64>
+  view.store %remainder, %captured[1, %capture_lane] : i64, view<2x64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @unsigned_pair(%dividend: reg<amdgpu.vgpr x2>, %divisor: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
-  %162 = slice %divisor[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %163 = v_clz_i32_u32 %162
-  %164 = v_mov_b32 32
-  %165 = v_min_u32 %163, %164
-  %169 = v_lshlrev_b64 %165, %divisor
-  %170 = slice %169[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %171 = slice %169[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %172 = s_mov_b32 32
-  %176 = v_mov_b32_copy %172
-  %184, %185 = v_sub_co_u32 %176, %165
-  %190 = v_lshrrev_b64 %184, %dividend
-  %193 = slice %190[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %194 = slice %190[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %196 = v_mov_b32 0
-  %197 = v_mov_b32 1
-  %198 = v_cvt_f32_u32 %170
-  %199 = v_rcp_f32 %198
-  %200 = v_mul_f32_lit %199, 1333788670
-  %201 = v_cvt_u32_f32 %200
-  %202 = v_mul_lo_u32 %170, %201
-  %203 = v_sub_nc_u32 %196, %202
-  %204 = v_mul_hi_u32 %201, %203
-  %205 = v_add_u32 %201, %204
-  %206 = v_mul_hi_u32 %194, %205
-  %207 = v_mul_lo_u32 %206, %170
-  %208 = v_sub_nc_u32 %194, %207
-  %209 = v_add_u32 %206, %197
-  %210, %211 = v_sub_co_u32 %208, %170
-  %212 = v_cndmask_b32 %209, %206, %211
-  %213 = v_cndmask_b32 %210, %208, %211
-  %214 = v_add_u32 %212, %197
-  %215, %216 = v_sub_co_u32 %213, %170
-  %217 = v_cndmask_b32 %214, %212, %216
-  %218 = v_cndmask_b32 %215, %213, %216
-  %219 = v_clz_i32_u32 %170
-  %220 = v_lshlrev_b32 %219, %170
-  %230 = concat(%193, %218) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %234 = v_lshlrev_b64 %219, %230
-  %235 = slice %234[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %236 = slice %234[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %237 = s_mov_b32 65536
-  %238 = v_and_b32_lit %220, 65535
-  %239 = v_lshrrev_b32_src0_inline %220, 16
-  %240 = v_and_b32_lit %235, 65535
-  %241 = v_lshrrev_b32_src0_inline %235, 16
-  %244 = v_cvt_f32_u32 %239
-  %245 = v_rcp_f32 %244
-  %246 = v_mul_f32_lit %245, 1333788670
-  %247 = v_cvt_u32_f32 %246
-  %248 = v_mul_lo_u32 %239, %247
-  %249 = v_sub_nc_u32 %196, %248
-  %250 = v_mul_hi_u32 %247, %249
-  %251 = v_add_u32 %247, %250
-  %252 = v_mul_hi_u32 %236, %251
-  %253 = v_mul_lo_u32 %252, %239
-  %254 = v_sub_nc_u32 %236, %253
-  %255 = v_add_u32 %252, %197
-  %256, %257 = v_sub_co_u32 %254, %239
-  %258 = v_cndmask_b32 %255, %252, %257
-  %259 = v_cndmask_b32 %256, %254, %257
-  %260 = v_add_u32 %258, %197
-  %261, %262 = v_sub_co_u32 %259, %239
-  %263 = v_cndmask_b32 %260, %258, %262
-  %264 = v_cndmask_b32 %261, %259, %262
-  %266 = v_mov_b32 4294967295
-  %267 = v_add_u32 %263, %266
-  %268 = v_add_u32 %264, %239
-  %269 = v_cmp_ge_u32 %263, %237
-  %270 = v_cndmask_b32 %263, %267, %269
-  %271 = v_cndmask_b32 %264, %268, %269
-  %272 = v_mul_lo_u32 %270, %238
-  %273 = v_lshlrev_b32_src0_inline %271, 16
-  %274 = v_add_u32 %273, %241
-  %276 = v_add_u32 %270, %266
-  %277 = v_add_u32 %271, %239
-  %278 = v_cmp_gt_u32 %272, %274
-  %279 = v_cndmask_b32 %270, %276, %278
-  %280 = v_cndmask_b32 %271, %277, %278
-  %281 = v_cmp_lt_u32 %271, %237
-  %282 = v_cndmask_b32 %270, %279, %281
-  %283 = v_cndmask_b32 %271, %280, %281
-  %284 = v_mul_lo_u32 %282, %238
-  %285 = v_lshlrev_b32_src0_inline %283, 16
-  %286 = v_add_u32 %285, %241
-  %288 = v_add_u32 %282, %266
-  %289 = v_cmp_gt_u32 %284, %286
-  %290 = v_cndmask_b32 %282, %288, %289
-  %291 = v_cmp_lt_u32 %283, %237
-  %292 = v_cndmask_b32 %282, %290, %291
-  %293 = v_lshlrev_b32_src0_inline %236, 16
-  %294 = v_add_u32 %293, %241
-  %295 = v_mul_lo_u32 %292, %220
-  %296 = v_sub_nc_u32 %294, %295
-  %297 = v_mul_hi_u32 %296, %251
-  %298 = v_mul_lo_u32 %297, %239
-  %299 = v_sub_nc_u32 %296, %298
-  %300 = v_add_u32 %297, %197
-  %301, %302 = v_sub_co_u32 %299, %239
-  %303 = v_cndmask_b32 %300, %297, %302
-  %304 = v_cndmask_b32 %301, %299, %302
-  %305 = v_add_u32 %303, %197
-  %306, %307 = v_sub_co_u32 %304, %239
-  %308 = v_cndmask_b32 %305, %303, %307
-  %309 = v_cndmask_b32 %306, %304, %307
-  %311 = v_add_u32 %308, %266
-  %312 = v_add_u32 %309, %239
-  %313 = v_cmp_ge_u32 %308, %237
-  %314 = v_cndmask_b32 %308, %311, %313
-  %315 = v_cndmask_b32 %309, %312, %313
-  %316 = v_mul_lo_u32 %314, %238
-  %317 = v_lshlrev_b32_src0_inline %315, 16
-  %318 = v_add_u32 %317, %240
-  %320 = v_add_u32 %314, %266
-  %321 = v_add_u32 %315, %239
-  %322 = v_cmp_gt_u32 %316, %318
-  %323 = v_cndmask_b32 %314, %320, %322
-  %324 = v_cndmask_b32 %315, %321, %322
-  %325 = v_cmp_lt_u32 %315, %237
-  %326 = v_cndmask_b32 %314, %323, %325
-  %327 = v_cndmask_b32 %315, %324, %325
-  %328 = v_mul_lo_u32 %326, %238
-  %329 = v_lshlrev_b32_src0_inline %327, 16
-  %330 = v_add_u32 %329, %240
-  %332 = v_add_u32 %326, %266
-  %333 = v_cmp_gt_u32 %328, %330
-  %334 = v_cndmask_b32 %326, %332, %333
-  %335 = v_cmp_lt_u32 %327, %237
-  %336 = v_cndmask_b32 %326, %334, %335
-  %337 = v_lshlrev_b32_src0_inline %296, 16
-  %338 = v_add_u32 %337, %240
-  %339 = v_mul_lo_u32 %336, %220
-  %340 = v_sub_nc_u32 %338, %339
-  %341 = v_lshrrev_b32 %219, %340
-  %342 = v_lshlrev_b32_src0_inline %292, 16
-  %343 = v_or_b32 %342, %336
-  %364 = v_mul_lo_u32 %343, %171
-  %365 = v_mul_hi_u32 %343, %171
-  %366 = concat(%364, %365) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %368 = v_lshlrev_b64 %165, %dividend
-  %369 = slice %368[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %379 = concat(%369, %341) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %380 = v_cmp_gt_u64 %366, %379
-  %381 = s_mov_b32 1
-  %382 = s_mov_b32 0
-  %388 = v_mov_b32_copy %381
-  %390 = v_mov_b32_copy %382
-  %391 = v_cndmask_b32 %390, %388, %380
-  %399, %400 = v_sub_co_u32 %343, %391
-  %401, %402 = v_sub_co_ci_u32 %217, %390, %400
-  %quotient = concat(%399, %401) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %406 = slice %divisor[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %408 = v_mul_lo_u32 %399, %406
-  %409 = v_mul_hi_u32 %399, %406
-  %410 = v_mul_lo_u32 %399, %162
-  %411 = v_mul_lo_u32 %401, %406
-  %412 = v_add_u32 %409, %410
-  %413 = v_add_u32 %412, %411
-  %415 = slice %dividend[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %416 = slice %dividend[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %419, %420 = v_sub_co_u32 %415, %408
-  %421, %422 = v_sub_co_ci_u32 %416, %413, %420
-  %remainder = concat(%419, %421) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %quotient, %remainder
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 4, direct_arg_count = 2, direct_arg_names = {arg0 = "dividend", arg1 = "divisor"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 8], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @unsigned_pair(%dividend: reg<amdgpu.sgpr x2>, %divisor: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %169 = slice %divisor[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %170 = s_clz_i32_u32 %169
+  %171 = s_mov_b32 32
+  %172 = s_min_u32 %170, %171
+  %176 = s_lshl_b64 %divisor, %172
+  %177 = slice %176[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %178 = slice %176[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %186, %187 = s_sub_co_u32 %171, %172
+  %192 = s_lshr_b64 %dividend, %186
+  %195 = slice %192[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %196 = slice %192[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %198 = s_mov_b32 0
+  %199 = s_mov_b32 1
+  %200 = v_cvt_f32_u32 %177
+  %201 = v_rcp_f32 %200
+  %202 = v_mul_f32_lit %201, 1333788670
+  %203 = v_cvt_u32_f32 %202
+  %204 = v_readfirstlane_b32 %203
+  %205 = s_mul_i32 %177, %204
+  %206 = s_sub_u32 %198, %205
+  %207 = s_mul_hi_u32 %204, %206
+  %208 = s_add_u32 %204, %207
+  %209 = s_mul_hi_u32 %196, %208
+  %210 = s_mul_i32 %209, %177
+  %211 = s_sub_u32 %196, %210
+  %212 = s_add_u32 %209, %199
+  %213, %214 = s_sub_co_u32 %211, %177
+  %215 = s_cselect_b32 %209, %212, %214
+  %216 = s_cselect_b32 %211, %213, %214
+  %217 = s_add_u32 %215, %199
+  %218, %219 = s_sub_co_u32 %216, %177
+  %220 = s_cselect_b32 %215, %217, %219
+  %221 = s_cselect_b32 %216, %218, %219
+  %222 = s_clz_i32_u32 %177
+  %223 = s_lshl_b32 %177, %222
+  %233 = concat(%195, %221) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %237 = s_lshl_b64 %233, %222
+  %238 = slice %237[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %239 = slice %237[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %240 = s_mov_b32 65536
+  %241 = s_mov_b32 16
+  %242 = s_and_b32_lit %223, 65535
+  %243 = s_lshr_b32 %223, %241
+  %244 = s_and_b32_lit %238, 65535
+  %245 = s_lshr_b32 %238, %241
+  %246 = s_mov_b32 0
+  %247 = s_mov_b32 1
+  %248 = v_cvt_f32_u32 %243
+  %249 = v_rcp_f32 %248
+  %250 = v_mul_f32_lit %249, 1333788670
+  %251 = v_cvt_u32_f32 %250
+  %252 = v_readfirstlane_b32 %251
+  %253 = s_mul_i32 %243, %252
+  %254 = s_sub_u32 %246, %253
+  %255 = s_mul_hi_u32 %252, %254
+  %256 = s_add_u32 %252, %255
+  %257 = s_mul_hi_u32 %239, %256
+  %258 = s_mul_i32 %257, %243
+  %259 = s_sub_u32 %239, %258
+  %260 = s_add_u32 %257, %247
+  %261, %262 = s_sub_co_u32 %259, %243
+  %263 = s_cselect_b32 %257, %260, %262
+  %264 = s_cselect_b32 %259, %261, %262
+  %265 = s_add_u32 %263, %247
+  %266, %267 = s_sub_co_u32 %264, %243
+  %268 = s_cselect_b32 %263, %265, %267
+  %269 = s_cselect_b32 %264, %266, %267
+  %270 = s_mov_b32 4294967295
+  %271 = s_add_u32 %268, %270
+  %272 = s_add_u32 %269, %243
+  %273 = s_cmp_ge_u32 %268, %240
+  %274 = s_cselect_b32 %271, %268, %273
+  %275 = s_cselect_b32 %272, %269, %273
+  %276 = s_mul_i32 %274, %242
+  %277 = s_lshl_b32 %275, %241
+  %278 = s_add_u32 %277, %245
+  %279 = s_add_u32 %274, %270
+  %280 = s_add_u32 %275, %243
+  %281 = s_cmp_gt_u32 %276, %278
+  %282 = s_cselect_b32 %279, %274, %281
+  %283 = s_cselect_b32 %280, %275, %281
+  %284 = s_cmp_lt_u32 %275, %240
+  %285 = s_cselect_b32 %282, %274, %284
+  %286 = s_cselect_b32 %283, %275, %284
+  %287 = s_mul_i32 %285, %242
+  %288 = s_lshl_b32 %286, %241
+  %289 = s_add_u32 %288, %245
+  %290 = s_add_u32 %285, %270
+  %291 = s_cmp_gt_u32 %287, %289
+  %292 = s_cselect_b32 %290, %285, %291
+  %293 = s_cmp_lt_u32 %286, %240
+  %294 = s_cselect_b32 %292, %285, %293
+  %295 = s_lshl_b32 %239, %241
+  %296 = s_add_u32 %295, %245
+  %297 = s_mul_i32 %294, %223
+  %298 = s_sub_u32 %296, %297
+  %299 = s_mul_hi_u32 %298, %256
+  %300 = s_mul_i32 %299, %243
+  %301 = s_sub_u32 %298, %300
+  %302 = s_add_u32 %299, %247
+  %303, %304 = s_sub_co_u32 %301, %243
+  %305 = s_cselect_b32 %299, %302, %304
+  %306 = s_cselect_b32 %301, %303, %304
+  %307 = s_add_u32 %305, %247
+  %308, %309 = s_sub_co_u32 %306, %243
+  %310 = s_cselect_b32 %305, %307, %309
+  %311 = s_cselect_b32 %306, %308, %309
+  %312 = s_add_u32 %310, %270
+  %313 = s_add_u32 %311, %243
+  %314 = s_cmp_ge_u32 %310, %240
+  %315 = s_cselect_b32 %312, %310, %314
+  %316 = s_cselect_b32 %313, %311, %314
+  %317 = s_mul_i32 %315, %242
+  %318 = s_lshl_b32 %316, %241
+  %319 = s_add_u32 %318, %244
+  %320 = s_add_u32 %315, %270
+  %321 = s_add_u32 %316, %243
+  %322 = s_cmp_gt_u32 %317, %319
+  %323 = s_cselect_b32 %320, %315, %322
+  %324 = s_cselect_b32 %321, %316, %322
+  %325 = s_cmp_lt_u32 %316, %240
+  %326 = s_cselect_b32 %323, %315, %325
+  %327 = s_cselect_b32 %324, %316, %325
+  %328 = s_mul_i32 %326, %242
+  %329 = s_lshl_b32 %327, %241
+  %330 = s_add_u32 %329, %244
+  %331 = s_add_u32 %326, %270
+  %332 = s_cmp_gt_u32 %328, %330
+  %333 = s_cselect_b32 %331, %326, %332
+  %334 = s_cmp_lt_u32 %327, %240
+  %335 = s_cselect_b32 %333, %326, %334
+  %336 = s_lshl_b32 %298, %241
+  %337 = s_add_u32 %336, %244
+  %338 = s_mul_i32 %335, %223
+  %339 = s_sub_u32 %337, %338
+  %340 = s_lshr_b32 %339, %222
+  %341 = s_lshl_b32 %294, %241
+  %342 = s_or_b32 %341, %335
+  %363 = s_mul_i32 %342, %178
+  %364 = s_mul_hi_u32 %342, %178
+  %367 = s_lshl_b64 %dividend, %172
+  %368 = slice %367[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %383 = s_cmp_gt_u32 %363, %368
+  %384, %385 = s_subb_u32 %340, %364, %383
+  %386 = s_mov_b32 1
+  %387 = s_mov_b32 0
+  %394 = s_cselect_b32 %386, %387, %385
+  %397 = s_cselect_b32 %387, %387, %385
+  %403, %404 = s_sub_co_u32 %342, %394
+  %405, %406 = s_subb_u32 %220, %397, %404
+  %410 = slice %divisor[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %411 = slice %divisor[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %412 = s_mul_i32 %403, %410
+  %413 = s_mul_hi_u32 %403, %410
+  %414 = s_mul_i32 %403, %411
+  %415 = s_mul_i32 %405, %410
+  %416 = s_add_u32 %413, %414
+  %417 = s_add_u32 %416, %415
+  %419 = slice %dividend[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %420 = slice %dividend[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %423, %424 = s_sub_co_u32 %419, %412
+  %425, %426 = s_subb_u32 %420, %417, %424
+  %429 = v_mov_b32_copy %403
+  %431 = v_mov_b32_copy %405
+  %432 = concat(%429, %431) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %433 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  global_store_b64_saddr %433, %432, %captured
+  %435 = v_mov_b32_copy %423
+  %437 = v_mov_b32_copy %425
+  %438 = concat(%435, %437) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %433, %438, %captured {offset = 512}
+  return
 }
 
 // ====
@@ -458,7 +478,14 @@ func.def @bounded_signed(%input: i64, %divisor: i64) -> (i64, i64) {
 
 // ====
 // RUN: emit source-low @unrolled_division target=amdgpu:gfx11-generic output=low
-func.def @unrolled_division(%word: i32, %divisor: i64) -> (i64) {
+kernel.def @unrolled_division() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%word: i32, %divisor: i64, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xi64>
   %begin = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
@@ -467,60 +494,69 @@ func.def @unrolled_division(%word: i32, %divisor: i64) -> (i64) {
     %next = scalar.divui %value, %divisor : i64
     scf.yield %next : i64
   }
-  func.return %result : i64
+  view.store %result, %captured[%capture_lane] : i64, view<64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @unrolled_division(%word: reg<amdgpu.vgpr>, %divisor: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %59 = slice %divisor[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %60 = slice %divisor[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %63 = v_cmp_ne_i32_src1_inline %60 {rhs = 0}
-  %64 = v_cndmask_b32_src1_inline %59, %63 {true_value = 1}
-  %65 = v_mov_b32 0
-  %66 = v_mov_b32 1
-  %67 = v_cvt_f32_u32 %64
-  %68 = v_rcp_f32 %67
-  %69 = v_mul_f32_lit %68, 1333788670
-  %70 = v_cvt_u32_f32 %69
-  %71 = v_mul_lo_u32 %64, %70
-  %72 = v_sub_nc_u32 %65, %71
-  %73 = v_mul_hi_u32 %70, %72
-  %74 = v_add_u32 %70, %73
-  %75 = v_mul_hi_u32 %word, %74
-  %76 = v_mul_lo_u32 %75, %64
-  %77 = v_sub_nc_u32 %word, %76
-  %78 = v_add_u32 %75, %66
-  %79, %80 = v_sub_co_u32 %77, %64
-  %81 = v_cndmask_b32 %78, %75, %80
-  %82 = v_cndmask_b32 %79, %77, %80
-  %83 = v_add_u32 %81, %66
-  %84, %85 = v_sub_co_u32 %82, %64
-  %86 = v_cndmask_b32 %83, %81, %85
-  %88 = v_cndmask_b32_src1_inline %86, %63 {true_value = 0}
-  %92 = v_mul_hi_u32 %88, %74
-  %93 = v_mul_lo_u32 %92, %64
-  %94 = v_sub_nc_u32 %88, %93
-  %95 = v_add_u32 %92, %66
-  %96, %97 = v_sub_co_u32 %94, %64
-  %98 = v_cndmask_b32 %95, %92, %97
-  %99 = v_cndmask_b32 %96, %94, %97
-  %100 = v_add_u32 %98, %66
-  %101, %102 = v_sub_co_u32 %99, %64
-  %103 = v_cndmask_b32 %100, %98, %102
-  %105 = v_cndmask_b32_src1_inline %103, %63 {true_value = 0}
-  %109 = v_mul_hi_u32 %105, %74
-  %110 = v_mul_lo_u32 %109, %64
-  %111 = v_sub_nc_u32 %105, %110
-  %112 = v_add_u32 %109, %66
-  %113, %114 = v_sub_co_u32 %111, %64
-  %115 = v_cndmask_b32 %112, %109, %114
-  %116 = v_cndmask_b32 %113, %111, %114
-  %117 = v_add_u32 %115, %66
-  %118, %119 = v_sub_co_u32 %116, %64
-  %120 = v_cndmask_b32 %117, %115, %119
-  %122 = v_cndmask_b32_src1_inline %120, %63 {true_value = 0}
-  %next_2 = concat(%122, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %next_2
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "word", arg1 = "divisor"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 8], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @unrolled_division(%word: reg<amdgpu.sgpr>, %divisor: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %65 = slice %divisor[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %66 = slice %divisor[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %67 = s_mov_b32 0
+  %68 = s_mov_b32 1
+  %69 = s_cmp_lg_i32 %66, %67
+  %70 = s_cselect_b32 %68, %65, %69
+  %73 = v_cvt_f32_u32 %70
+  %74 = v_rcp_f32 %73
+  %75 = v_mul_f32_lit %74, 1333788670
+  %76 = v_cvt_u32_f32 %75
+  %77 = v_readfirstlane_b32 %76
+  %78 = s_mul_i32 %70, %77
+  %79 = s_sub_u32 %67, %78
+  %80 = s_mul_hi_u32 %77, %79
+  %81 = s_add_u32 %77, %80
+  %82 = s_mul_hi_u32 %word, %81
+  %83 = s_mul_i32 %82, %70
+  %84 = s_sub_u32 %word, %83
+  %85 = s_add_u32 %82, %68
+  %86, %87 = s_sub_co_u32 %84, %70
+  %88 = s_cselect_b32 %82, %85, %87
+  %89 = s_cselect_b32 %84, %86, %87
+  %90 = s_add_u32 %88, %68
+  %91, %92 = s_sub_co_u32 %89, %70
+  %93 = s_cselect_b32 %88, %90, %92
+  %95 = s_cselect_b32 %67, %93, %69
+  %99 = s_mul_hi_u32 %95, %81
+  %100 = s_mul_i32 %99, %70
+  %101 = s_sub_u32 %95, %100
+  %102 = s_add_u32 %99, %68
+  %103, %104 = s_sub_co_u32 %101, %70
+  %105 = s_cselect_b32 %99, %102, %104
+  %106 = s_cselect_b32 %101, %103, %104
+  %107 = s_add_u32 %105, %68
+  %108, %109 = s_sub_co_u32 %106, %70
+  %110 = s_cselect_b32 %105, %107, %109
+  %112 = s_cselect_b32 %67, %110, %69
+  %116 = s_mul_hi_u32 %112, %81
+  %117 = s_mul_i32 %116, %70
+  %118 = s_sub_u32 %112, %117
+  %119 = s_add_u32 %116, %68
+  %120, %121 = s_sub_co_u32 %118, %70
+  %122 = s_cselect_b32 %116, %119, %121
+  %123 = s_cselect_b32 %118, %120, %121
+  %124 = s_add_u32 %122, %68
+  %125, %126 = s_sub_co_u32 %123, %70
+  %127 = s_cselect_b32 %122, %124, %126
+  %129 = s_cselect_b32 %67, %127, %69
+  %130 = s_mov_b32 0
+  %133 = v_mov_b32_copy %129
+  %135 = v_mov_b32_copy %130
+  %136 = concat(%133, %135) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %137 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  global_store_b64_saddr %137, %136, %captured
+  return
 }
 
 // ====

@@ -676,8 +676,6 @@ kernel.def target(@loop_entry_wave64) @uniform_multiple_exits() {
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
 } launch(%first_limit: i32, %second_limit: i32) {
-  %fixture_base = index.constant 0 : offset
-  %fixture_lane = kernel.workitem.id<x> : index
   %loop_begin = scalar.constant 0 : i32
   %increment = scalar.constant 1 : i32
   cfg.br ^header(%loop_begin: i32)

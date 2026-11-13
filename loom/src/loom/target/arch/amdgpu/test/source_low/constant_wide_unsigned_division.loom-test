@@ -67,39 +67,53 @@ amdgpu.target<gfx11-generic> @target
 
 // Both quotient and divisor fit one unsigned word, but their product remains
 // two words for the full-width subtraction.
-func.def target(@target) @narrow_quotient_and_divisor(%input: i64) -> (i64) {
+kernel.def target(@target) @narrow_quotient_and_divisor() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%input: i64, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xi64>
   %value = scalar.assume %input [range(%input, 0, 30064771071)] : i64
   %divisor = scalar.constant 7 : i64
   %result = scalar.remui %value, %divisor : i64
-  func.return %result : i64
+  view.store %result, %captured[%capture_lane] : i64, view<64xi64>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @narrow_quotient_and_divisor(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %7 = v_mov_b32 2454267027
-  %8 = v_mov_b32 613566756
-  %10 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %12 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %14 = v_mov_b32 0
-  %15 = v_mul_hi_u32 %10, %7
-  %16 = v_mul_lo_u32 %12, %7
-  %17 = v_mul_hi_u32 %12, %7
-  %24, %25 = v_add_co_u32 %16, %15
-  %26, %27 = v_add_co_ci_u32 %17, %14, %25
-  %31 = v_mul_lo_u32 %10, %8
-  %32 = v_mul_hi_u32 %10, %8
-  %39, %40 = v_add_co_u32 %31, %24
-  %41, %42 = v_add_co_ci_u32 %32, %14, %40
-  %46 = v_mul_lo_u32 %12, %8
-  %54, %55 = v_add_co_u32 %46, %26
-  %64, %65 = v_add_co_u32 %54, %41
-  %70 = v_mov_b32 7
-  %71 = v_mul_lo_u32 %64, %70
-  %72 = v_mul_hi_u32 %64, %70
-  %78, %79 = v_sub_co_u32 %10, %71
-  %80, %81 = v_sub_co_ci_u32 %12, %72, %79
-  %result = concat(%78, %80) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %result
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @narrow_quotient_and_divisor(%value: reg<amdgpu.sgpr x2>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = s_mov_b32 2454267027
+  %14 = s_mov_b32 613566756
+  %16 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = s_mov_b32 0
+  %21 = s_mul_hi_u32 %16, %13
+  %22 = s_mul_i32 %18, %13
+  %23 = s_mul_hi_u32 %18, %13
+  %30, %31 = s_add_co_u32 %22, %21
+  %32, %33 = s_addc_u32 %23, %20, %31
+  %37 = s_mul_i32 %16, %14
+  %38 = s_mul_hi_u32 %16, %14
+  %45, %46 = s_add_co_u32 %37, %30
+  %47, %48 = s_addc_u32 %38, %20, %46
+  %52 = s_mul_i32 %18, %14
+  %60, %61 = s_add_co_u32 %52, %32
+  %70, %71 = s_add_co_u32 %60, %47
+  %76 = s_mov_b32 7
+  %77 = s_mul_i32 %70, %76
+  %78 = s_mul_hi_u32 %70, %76
+  %84, %85 = s_sub_co_u32 %16, %77
+  %86, %87 = s_subb_u32 %18, %78, %85
+  %90 = v_mov_b32_copy %84
+  %92 = v_mov_b32_copy %86
+  %93 = concat(%90, %92) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %94 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  global_store_b64_saddr %94, %93, %captured
+  return
 }
 
 // ====

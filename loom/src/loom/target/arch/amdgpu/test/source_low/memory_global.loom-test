@@ -166,26 +166,37 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @global_bf16x7_ro
 
 // ====
 
-func.def @global_saddr_dynamic_offset_argument(%input: buffer, %byte_offset: offset) -> (i32) {
+kernel.def @global_saddr_dynamic_offset_argument() {
+  %launch_unit = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_unit, %launch_unit, %launch_unit) : index
+} launch(%input: buffer, %byte_offset: offset, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<1xi32>
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_view = buffer.view %input_global[%byte_offset] : buffer -> view<1xi32>
   %loaded = view.load %input_view[0] : view<1xi32> -> i32
-  func.return %loaded : i32
+  view.store %loaded, %captured[%capture_lane] : i32, view<1xi32>
+  kernel.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @global_saddr_dynamic_offset_argument(%byte_offset: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "byte_offset"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_saddr_dynamic_offset_argument(%byte_offset: reg<amdgpu.sgpr x2>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %9 = slice %byte_offset[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %10 = slice %byte_offset[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %11 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %12 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %13, %14 = v_add_co_u32 %11, %9
-  %15 = v_mov_b32_copy %12
-  %16, %17 = v_add_co_ci_u32 %15, %10, %14
-  %18 = concat(%13, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %loaded = global_load_b32_vaddr %18
-  return %loaded
+  %captured = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = slice %byte_offset[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %byte_offset[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18, %19 = s_add_co_u32 %14, %16
+  %20, %21 = s_addc_u32 %15, %17, %19
+  %22 = concat(%18, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %23 = s_mov_b32 0
+  %loaded = s_load_dword %22, %23
+  %25 = v_mov_b32_copy %loaded
+  %26 = v_mov_b32 0
+  global_store_b32_saddr %26, %25, %captured
+  return
 }
 
 // ====

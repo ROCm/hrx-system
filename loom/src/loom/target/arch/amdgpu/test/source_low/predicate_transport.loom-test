@@ -58,7 +58,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 amdgpu.target<gfx11-generic> @target
 
 // Several predicates survive the loop comparison and rotate independently.
-func.def target(@target) @rotating_predicates(%lhs: i32, %rhs: i32, %limit: i32) -> (i32) {
+kernel.def target(@target) @rotating_predicates() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%lhs: i32, %rhs: i32, %limit: i32, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xi32>
   %begin = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32
   %first = scalar.cmpi slt, %lhs, %rhs : i32
@@ -79,52 +86,50 @@ func.def target(@target) @rotating_predicates(%lhs: i32, %rhs: i32, %limit: i32)
 ^empty:
   cfg.br ^done(%begin: i32)
 ^done(%value: i32):
-  func.return %value : i32
+  view.store %value, %captured[%capture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rotating_predicates(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %limit: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %first = v_cmp_lt_i32 %lhs, %rhs
-  %second = v_cmp_gt_i32 %lhs, %rhs
-  %32, %33 = s_and_saveexec_b64 %first
-  low.cond_br %33, ^prepare, ^_bb5 : reg<amdgpu.scc>
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 3, direct_arg_count = 3, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "limit"}, direct_arg_offsets = [0, 4, 8], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [4, 4, 4], parameter_count = 4, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @rotating_predicates(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %32 = s_cmp_lt_i32 %lhs, %rhs
+  %33 = s_mov_b32 0
+  %34 = s_mov_b32 1
+  %first = s_cselect_b32 %34, %33, %32
+  %36 = s_cmp_gt_i32 %lhs, %rhs
+  %37 = s_mov_b32 0
+  %38 = s_mov_b32 1
+  %second = s_cselect_b32 %38, %37, %36
+  %40 = s_mov_b32 0
+  %41 = s_cmp_lg_i32 %first, %40
+  low.cond_br %41, ^prepare, ^empty : reg<amdgpu.scc>
 ^prepare:
-  %37 = v_mov_b32 0
-  low.br ^_bb9(%37: reg<amdgpu.vgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
-^_bb9(%iteration$25: reg<amdgpu.vgpr>, %head$26: reg<amdgpu.sgpr x2>, %tail$27: reg<amdgpu.sgpr x2>):
-  %39 = s_mov_b64_exec_read
-  low.br ^loop(%iteration$25: reg<amdgpu.vgpr>, %head$26: reg<amdgpu.sgpr x2>, %tail$27: reg<amdgpu.sgpr x2>)
-^loop(%iteration$20: reg<amdgpu.vgpr>, %head$21: reg<amdgpu.sgpr x2>, %tail$22: reg<amdgpu.sgpr x2>):
-  %again = v_cmp_lt_i32 %iteration$20, %limit
-  %40, %41 = s_and_saveexec_b64 %again
-  low.cond_br %41, ^body, ^_bb10 : reg<amdgpu.scc>
+  low.br ^loop(%begin: reg<amdgpu.sgpr>, %first: reg<amdgpu.sgpr>, %second: reg<amdgpu.sgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>, %head: reg<amdgpu.sgpr>, %tail: reg<amdgpu.sgpr>):
+  %again = s_cmp_lt_i32 %iteration, %limit
+  low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
 ^body:
-  %42 = v_mov_b32 1
-  %next = v_add_u32 %iteration$20, %42
-  low.br ^loop(%next: reg<amdgpu.vgpr>, %tail$22: reg<amdgpu.sgpr x2>, %head$21: reg<amdgpu.sgpr x2>)
-^_bb10:
-  s_mov_b64_exec %39
-  low.br ^exit
+  %next = s_add_u32 %iteration, %step
+  low.br ^loop(%next: reg<amdgpu.sgpr>, %tail: reg<amdgpu.sgpr>, %head: reg<amdgpu.sgpr>)
 ^exit:
-  %selected = v_cndmask_b32 %rhs, %lhs, %head$21
-  %result = v_cndmask_b32 %limit, %selected, %tail$22
-  low.br ^_bb7(%result: reg<amdgpu.vgpr>)
-^_bb5:
-  s_mov_b64_exec %32
-  %34 = v_mov_b32 0
-  low.br ^done(%34: reg<amdgpu.vgpr>)
-^_bb7(%value$24: reg<amdgpu.vgpr>):
-  s_mov_b64_exec %32
-  %35 = v_mov_b32 0
-  %36 = v_cndmask_b32 %35, %value$24, %first
-  low.br ^done(%36: reg<amdgpu.vgpr>)
-^done(%value$23: reg<amdgpu.vgpr>):
-  return %value$23
+  %44 = s_cmp_lg_i32_src1_inline %head {rhs = 0}
+  %selected = s_cselect_b32 %lhs, %rhs, %44
+  %46 = s_cmp_lg_i32_src1_inline %tail {rhs = 0}
+  %result = s_cselect_b32 %selected, %limit, %46
+  low.br ^done(%result: reg<amdgpu.sgpr>)
 ^empty:
-  %46 = v_mov_b32 0
-  low.br ^done(%46: reg<amdgpu.vgpr>)
+  low.br ^done(%begin: reg<amdgpu.sgpr>)
+^done(%value: reg<amdgpu.sgpr>):
+  %48 = v_mov_b32_copy %value
+  %49 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %49, %48, %captured
+  return
 }
 
 // ====
@@ -132,7 +137,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rotatin
 amdgpu.target<gfx11-generic> @target
 
 // A same-block comparison and constants enter durable loop arguments.
-func.def target(@target) @rotating_predicate_constants(%lhs: i32, %rhs: i32, %limit: i32) -> (i32) {
+kernel.def target(@target) @rotating_predicate_constants() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%lhs: i32, %rhs: i32, %limit: i32, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xi32>
   %begin = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32
   %enabled = scalar.constant true : i1
@@ -149,39 +161,50 @@ func.def target(@target) @rotating_predicate_constants(%lhs: i32, %rhs: i32, %li
   %a = scf.select %head, %lhs, %rhs : i32
   %b = scf.select %middle, %a, %limit : i32
   %result = scf.select %tail, %b, %begin : i32
-  func.return %result : i32
+  view.store %result, %captured[%capture_lane] : i32, view<64xi32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rotating_predicate_constants(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %limit: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %compared = v_cmp_lt_i32 %lhs, %rhs
-  %37 = v_mov_b32 0
-  %38 = s_mov_b64_exec_read
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 3, direct_arg_count = 3, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "limit"}, direct_arg_offsets = [0, 4, 8], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [4, 4, 4], parameter_count = 4, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @rotating_predicate_constants(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %captured = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %34 = s_mov_b32 0
+  %enabled = s_cmp_eq_i32 %34, %34
+  %36 = s_mov_b32 0
+  %disabled = s_cmp_lg_i32 %36, %36
+  %compared = s_cmp_lt_i32 %lhs, %rhs
   %39 = s_mov_b32 0
-  %40 = s_mov_b32 0
-  %41 = concat(%39, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb4(%37: reg<amdgpu.vgpr>, %38: reg<amdgpu.sgpr x2>, %41: reg<amdgpu.sgpr x2>, %compared: reg<amdgpu.sgpr x2>)
-^_bb4(%iteration$26: reg<amdgpu.vgpr>, %head$27: reg<amdgpu.sgpr x2>, %middle$28: reg<amdgpu.sgpr x2>, %tail$29: reg<amdgpu.sgpr x2>):
-  %43 = s_mov_b64_exec_read
-  low.br ^loop(%iteration$26: reg<amdgpu.vgpr>, %head$27: reg<amdgpu.sgpr x2>, %middle$28: reg<amdgpu.sgpr x2>, %tail$29: reg<amdgpu.sgpr x2>)
-^loop(%iteration$22: reg<amdgpu.vgpr>, %head$23: reg<amdgpu.sgpr x2>, %middle$24: reg<amdgpu.sgpr x2>, %tail$25: reg<amdgpu.sgpr x2>):
-  %again = v_cmp_lt_i32 %iteration$22, %limit
-  %44, %45 = s_and_saveexec_b64 %again
-  low.cond_br %45, ^body, ^_bb5 : reg<amdgpu.scc>
+  %40 = s_mov_b32 1
+  %41 = s_cselect_b32 %40, %39, %enabled
+  %42 = s_mov_b32 0
+  %43 = s_mov_b32 1
+  %44 = s_cselect_b32 %43, %42, %disabled
+  %45 = s_mov_b32 0
+  %46 = s_mov_b32 1
+  %47 = s_cselect_b32 %46, %45, %compared
+  low.br ^loop(%begin: reg<amdgpu.sgpr>, %41: reg<amdgpu.sgpr>, %44: reg<amdgpu.sgpr>, %47: reg<amdgpu.sgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>, %head: reg<amdgpu.sgpr>, %middle: reg<amdgpu.sgpr>, %tail: reg<amdgpu.sgpr>):
+  %again = s_cmp_lt_i32 %iteration, %limit
+  low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
 ^body:
-  %46 = v_mov_b32 1
-  %next = v_add_u32 %iteration$22, %46
-  low.br ^loop(%next: reg<amdgpu.vgpr>, %middle$24: reg<amdgpu.sgpr x2>, %tail$25: reg<amdgpu.sgpr x2>, %head$23: reg<amdgpu.sgpr x2>)
-^_bb5:
-  s_mov_b64_exec %43
-  low.br ^exit
+  %next = s_add_u32 %iteration, %step
+  low.br ^loop(%next: reg<amdgpu.sgpr>, %middle: reg<amdgpu.sgpr>, %tail: reg<amdgpu.sgpr>, %head: reg<amdgpu.sgpr>)
 ^exit:
-  %a = v_cndmask_b32 %rhs, %lhs, %head$23
-  %b = v_cndmask_b32 %limit, %a, %middle$24
-  %result = v_cndmask_b32_src0_inline %b, %tail$25 {false_value = 0}
-  return %result
+  %50 = s_cmp_lg_i32_src1_inline %head {rhs = 0}
+  %a = s_cselect_b32 %lhs, %rhs, %50
+  %52 = s_cmp_lg_i32_src1_inline %middle {rhs = 0}
+  %b = s_cselect_b32 %a, %limit, %52
+  %54 = s_cmp_lg_i32_src1_inline %tail {rhs = 0}
+  %result = s_cselect_b32 %b, %begin, %54
+  %56 = v_mov_b32_copy %result
+  %57 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %57, %56, %captured
+  return
 }
 
 // ====
@@ -189,7 +212,20 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rotatin
 amdgpu.target<gfx11-generic> @target
 
 // Lane predicates retain their full masks while scalar loop control clobbers SCC.
-func.def target(@target) @rotating_lane_predicates(%values: vector<2xi32>, %limit: i32, %lhs: f32, %rhs: f32) -> (f32) {
+kernel.def target(@target) @rotating_lane_predicates() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%values_buffer: buffer, %limit: i32, %lhs_buffer: buffer, %rhs_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %values_view = buffer.view %values_buffer[%capture_base] : buffer -> view<64x2xi32>
+  %values = vector.load %values_view[%capture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %lhs_view = buffer.view %lhs_buffer[%capture_base] : buffer -> view<64xf32>
+  %lhs = view.load %lhs_view[%capture_lane] : view<64xf32> -> f32
+  %rhs_view = buffer.view %rhs_buffer[%capture_base] : buffer -> view<64xf32>
+  %rhs = view.load %rhs_view[%capture_lane] : view<64xf32> -> f32
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<64xf32>
   %begin = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -205,36 +241,43 @@ func.def target(@target) @rotating_lane_predicates(%values: vector<2xi32>, %limi
 ^exit:
   %selected = scf.select %head, %lhs, %rhs : f32
   %result = scf.select %tail, %selected, %rhs : f32
-  func.return %result : f32
+  view.store %result, %captured[%capture_lane] : f32, view<64xf32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rotating_lane_predicates(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 5, resource_count = 4, resource_offsets = [0, 16, 24, 32], resource_parameter_indices = [0, 2, 3, 4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @rotating_lane_predicates(%limit: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %values_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %lhs_view = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %37 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %values = global_load_b64_saddr %37, %values_view
+  %39 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  %lhs = global_load_b32_saddr %39, %lhs_view
+  %41 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  %rhs = global_load_b32_saddr %41, %rhs_view
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %first = v_cmp_lt_i32 %lane, %limit
   %second = v_cmp_gt_i32 %lane, %limit
-  %33 = v_mov_b32 0
-  low.br ^_bb4(%33: reg<amdgpu.vgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
-^_bb4(%iteration$25: reg<amdgpu.vgpr>, %head$26: reg<amdgpu.sgpr x2>, %tail$27: reg<amdgpu.sgpr x2>):
-  %35 = s_mov_b64_exec_read
-  low.br ^loop(%iteration$25: reg<amdgpu.vgpr>, %head$26: reg<amdgpu.sgpr x2>, %tail$27: reg<amdgpu.sgpr x2>)
-^loop(%iteration$22: reg<amdgpu.vgpr>, %head$23: reg<amdgpu.sgpr x2>, %tail$24: reg<amdgpu.sgpr x2>):
-  %again = v_cmp_lt_i32 %iteration$22, %limit
-  %36, %37 = s_and_saveexec_b64 %again
-  low.cond_br %37, ^body, ^_bb5 : reg<amdgpu.scc>
+  low.br ^loop(%begin: reg<amdgpu.sgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
+^loop(%iteration: reg<amdgpu.sgpr>, %head: reg<amdgpu.sgpr x2>, %tail: reg<amdgpu.sgpr x2>):
+  %again = s_cmp_lt_i32 %iteration, %limit
+  low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
 ^body:
-  %38 = v_mov_b32 1
-  %next = v_add_u32 %iteration$22, %38
-  low.br ^loop(%next: reg<amdgpu.vgpr>, %tail$24: reg<amdgpu.sgpr x2>, %head$23: reg<amdgpu.sgpr x2>)
-^_bb5:
-  s_mov_b64_exec %35
-  low.br ^exit
+  %next = s_add_u32 %iteration, %step
+  low.br ^loop(%next: reg<amdgpu.sgpr>, %tail: reg<amdgpu.sgpr x2>, %head: reg<amdgpu.sgpr x2>)
 ^exit:
-  %selected = v_cndmask_b32 %rhs, %lhs, %head$23
-  %result = v_cndmask_b32 %rhs, %selected, %tail$24
-  return %result
+  %selected = v_cndmask_b32 %rhs, %lhs, %head
+  %result = v_cndmask_b32 %rhs, %selected, %tail
+  %52 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %52, %result, %captured
+  return
 }
 
 // ====
@@ -406,7 +449,20 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 amdgpu.target<gfx11-generic> @target
 
 // Constants defined before divergence materialize the mask active at the edge.
-func.def target(@target) @constant_predicates_across_divergence_wave32(%values: vector<2xi32>, %fallback: i1, %yes: f32, %no: f32) -> (f32, f32) {
+kernel.def target(@target) @constant_predicates_across_divergence_wave32() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%values_buffer: buffer, %fallback: i1, %yes_buffer: buffer, %no_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %values_view = buffer.view %values_buffer[%capture_base] : buffer -> view<64x2xi32>
+  %values = vector.load %values_view[%capture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %yes_view = buffer.view %yes_buffer[%capture_base] : buffer -> view<64xf32>
+  %yes = view.load %yes_view[%capture_lane] : view<64xf32> -> f32
+  %no_view = buffer.view %no_buffer[%capture_base] : buffer -> view<64xf32>
+  %no = view.load %no_view[%capture_lane] : view<64xf32> -> f32
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xf32>
   %enabled = scalar.constant true : i1
   %disabled = scalar.constant false : i1
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -420,50 +476,84 @@ func.def target(@target) @constant_predicates_across_divergence_wave32(%values: 
 ^join(%positive: i1, %negative: i1):
   %first = scf.select %positive, %yes, %no : f32
   %second = scf.select %negative, %yes, %no : f32
-  func.return %first, %second : f32, f32
+  view.store %first, %captured[0, %capture_lane] : f32, view<2x64xf32>
+  view.store %second, %captured[1, %capture_lane] : f32, view<2x64xf32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @constant_predicates_across_divergence_wave32(%values: reg<amdgpu.vgpr x2>, %fallback: reg<amdgpu.sgpr x2>, %yes: reg<amdgpu.vgpr>, %no: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "fallback"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_payload_sizes = [1], direct_arg_sizes = [4], parameter_count = 5, resource_count = 4, resource_offsets = [0, 16, 24, 32], resource_parameter_indices = [0, 2, 3, 4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @constant_predicates_across_divergence_wave32(%fallback$25: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %values_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %yes_view = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %no_view = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %fallback$37 = s_bfe_u32_lit %fallback$25, 524288
+  %38 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %values = global_load_b64_saddr %38, %values_view
+  %40 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  %yes = global_load_b32_saddr %40, %yes_view
+  %42 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  %no = global_load_b32_saddr %42, %no_view
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %condition = v_cmp_lt_i32_src1_inline %lane {rhs = 8}
-  %33, %34 = s_and_saveexec_b64 %condition
-  low.cond_br %34, ^then, ^_bb5 : reg<amdgpu.scc>
+  %50, %51 = s_and_saveexec_b64 %condition
+  low.cond_br %51, ^then, ^_bb5 : reg<amdgpu.scc>
 ^then:
-  %45 = s_mov_b64_exec_read
-  %46 = s_mov_b32 0
-  %47 = s_mov_b32 0
-  %48 = concat(%46, %47) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb4(%45: reg<amdgpu.sgpr x2>, %48: reg<amdgpu.sgpr x2>)
-^_bb4(%positive$23: reg<amdgpu.sgpr x2>, %negative$24: reg<amdgpu.sgpr x2>):
-  %44 = s_andn2_b64_exec %33, %condition
-  low.cond_br %44, ^else, ^_bb6 : reg<amdgpu.scc>
+  %62 = s_mov_b64_exec_read
+  %63 = s_mov_b32 0
+  %64 = s_mov_b32 0
+  %65 = concat(%63, %64) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb4(%62: reg<amdgpu.sgpr x2>, %65: reg<amdgpu.sgpr x2>)
+^_bb4(%positive$28: reg<amdgpu.sgpr x2>, %negative$29: reg<amdgpu.sgpr x2>):
+  %61 = s_andn2_b64_exec %50, %condition
+  low.cond_br %61, ^else, ^_bb6 : reg<amdgpu.scc>
 ^else:
-  low.br ^_bb7(%fallback: reg<amdgpu.sgpr x2>, %fallback: reg<amdgpu.sgpr x2>)
-^join(%positive$21: reg<amdgpu.sgpr x2>, %negative$22: reg<amdgpu.sgpr x2>):
-  %first = v_cndmask_b32 %no, %yes, %positive$21
-  %second = v_cndmask_b32 %no, %yes, %negative$22
-  return %first, %second
+  %66 = s_cmp_lg_i32_src1_inline %fallback$37 {rhs = 0}
+  %67 = s_mov_b64_exec_read
+  %68 = slice %67[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %69 = slice %67[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %70 = s_mov_b32 0
+  %71 = s_cselect_b32 %68, %70, %66
+  %72 = s_cselect_b32 %69, %70, %66
+  %73 = concat(%71, %72) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %74 = s_cmp_lg_i32_src1_inline %fallback$37 {rhs = 0}
+  %75 = s_mov_b64_exec_read
+  %76 = slice %75[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %77 = slice %75[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %78 = s_mov_b32 0
+  %79 = s_cselect_b32 %76, %78, %74
+  %80 = s_cselect_b32 %77, %78, %74
+  %81 = concat(%79, %80) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb7(%73: reg<amdgpu.sgpr x2>, %81: reg<amdgpu.sgpr x2>)
+^join(%positive$26: reg<amdgpu.sgpr x2>, %negative$27: reg<amdgpu.sgpr x2>):
+  %first = v_cndmask_b32 %no, %yes, %positive$26
+  %second = v_cndmask_b32 %no, %yes, %negative$27
+  %84 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %84, %first, %captured
+  %85 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_b32_saddr %85, %second, %captured {offset = 256}
+  return
 ^_bb5:
-  s_mov_b64_exec %33
-  %35 = s_mov_b32 0
-  %36 = concat(%35, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb4(%36: reg<amdgpu.sgpr x2>, %36: reg<amdgpu.sgpr x2>)
+  s_mov_b64_exec %50
+  %52 = s_mov_b32 0
+  %53 = concat(%52, %52) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb4(%53: reg<amdgpu.sgpr x2>, %53: reg<amdgpu.sgpr x2>)
 ^_bb6:
-  s_mov_b64_exec %33
-  low.br ^join(%positive$23: reg<amdgpu.sgpr x2>, %negative$24: reg<amdgpu.sgpr x2>)
-^_bb7(%positive$25: reg<amdgpu.sgpr x2>, %negative$26: reg<amdgpu.sgpr x2>):
-  s_mov_b64_exec %33
-  %37 = s_and_b64 %33, %condition
-  %38 = s_xor_b64 %37, %33
-  %39 = s_and_b64 %38, %positive$25
-  %40 = s_or_b64 %37, %39
-  %41 = s_and_b64 %33, %condition
-  %42 = s_xor_b64 %41, %33
-  %43 = s_and_b64 %42, %negative$26
-  low.br ^join(%40: reg<amdgpu.sgpr x2>, %43: reg<amdgpu.sgpr x2>)
+  s_mov_b64_exec %50
+  low.br ^join(%positive$28: reg<amdgpu.sgpr x2>, %negative$29: reg<amdgpu.sgpr x2>)
+^_bb7(%positive$30: reg<amdgpu.sgpr x2>, %negative$31: reg<amdgpu.sgpr x2>):
+  s_mov_b64_exec %50
+  %54 = s_and_b64 %50, %condition
+  %55 = s_xor_b64 %54, %50
+  %56 = s_and_b64 %55, %positive$30
+  %57 = s_or_b64 %54, %56
+  %58 = s_and_b64 %50, %condition
+  %59 = s_xor_b64 %58, %50
+  %60 = s_and_b64 %59, %negative$31
+  low.br ^join(%57: reg<amdgpu.sgpr x2>, %60: reg<amdgpu.sgpr x2>)
 }
 
 // ====
@@ -471,7 +561,20 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @constan
 amdgpu.target<gfx942> @target
 
 // Constants defined before divergence materialize the mask active at the edge.
-func.def target(@target) @constant_predicates_across_divergence_wave64(%values: vector<2xi32>, %fallback: i1, %yes: f32, %no: f32) -> (f32, f32) {
+kernel.def target(@target) @constant_predicates_across_divergence_wave64() {
+  %launch_unit = index.constant 1 : index
+  %launch_width = index.constant 64 : index
+  kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
+} launch(%values_buffer: buffer, %fallback: i1, %yes_buffer: buffer, %no_buffer: buffer, %captured_buffer: buffer) {
+  %capture_base = index.constant 0 : offset
+  %capture_lane = kernel.workitem.id<x> : index
+  %values_view = buffer.view %values_buffer[%capture_base] : buffer -> view<64x2xi32>
+  %values = vector.load %values_view[%capture_lane, 0] : view<64x2xi32> -> vector<2xi32>
+  %yes_view = buffer.view %yes_buffer[%capture_base] : buffer -> view<64xf32>
+  %yes = view.load %yes_view[%capture_lane] : view<64xf32> -> f32
+  %no_view = buffer.view %no_buffer[%capture_base] : buffer -> view<64xf32>
+  %no = view.load %no_view[%capture_lane] : view<64xf32> -> f32
+  %captured = buffer.view %captured_buffer[%capture_base] : buffer -> view<2x64xf32>
   %enabled = scalar.constant true : i1
   %disabled = scalar.constant false : i1
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -485,48 +588,82 @@ func.def target(@target) @constant_predicates_across_divergence_wave64(%values: 
 ^join(%positive: i1, %negative: i1):
   %first = scf.select %positive, %yes, %no : f32
   %second = scf.select %negative, %yes, %no : f32
-  func.return %first, %second : f32, f32
+  view.store %first, %captured[0, %capture_lane] : f32, view<2x64xf32>
+  view.store %second, %captured[1, %capture_lane] : f32, view<2x64xf32>
+  kernel.return
 }
 
 // ----
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @constant_predicates_across_divergence_wave64(%values: reg<amdgpu.vgpr x2>, %fallback: reg<amdgpu.sgpr x2>, %yes: reg<amdgpu.vgpr>, %no: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "fallback"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_payload_sizes = [1], direct_arg_sizes = [4], parameter_count = 5, resource_count = 4, resource_offsets = [0, 16, 24, 32], resource_parameter_indices = [0, 2, 3, 4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @constant_predicates_across_divergence_wave64(%fallback$25: reg<amdgpu.sgpr>) asm {
+  %capture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %values_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %yes_view = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %no_view = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %captured = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %fallback$37 = s_bfe_u32_lit %fallback$25, 524288
+  %38 = v_lshlrev_b32_src0_inline %capture_lane, 3
+  %values = global_load_dwordx2_saddr %38, %values_view : reg<amdgpu.vgpr x2>
+  %40 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  %yes = global_load_dword_saddr %40, %yes_view : reg<amdgpu.vgpr>
+  %42 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  %no = global_load_dword_saddr %42, %no_view : reg<amdgpu.vgpr>
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %condition = v_cmp_lt_i32_src1_inline %lane {rhs = 8}
-  %33, %34 = s_and_saveexec_b64 %condition
-  low.cond_br %34, ^then, ^_bb5 : reg<amdgpu.scc>
+  %50, %51 = s_and_saveexec_b64 %condition
+  low.cond_br %51, ^then, ^_bb5 : reg<amdgpu.scc>
 ^then:
-  %45 = s_mov_b64_exec_read
-  %46 = s_mov_b32 0
-  %47 = s_mov_b32 0
-  %48 = concat(%46, %47) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb4(%45: reg<amdgpu.sgpr x2>, %48: reg<amdgpu.sgpr x2>)
-^_bb4(%positive$23: reg<amdgpu.sgpr x2>, %negative$24: reg<amdgpu.sgpr x2>):
-  %44 = s_andn2_b64_exec %33, %condition
-  low.cond_br %44, ^else, ^_bb6 : reg<amdgpu.scc>
+  %62 = s_mov_b64_exec_read
+  %63 = s_mov_b32 0
+  %64 = s_mov_b32 0
+  %65 = concat(%63, %64) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb4(%62: reg<amdgpu.sgpr x2>, %65: reg<amdgpu.sgpr x2>)
+^_bb4(%positive$28: reg<amdgpu.sgpr x2>, %negative$29: reg<amdgpu.sgpr x2>):
+  %61 = s_andn2_b64_exec %50, %condition
+  low.cond_br %61, ^else, ^_bb6 : reg<amdgpu.scc>
 ^else:
-  low.br ^_bb7(%fallback: reg<amdgpu.sgpr x2>, %fallback: reg<amdgpu.sgpr x2>)
-^join(%positive$21: reg<amdgpu.sgpr x2>, %negative$22: reg<amdgpu.sgpr x2>):
-  %first = v_cndmask_b32 %no, %yes, %positive$21
-  %second = v_cndmask_b32 %no, %yes, %negative$22
-  return %first, %second
+  %66 = s_cmp_lg_i32_src1_inline %fallback$37 {rhs = 0}
+  %67 = s_mov_b64_exec_read
+  %68 = slice %67[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %69 = slice %67[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %70 = s_mov_b32 0
+  %71 = s_cselect_b32 %68, %70, %66
+  %72 = s_cselect_b32 %69, %70, %66
+  %73 = concat(%71, %72) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %74 = s_cmp_lg_i32_src1_inline %fallback$37 {rhs = 0}
+  %75 = s_mov_b64_exec_read
+  %76 = slice %75[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %77 = slice %75[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %78 = s_mov_b32 0
+  %79 = s_cselect_b32 %76, %78, %74
+  %80 = s_cselect_b32 %77, %78, %74
+  %81 = concat(%79, %80) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb7(%73: reg<amdgpu.sgpr x2>, %81: reg<amdgpu.sgpr x2>)
+^join(%positive$26: reg<amdgpu.sgpr x2>, %negative$27: reg<amdgpu.sgpr x2>):
+  %first = v_cndmask_b32 %no, %yes, %positive$26
+  %second = v_cndmask_b32 %no, %yes, %negative$27
+  %84 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_dword_saddr %84, %first, %captured
+  %85 = v_lshlrev_b32_src0_inline %capture_lane, 2
+  global_store_dword_saddr %85, %second, %captured {offset = 256}
+  return
 ^_bb5:
-  s_mov_b64_exec %33
-  %35 = s_mov_b32 0
-  %36 = concat(%35, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb4(%36: reg<amdgpu.sgpr x2>, %36: reg<amdgpu.sgpr x2>)
+  s_mov_b64_exec %50
+  %52 = s_mov_b32 0
+  %53 = concat(%52, %52) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb4(%53: reg<amdgpu.sgpr x2>, %53: reg<amdgpu.sgpr x2>)
 ^_bb6:
-  s_mov_b64_exec %33
-  low.br ^join(%positive$23: reg<amdgpu.sgpr x2>, %negative$24: reg<amdgpu.sgpr x2>)
-^_bb7(%positive$25: reg<amdgpu.sgpr x2>, %negative$26: reg<amdgpu.sgpr x2>):
-  s_mov_b64_exec %33
-  %37 = s_and_b64 %33, %condition
-  %38 = s_xor_b64 %37, %33
-  %39 = s_and_b64 %38, %positive$25
-  %40 = s_or_b64 %37, %39
-  %41 = s_and_b64 %33, %condition
-  %42 = s_xor_b64 %41, %33
-  %43 = s_and_b64 %42, %negative$26
-  low.br ^join(%40: reg<amdgpu.sgpr x2>, %43: reg<amdgpu.sgpr x2>)
+  s_mov_b64_exec %50
+  low.br ^join(%positive$28: reg<amdgpu.sgpr x2>, %negative$29: reg<amdgpu.sgpr x2>)
+^_bb7(%positive$30: reg<amdgpu.sgpr x2>, %negative$31: reg<amdgpu.sgpr x2>):
+  s_mov_b64_exec %50
+  %54 = s_and_b64 %50, %condition
+  %55 = s_xor_b64 %54, %50
+  %56 = s_and_b64 %55, %positive$30
+  %57 = s_or_b64 %54, %56
+  %58 = s_and_b64 %50, %condition
+  %59 = s_xor_b64 %58, %50
+  %60 = s_and_b64 %59, %negative$31
+  low.br ^join(%57: reg<amdgpu.sgpr x2>, %60: reg<amdgpu.sgpr x2>)
 }
