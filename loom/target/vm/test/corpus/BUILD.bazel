@@ -193,6 +193,7 @@ loom_corpus_test(
             "numeric/float/inverse_hyperbolic.loom",
             "numeric/float/inverse_hyperbolic_narrow.loom",
             "numeric/integer/arithmetic.loom",
+            "numeric/integer/bit_count.loom",
             "numeric/integer/division.loom",
             "numeric/integer/widening.loom",
             "numeric/vector/coordinates.loom",
