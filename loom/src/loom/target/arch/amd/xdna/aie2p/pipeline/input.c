@@ -21,10 +21,13 @@ iree_status_t loom_aie2p_native_select_input(
   if (!plan) {
     return iree_ok_status();
   }
+  const loom_pipeline_invocation_t* invocation =
+      realization->invocations.workers[worker].invocation;
   if (plan->acquisition || !source->transport.sources_stable ||
-      (plan->phase_count == 1 && !plan->phases[0].source_capture_count)) {
-    // One stable phase retains autonomous repetition. Phased input admission
-    // belongs to an existing instruction worker.
+      (!invocation->ordinal && plan->phase_count == 1 &&
+       !plan->phases[0].source_capture_count)) {
+    // One stable root phase retains autonomous repetition. Child inputs use
+    // an existing instruction worker to start and retire their DMA queues.
     return iree_ok_status();
   }
   // Prefixes fit independently before the first bulk demand, even if the
@@ -71,7 +74,7 @@ iree_status_t loom_aie2p_native_select_input(
                                            (void**)&input));
   *input = (loom_aie2p_native_input_t){
       .worker = (uint32_t)worker,
-      .invocation = realization->invocations.workers[worker].invocation,
+      .invocation = invocation,
       .controller = UINT32_MAX,
       .begin = loom_symbol_ref_null(),
       .prepare = loom_symbol_ref_null(),
