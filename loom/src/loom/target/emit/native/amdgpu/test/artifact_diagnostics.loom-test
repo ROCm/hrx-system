@@ -1,0 +1,84 @@
+// RUN: emit amdgpu-kernel-assembly
+
+// Descriptor names share the artifact namespace with authored data.
+global.rodata.def @entry.kd = bytes("00")
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: BACKEND/057 {export="entry", symbol_name="entry.kd"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  return
+}
+
+// ====
+
+// Export aliases must be unique even when the function symbols differ.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) export("shared") workgroup_size(64, 1, 1) @first() asm {
+  return
+}
+
+// ERROR@+1: BACKEND/057 {export="second", symbol_name="shared"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) export("shared") workgroup_size(64, 1, 1) @second() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: BACKEND/057 {export="entry", symbol_name="invalid-name"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) export("invalid-name") workgroup_size(64, 1, 1) @entry() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: BACKEND/057 {export="entry", symbol_name="7invalid"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) export("7invalid") workgroup_size(64, 1, 1) @entry() asm {
+  return
+}
+
+// ====
+
+// Read-only data keeps its own source definition through artifact layout.
+// ERROR@+1: BACKEND/057 {symbol_name="invalid-name"}
+global.rodata.def @invalid-name = bytes("00")
+
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  return
+}
+
+// ====
+
+// Retained helpers occupy the same namespace and retain their own definition.
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: BACKEND/057 {symbol_name="leaf"}
+low.func.def target<amdgpu.rdna3.core>(@target) @leaf() asm {
+  return
+}
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) export("leaf") workgroup_size(64, 1, 1) @entry() asm {
+  low.func.call noinline @leaf() : ()
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: BACKEND/057 {symbol_name="invalid-helper"}
+low.func.def target<amdgpu.cdna2.core>(@target) @invalid-helper() asm {
+  return
+}
+
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @entry() asm {
+  low.func.call noinline @invalid-helper() : ()
+  return
+}

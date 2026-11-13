@@ -954,14 +954,18 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
           .data_symbol_count = data_symbols.symbol_count,
           .data_layout = data_symbols.layout,
       };
-      status = loom_amdgpu_artifact_symbols_validate(module, &hsaco_input,
-                                                     table_arena);
-      if (iree_status_is_ok(status)) {
+      bool symbols_accepted = false;
+      status = loom_amdgpu_artifact_symbols_validate(
+          module, &hsaco_input, entries, &program_artifact, &data_symbols,
+          loom_target_entry_emitter(diagnostic_emitter), table_arena,
+          &symbols_accepted);
+      diagnostics_failed |= !symbols_accepted;
+      if (iree_status_is_ok(status) && !diagnostics_failed) {
         status = loom_amdgpu_hsaco_plan_build(&hsaco_input, table_arena,
                                               &hsaco_plan);
       }
     }
-    if (iree_status_is_ok(status) && report != NULL) {
+    if (iree_status_is_ok(status) && !diagnostics_failed && report != NULL) {
       uint64_t artifact_instruction_count = 0;
       if (!iree_checked_add_u64(artifact_body_instruction_count,
                                 artifact_entry_instruction_count,
@@ -986,15 +990,15 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
             report, &emission_breakdown);
       }
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && !diagnostics_failed) {
       status = loom_amdgpu_hal_kernel_library_write_hsaco(
           &hsaco_plan, table_arena, allocator, &hsaco);
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && !diagnostics_failed) {
       status = loom_amdgpu_hal_kernel_library_set_contents(
           artifact_target_key, hsaco, allocator, out_library);
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && !diagnostics_failed) {
       hsaco = NULL;
       out_library->target_bundle_storage =
           entries.values[0].target_facts->storage;

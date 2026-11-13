@@ -32,7 +32,10 @@ typedef struct loom_amdgpu_data_symbol_directory_t {
   const loom_module_t* module;
   // Final HSACO data-symbol rows in layout order.
   const loom_amdgpu_hsaco_data_symbol_t* symbols;
-  // Number of entries in |symbols|.
+  // Module-local source symbol for each final row, or INVALID for a runtime
+  // global without a declaration. Retained for artifact admission diagnostics.
+  const loom_symbol_id_t* source_symbols;
+  // Number of entries in |symbols| and |source_symbols|.
   iree_host_size_t symbol_count;
   // Final data-symbol ordinal by module-local symbol ID, or
   // LOOM_AMDGPU_DATA_SYMBOL_ORDINAL_INVALID for non-data symbols.

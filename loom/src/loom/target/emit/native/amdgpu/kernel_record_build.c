@@ -13,6 +13,7 @@
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
@@ -54,37 +55,16 @@ static iree_status_t loom_amdgpu_kernel_record_concat3(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_kernel_record_symbol_name(
-    const loom_module_t* module, const loom_op_t* function_op,
-    iree_string_view_t* out_symbol) {
-  *out_symbol = iree_string_view_empty();
-  loom_symbol_ref_t symbol_ref = loom_low_function_callee(function_op);
-  if (!loom_symbol_ref_is_valid(symbol_ref) || symbol_ref.module_id != 0 ||
-      symbol_ref.symbol_id >= module->symbols.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU kernel emission function symbol is invalid");
-  }
-  const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
-  if (symbol->name_id == LOOM_STRING_ID_INVALID ||
-      symbol->name_id >= module->strings.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel emission function symbol has no "
-                            "module string");
-  }
-  *out_symbol = loom_string_table_get(&module->strings, symbol->name_id);
-  return loom_amdgpu_symbol_name_validate(*out_symbol);
-}
-
-static iree_status_t loom_amdgpu_kernel_record_export_symbol(
+static iree_string_view_t loom_amdgpu_kernel_record_export_symbol(
     const loom_low_resolved_target_t* target, const loom_module_t* module,
-    const loom_op_t* function_op, iree_string_view_t* out_symbol) {
+    const loom_op_t* function_op) {
   const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
   if (!iree_string_view_is_empty(bundle->export_plan->export_symbol)) {
-    *out_symbol = bundle->export_plan->export_symbol;
-    return loom_amdgpu_symbol_name_validate(*out_symbol);
+    return bundle->export_plan->export_symbol;
   }
-  return loom_amdgpu_kernel_record_symbol_name(module, function_op, out_symbol);
+  const loom_symbol_ref_t symbol_ref = loom_low_function_callee(function_op);
+  const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
+  return loom_string_table_get(&module->strings, symbol->name_id);
 }
 
 static iree_status_t loom_amdgpu_kernel_record_validate_target(
@@ -314,8 +294,9 @@ iree_status_t loom_amdgpu_kernel_record_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_storage_layout_t* storage_layout,
     const loom_amdgpu_kernel_record_options_t* options,
-    iree_arena_allocator_t* scratch_arena,
-    loom_amdgpu_kernel_record_t* out_record) {
+    iree_arena_allocator_t* scratch_arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_kernel_record_t* out_record) {
+  *out_accepted = false;
   *out_record = (loom_amdgpu_kernel_record_t){0};
   loom_amdgpu_native_preflight_t derived_preflight = {0};
   const loom_amdgpu_native_preflight_t* preflight = options->preflight;
@@ -340,9 +321,14 @@ iree_status_t loom_amdgpu_kernel_record_build(
   const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify =
       options->abi_verify;
 
-  iree_string_view_t symbol = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_export_symbol(
-      &schedule->target, schedule->module, schedule->function_op, &symbol));
+  const iree_string_view_t symbol = loom_amdgpu_kernel_record_export_symbol(
+      &schedule->target, schedule->module, schedule->function_op);
+  if (!loom_amdgpu_symbol_name_is_valid(symbol)) {
+    return loom_target_artifact_emit_symbol_requirement(
+        emitter, schedule->function_op, IREE_SV("AMDGPU HSACO"), symbol,
+        IREE_SV("a symbol beginning with a letter, '_' or '$' and containing "
+                "only letters, digits, '_', '$' or '.'"));
+  }
 
   loom_amdgpu_hal_kernel_abi_layout_t derived_abi_layout = {0};
   const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout = options->abi_layout;
@@ -504,5 +490,6 @@ iree_status_t loom_amdgpu_kernel_record_build(
       .architectural_vgpr_count = next_free_vgpr,
       .accum_offset = accum_offset,
   };
+  *out_accepted = true;
   return iree_ok_status();
 }

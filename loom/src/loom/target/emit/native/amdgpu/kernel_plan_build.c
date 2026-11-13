@@ -296,9 +296,13 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
       .minimum_agpr_count =
           program_resources != NULL ? program_resources->agpr_count : 0,
   };
+  bool record_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       &frame->schedule, &frame->allocation, storage_layout, &record_options,
-      arena, &out_plan->record));
+      arena, options->emitter, &record_accepted, &out_plan->record));
+  if (!record_accepted) {
+    return iree_ok_status();
+  }
 
   bool residency_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_plan_admit_residency(

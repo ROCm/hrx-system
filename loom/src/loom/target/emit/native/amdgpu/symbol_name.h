@@ -13,8 +13,8 @@
 extern "C" {
 #endif
 
-// Validates one symbol name against the AMDGPU artifact symbol grammar.
-iree_status_t loom_amdgpu_symbol_name_validate(iree_string_view_t symbol);
+// Tests the AMDGPU artifact symbol grammar; callers own source diagnostics.
+bool loom_amdgpu_symbol_name_is_valid(iree_string_view_t symbol);
 
 #ifdef __cplusplus
 }  // extern "C"

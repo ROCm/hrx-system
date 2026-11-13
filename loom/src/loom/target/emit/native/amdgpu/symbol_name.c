@@ -16,24 +16,15 @@ static bool loom_amdgpu_symbol_name_continue_char(char c) {
          c == '.';
 }
 
-iree_status_t loom_amdgpu_symbol_name_validate(iree_string_view_t symbol) {
-  if (iree_string_view_is_empty(symbol)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU artifact symbol name is required");
-  }
-  if (!loom_amdgpu_symbol_name_start_char(symbol.data[0])) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU artifact symbol '%.*s' has invalid first character '%c'",
-        (int)symbol.size, symbol.data, symbol.data[0]);
+bool loom_amdgpu_symbol_name_is_valid(iree_string_view_t symbol) {
+  if (iree_string_view_is_empty(symbol) ||
+      !loom_amdgpu_symbol_name_start_char(symbol.data[0])) {
+    return false;
   }
   for (iree_host_size_t i = 1; i < symbol.size; ++i) {
     if (!loom_amdgpu_symbol_name_continue_char(symbol.data[i])) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU artifact symbol '%.*s' contains invalid character '%c'",
-          (int)symbol.size, symbol.data, symbol.data[i]);
+      return false;
     }
   }
-  return iree_ok_status();
+  return true;
 }

@@ -53,8 +53,8 @@ loom_amdgpu_data_symbol_directory_runtime_globals(const loom_module_t* module) {
 static void loom_amdgpu_data_symbol_directory_index_runtime_globals(
     const loom_module_t* module,
     const loom_amdgpu_hsaco_data_symbol_t* runtime_symbols,
-    iree_host_size_t runtime_symbol_count,
-    uint32_t* ordinals_by_module_symbol) {
+    iree_host_size_t runtime_symbol_count, uint32_t* ordinals_by_module_symbol,
+    loom_symbol_id_t* source_symbols) {
   for (iree_host_size_t i = 0; i < runtime_symbol_count; ++i) {
     const loom_string_id_t name_id =
         loom_module_lookup_string(module, runtime_symbols[i].name);
@@ -69,6 +69,7 @@ static void loom_amdgpu_data_symbol_directory_index_runtime_globals(
     IREE_ASSERT_EQ(ordinals_by_module_symbol[symbol_id],
                    LOOM_AMDGPU_DATA_SYMBOL_ORDINAL_INVALID);
     ordinals_by_module_symbol[symbol_id] = (uint32_t)i;
+    source_symbols[i] = symbol_id;
   }
 }
 
@@ -106,15 +107,20 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
   }
 
   loom_amdgpu_hsaco_data_symbol_t* symbols = NULL;
+  loom_symbol_id_t* source_symbols = NULL;
   if (symbol_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, symbol_count, sizeof(*symbols), (void**)&symbols));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, symbol_count, sizeof(*source_symbols), (void**)&source_symbols));
+    memset(source_symbols, 0xFF, symbol_count * sizeof(*source_symbols));
   }
   iree_host_size_t next_ordinal = 0;
   loom_amdgpu_runtime_global_symbols(runtime_globals, symbols, &next_ordinal);
   IREE_ASSERT_EQ(next_ordinal, runtime_symbol_count);
   loom_amdgpu_data_symbol_directory_index_runtime_globals(
-      module, symbols, runtime_symbol_count, ordinals_by_module_symbol);
+      module, symbols, runtime_symbol_count, ordinals_by_module_symbol,
+      source_symbols);
 
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_symbol_t* symbol = &module->symbols.entries[i];
@@ -126,6 +132,7 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
                    LOOM_AMDGPU_DATA_SYMBOL_ORDINAL_INVALID);
     ordinals_by_module_symbol[i] = (uint32_t)next_ordinal;
     const iree_const_byte_span_t contents = loom_global_rodata_def_contents(op);
+    source_symbols[next_ordinal] = (loom_symbol_id_t)i;
     symbols[next_ordinal++] = (loom_amdgpu_hsaco_data_symbol_t){
         .name = loom_amdgpu_data_symbol_directory_symbol_name(module, symbol),
         .initial_contents = contents,
@@ -140,6 +147,7 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
   *out_directory = (loom_amdgpu_data_symbol_directory_t){
       .module = module,
       .symbols = symbols,
+      .source_symbols = source_symbols,
       .symbol_count = symbol_count,
       .ordinals_by_module_symbol = ordinals_by_module_symbol,
       .module_symbol_count = module->symbols.count,

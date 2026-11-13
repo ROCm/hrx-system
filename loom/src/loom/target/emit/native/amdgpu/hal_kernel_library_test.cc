@@ -2281,27 +2281,32 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsDescriptorSymbolCollision) {
       "workgroup_size(64, 1, 1) @loom_kernel() {\n"
       "  low.return\n"
       "}\n";
-  loom_module_t* module = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      ParseSource(iree_make_cstring_view(kSource), &module));
-
-  DiagnosticCapture capture;
-  loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {
-      .diagnostic_sink = capture.sink(),
-      .max_errors = 20,
-  };
-  bool emitted = false;
-  iree::Status status(loom_amdgpu_compile_hal_kernel_library(
-      module, &options, iree_allocator_system(), &emitted, &library));
-
-  EXPECT_EQ(status.code(), iree::StatusCode::kInvalidArgument);
-  EXPECT_THAT(
-      status.ToString(),
-      ::testing::HasSubstr(
-          "artifact symbol 'loom_kernel.kd' is emitted more than once"));
-  EXPECT_FALSE(emitted);
-  loom_module_free(module);
+  for (bool capture_diagnostics : {false, true}) {
+    SCOPED_TRACE(capture_diagnostics);
+    loom_module_t* module = nullptr;
+    ASSERT_NO_FATAL_FAILURE(
+        ParseSource(iree_make_cstring_view(kSource), &module));
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        .diagnostic_sink =
+            capture_diagnostics ? capture.sink() : loom_diagnostic_sink_t{},
+        .max_errors = 20,
+    };
+    bool emitted = true;
+    IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
+        module, &options, iree_allocator_system(), &emitted, &library));
+    EXPECT_FALSE(emitted);
+    EXPECT_EQ(library.hsaco_data, nullptr);
+    if (capture_diagnostics) {
+      ASSERT_EQ(capture.diagnostics.size(), 1u);
+      const CapturedDiagnostic& diagnostic = capture.diagnostics.front();
+      EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_057);
+      EXPECT_EQ(GetStringParam(diagnostic, 1), "loom_kernel.kd");
+      EXPECT_EQ(diagnostic.origin_line, 3u);
+    }
+    loom_module_free(module);
+  }
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest,
