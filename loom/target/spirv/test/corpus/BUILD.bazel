@@ -588,6 +588,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16_values": "TARGET/001",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma_values": "TARGET/001",
     "numeric/vector/f32.loom:@vector_bf16_origin_fma_values": "TARGET/001",
+    "numeric/vector/f32.loom:@vector_compensated_integer_product_values": "TARGET/001",
     "numeric/vector/f32.loom:@vector_f32_square_root_values": "LOWERING/036",
     "numeric/vector/floating.loom:@bfloat_lookup_arithmetic_values": "TARGET/001",
     "numeric/vector/reductions.loom:@vector_bfloat_dot_reduction_values": "TARGET/001",

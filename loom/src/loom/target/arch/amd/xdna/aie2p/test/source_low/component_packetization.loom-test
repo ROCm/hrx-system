@@ -317,3 +317,242 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @shaped_c
   vst.128.bf16x8.index %132, %output_aligned, %133
   return
 }
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+// Rounding requires native packets. The product keeps each packet's exact
+// BF16 origin instead of recovering it from an aggregate F32 value.
+func.def @rounded_product_origin(%input: vector<64xf32>, %weight: vector<64xbf16>) -> (vector<64xf32>) {
+  %rounded = vector.fptrunc<daz> %input : vector<64xf32> to vector<64xbf16>
+  %input_wide = vector.extf %rounded : vector<64xbf16> to vector<64xf32>
+  %weight_wide = vector.extf %weight : vector<64xbf16> to vector<64xf32>
+  %initial_product = vector.splatf 0.0 : vector<64xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %input_wide, %weight_wide, %initial_product : vector<64xf32>
+  func.return %product : vector<64xf32>
+}
+
+// ----
+func.def @rounded_product_origin(%input: vector<64xf32>, %weight: vector<64xbf16>) -> (vector<64xf32>) {
+  %8 = vector.slice %input[0] : vector<64xf32> -> vector<32xf32>
+  %9 = vector.fptrunc<daz> %8 : vector<32xf32> to vector<32xbf16>
+  %10 = vector.extf %9 : vector<32xbf16> to vector<32xf32>
+  %11 = vector.slice %weight[0] : vector<64xbf16> -> vector<32xbf16>
+  %12 = vector.extf %11 : vector<32xbf16> to vector<32xf32>
+  %24 = vector.splatf 0.0 : vector<32xf32>
+  %14 = vector.fmaf<nnan|ninf|nsz|afn> %10, %12, %24 : vector<32xf32>
+  %15 = vector.slice %input[32] : vector<64xf32> -> vector<32xf32>
+  %16 = vector.fptrunc<daz> %15 : vector<32xf32> to vector<32xbf16>
+  %17 = vector.extf %16 : vector<32xbf16> to vector<32xf32>
+  %18 = vector.slice %weight[32] : vector<64xbf16> -> vector<32xbf16>
+  %19 = vector.extf %18 : vector<32xbf16> to vector<32xf32>
+  %23 = vector.splatf 0.0 : vector<32xf32>
+  %21 = vector.fmaf<nnan|ninf|nsz|afn> %17, %19, %23 : vector<32xf32>
+  %product = vector.concat<0> %14, %21 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  func.return %product : vector<64xf32>
+}
+
+// ====
+
+// An early aggregate consumer keeps its observed value while the later product
+// reuses the producer packets. The source and its widened result both escape.
+func.def @rounded_product_origin_early_use(%input: vector<64xf32>, %weight: vector<64xbf16>, %bias: vector<64xf32>) -> (vector<64xbf16>, vector<64xf32>, vector<64xf32>) {
+  %rounded = vector.fptrunc<daz> %input : vector<64xf32> to vector<64xbf16>
+  %input_wide = vector.extf %rounded : vector<64xbf16> to vector<64xf32>
+  %early = vector.addf %input_wide, %bias : vector<64xf32>
+  %weight_wide = vector.extf %weight : vector<64xbf16> to vector<64xf32>
+  %initial_product = vector.splatf 0.0 : vector<64xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %input_wide, %weight_wide, %initial_product : vector<64xf32>
+  func.return %rounded, %early, %product : vector<64xbf16>, vector<64xf32>, vector<64xf32>
+}
+
+// ----
+func.def @rounded_product_origin_early_use(%input: vector<64xf32>, %weight: vector<64xbf16>, %bias: vector<64xf32>) -> (vector<64xbf16>, vector<64xf32>, vector<64xf32>) {
+  %12 = vector.slice %input[0] : vector<64xf32> -> vector<32xf32>
+  %13 = vector.fptrunc<daz> %12 : vector<32xf32> to vector<32xbf16>
+  %14 = vector.extf %13 : vector<32xbf16> to vector<32xf32>
+  %15 = vector.slice %input[32] : vector<64xf32> -> vector<32xf32>
+  %16 = vector.fptrunc<daz> %15 : vector<32xf32> to vector<32xbf16>
+  %17 = vector.extf %16 : vector<32xbf16> to vector<32xf32>
+  %rounded = vector.concat<0> %13, %16 : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  %input_wide = vector.concat<0> %14, %17 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %early = vector.addf %input_wide, %bias : vector<64xf32>
+  %20 = vector.slice %weight[0] : vector<64xbf16> -> vector<32xbf16>
+  %21 = vector.extf %20 : vector<32xbf16> to vector<32xf32>
+  %22 = vector.slice %weight[32] : vector<64xbf16> -> vector<32xbf16>
+  %23 = vector.extf %22 : vector<32xbf16> to vector<32xf32>
+  %31 = vector.splatf 0.0 : vector<32xf32>
+  %26 = vector.fmaf<nnan|ninf|nsz|afn> %14, %21, %31 : vector<32xf32>
+  %30 = vector.splatf 0.0 : vector<32xf32>
+  %28 = vector.fmaf<nnan|ninf|nsz|afn> %17, %23, %30 : vector<32xf32>
+  %product = vector.concat<0> %26, %28 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  func.return %rounded, %early, %product : vector<64xbf16>, vector<64xf32>, vector<64xf32>
+}
+
+// ====
+
+// The final partial packet needs its own complete logical origin too.
+func.def @rounded_product_origin_tail(%input: vector<49xf32>, %weight: vector<49xbf16>, %seed: vector<49xf32>) -> (vector<49xf32>) {
+  %rounded = vector.fptrunc<daz> %input : vector<49xf32> to vector<49xbf16>
+  %input_wide = vector.extf %rounded : vector<49xbf16> to vector<49xf32>
+  %weight_wide = vector.extf %weight : vector<49xbf16> to vector<49xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %input_wide, %weight_wide, %seed : vector<49xf32>
+  func.return %product : vector<49xf32>
+}
+
+// ----
+func.def @rounded_product_origin_tail(%input: vector<49xf32>, %weight: vector<49xbf16>, %seed: vector<49xf32>) -> (vector<49xf32>) {
+  %8 = vector.slice %input[0] : vector<49xf32> -> vector<32xf32>
+  %9 = vector.fptrunc<daz> %8 : vector<32xf32> to vector<32xbf16>
+  %10 = vector.extf %9 : vector<32xbf16> to vector<32xf32>
+  %11 = vector.slice %weight[0] : vector<49xbf16> -> vector<32xbf16>
+  %12 = vector.extf %11 : vector<32xbf16> to vector<32xf32>
+  %13 = vector.slice %seed[0] : vector<49xf32> -> vector<32xf32>
+  %14 = vector.fmaf<nnan|ninf|nsz|afn> %10, %12, %13 : vector<32xf32>
+  %15 = vector.slice %input[32] : vector<49xf32> -> vector<17xf32>
+  %16 = vector.fptrunc<daz> %15 : vector<17xf32> to vector<17xbf16>
+  %17 = vector.extf %16 : vector<17xbf16> to vector<17xf32>
+  %18 = vector.slice %weight[32] : vector<49xbf16> -> vector<17xbf16>
+  %19 = vector.extf %18 : vector<17xbf16> to vector<17xf32>
+  %20 = vector.slice %seed[32] : vector<49xf32> -> vector<17xf32>
+  %21 = vector.fmaf<nnan|ninf|nsz|afn> %17, %19, %20 : vector<17xf32>
+  %product = vector.concat<0> %14, %21 : vector<32xf32>, vector<17xf32> -> vector<49xf32>
+  func.return %product : vector<49xf32>
+}
+
+// ====
+
+// The integer conversion requires narrower packets than the native product.
+// Keep the provenance chain in bounded components instead of rejecting an
+// oversized merge and losing the rounded origins at its boundary.
+func.def @compensated_integer_product(%integer: vector<64xi32>, %scale_a: vector<64xbf16>, %scale_b: vector<64xbf16>) -> (vector<64xf32>) {
+  %a = vector.extf %scale_a : vector<64xbf16> to vector<64xf32>
+  %b = vector.extf %scale_b : vector<64xbf16> to vector<64xf32>
+  %seed = vector.splatf 0.0 : vector<64xf32>
+  %scale = vector.fmaf<nnan|ninf|nsz|afn> %a, %b, %seed : vector<64xf32>
+  %input = vector.sitofp %integer : vector<64xi32> to vector<64xf32>
+  %input_high = vector.fptrunc<daz> %input : vector<64xf32> to vector<64xbf16>
+  %scale_high = vector.fptrunc<daz> %scale : vector<64xf32> to vector<64xbf16>
+  %input_high_wide = vector.extf<daz> %input_high : vector<64xbf16> to vector<64xf32>
+  %scale_high_wide = vector.extf<daz> %scale_high : vector<64xbf16> to vector<64xf32>
+  %input_residual = vector.subf %input, %input_high_wide : vector<64xf32>
+  %scale_residual = vector.subf %scale, %scale_high_wide : vector<64xf32>
+  %input_low = vector.fptrunc<daz> %input_residual : vector<64xf32> to vector<64xbf16>
+  %scale_low = vector.fptrunc<daz> %scale_residual : vector<64xf32> to vector<64xbf16>
+  %input_low_wide = vector.extf %input_low : vector<64xbf16> to vector<64xf32>
+  %scale_low_wide = vector.extf %scale_low : vector<64xbf16> to vector<64xf32>
+  %input_high_exact = vector.extf %input_high : vector<64xbf16> to vector<64xf32>
+  %scale_high_exact = vector.extf %scale_high : vector<64xbf16> to vector<64xf32>
+  %cross = vector.fmaf<nnan|ninf|nsz|afn> %input_low_wide, %scale_high_exact, %seed : vector<64xf32>
+  %cross_sum = vector.fmaf<nnan|ninf|nsz|afn> %input_high_exact, %scale_low_wide, %cross : vector<64xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %input_high_exact, %scale_high_exact, %cross_sum : vector<64xf32>
+  func.return %product : vector<64xf32>
+}
+
+// ----
+func.def @compensated_integer_product(%integer: vector<64xi32>, %scale_a: vector<64xbf16>, %scale_b: vector<64xbf16>) -> (vector<64xf32>) {
+  %74 = vector.slice %integer[0] : vector<64xi32> -> vector<16xi32>
+  %75 = vector.sitofp %74 : vector<16xi32> to vector<16xf32>
+  %76 = vector.fptrunc<daz> %75 : vector<16xf32> to vector<16xbf16>
+  %77 = vector.extf<daz> %76 : vector<16xbf16> to vector<16xf32>
+  %78 = vector.subf %75, %77 : vector<16xf32>
+  %79 = vector.fptrunc<daz> %78 : vector<16xf32> to vector<16xbf16>
+  %80 = vector.extf %79 : vector<16xbf16> to vector<16xf32>
+  %81 = vector.extf %76 : vector<16xbf16> to vector<16xf32>
+  %82 = vector.slice %integer[16] : vector<64xi32> -> vector<16xi32>
+  %83 = vector.sitofp %82 : vector<16xi32> to vector<16xf32>
+  %84 = vector.fptrunc<daz> %83 : vector<16xf32> to vector<16xbf16>
+  %85 = vector.extf<daz> %84 : vector<16xbf16> to vector<16xf32>
+  %86 = vector.subf %83, %85 : vector<16xf32>
+  %87 = vector.fptrunc<daz> %86 : vector<16xf32> to vector<16xbf16>
+  %88 = vector.extf %87 : vector<16xbf16> to vector<16xf32>
+  %89 = vector.extf %84 : vector<16xbf16> to vector<16xf32>
+  %90 = vector.slice %integer[32] : vector<64xi32> -> vector<16xi32>
+  %91 = vector.sitofp %90 : vector<16xi32> to vector<16xf32>
+  %92 = vector.fptrunc<daz> %91 : vector<16xf32> to vector<16xbf16>
+  %93 = vector.extf<daz> %92 : vector<16xbf16> to vector<16xf32>
+  %94 = vector.subf %91, %93 : vector<16xf32>
+  %95 = vector.fptrunc<daz> %94 : vector<16xf32> to vector<16xbf16>
+  %96 = vector.extf %95 : vector<16xbf16> to vector<16xf32>
+  %97 = vector.extf %92 : vector<16xbf16> to vector<16xf32>
+  %98 = vector.slice %integer[48] : vector<64xi32> -> vector<16xi32>
+  %99 = vector.sitofp %98 : vector<16xi32> to vector<16xf32>
+  %100 = vector.fptrunc<daz> %99 : vector<16xf32> to vector<16xbf16>
+  %101 = vector.extf<daz> %100 : vector<16xbf16> to vector<16xf32>
+  %102 = vector.subf %99, %101 : vector<16xf32>
+  %103 = vector.fptrunc<daz> %102 : vector<16xf32> to vector<16xbf16>
+  %104 = vector.extf %103 : vector<16xbf16> to vector<16xf32>
+  %105 = vector.extf %100 : vector<16xbf16> to vector<16xf32>
+  %125 = vector.concat<0> %81, %89 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %126 = vector.concat<0> %97, %105 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %input_high_exact = vector.concat<0> %125, %126 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %24 = vector.slice %scale_a[0] : vector<64xbf16> -> vector<16xbf16>
+  %25 = vector.extf %24 : vector<16xbf16> to vector<16xf32>
+  %26 = vector.slice %scale_b[0] : vector<64xbf16> -> vector<16xbf16>
+  %27 = vector.extf %26 : vector<16xbf16> to vector<16xf32>
+  %138 = vector.splatf 0.0 : vector<16xf32>
+  %29 = vector.fmaf<nnan|ninf|nsz|afn> %25, %27, %138 : vector<16xf32>
+  %30 = vector.fptrunc<daz> %29 : vector<16xf32> to vector<16xbf16>
+  %31 = vector.extf<daz> %30 : vector<16xbf16> to vector<16xf32>
+  %32 = vector.subf %29, %31 : vector<16xf32>
+  %33 = vector.fptrunc<daz> %32 : vector<16xf32> to vector<16xbf16>
+  %34 = vector.extf %33 : vector<16xbf16> to vector<16xf32>
+  %35 = vector.extf %30 : vector<16xbf16> to vector<16xf32>
+  %36 = vector.slice %scale_a[16] : vector<64xbf16> -> vector<16xbf16>
+  %37 = vector.extf %36 : vector<16xbf16> to vector<16xf32>
+  %38 = vector.slice %scale_b[16] : vector<64xbf16> -> vector<16xbf16>
+  %39 = vector.extf %38 : vector<16xbf16> to vector<16xf32>
+  %137 = vector.splatf 0.0 : vector<16xf32>
+  %41 = vector.fmaf<nnan|ninf|nsz|afn> %37, %39, %137 : vector<16xf32>
+  %42 = vector.fptrunc<daz> %41 : vector<16xf32> to vector<16xbf16>
+  %43 = vector.extf<daz> %42 : vector<16xbf16> to vector<16xf32>
+  %44 = vector.subf %41, %43 : vector<16xf32>
+  %45 = vector.fptrunc<daz> %44 : vector<16xf32> to vector<16xbf16>
+  %46 = vector.extf %45 : vector<16xbf16> to vector<16xf32>
+  %47 = vector.extf %42 : vector<16xbf16> to vector<16xf32>
+  %48 = vector.slice %scale_a[32] : vector<64xbf16> -> vector<16xbf16>
+  %49 = vector.extf %48 : vector<16xbf16> to vector<16xf32>
+  %50 = vector.slice %scale_b[32] : vector<64xbf16> -> vector<16xbf16>
+  %51 = vector.extf %50 : vector<16xbf16> to vector<16xf32>
+  %136 = vector.splatf 0.0 : vector<16xf32>
+  %53 = vector.fmaf<nnan|ninf|nsz|afn> %49, %51, %136 : vector<16xf32>
+  %54 = vector.fptrunc<daz> %53 : vector<16xf32> to vector<16xbf16>
+  %55 = vector.extf<daz> %54 : vector<16xbf16> to vector<16xf32>
+  %56 = vector.subf %53, %55 : vector<16xf32>
+  %57 = vector.fptrunc<daz> %56 : vector<16xf32> to vector<16xbf16>
+  %58 = vector.extf %57 : vector<16xbf16> to vector<16xf32>
+  %59 = vector.extf %54 : vector<16xbf16> to vector<16xf32>
+  %60 = vector.slice %scale_a[48] : vector<64xbf16> -> vector<16xbf16>
+  %61 = vector.extf %60 : vector<16xbf16> to vector<16xf32>
+  %62 = vector.slice %scale_b[48] : vector<64xbf16> -> vector<16xbf16>
+  %63 = vector.extf %62 : vector<16xbf16> to vector<16xf32>
+  %135 = vector.splatf 0.0 : vector<16xf32>
+  %65 = vector.fmaf<nnan|ninf|nsz|afn> %61, %63, %135 : vector<16xf32>
+  %66 = vector.fptrunc<daz> %65 : vector<16xf32> to vector<16xbf16>
+  %67 = vector.extf<daz> %66 : vector<16xbf16> to vector<16xf32>
+  %68 = vector.subf %65, %67 : vector<16xf32>
+  %69 = vector.fptrunc<daz> %68 : vector<16xf32> to vector<16xbf16>
+  %70 = vector.extf %69 : vector<16xbf16> to vector<16xf32>
+  %71 = vector.extf %66 : vector<16xbf16> to vector<16xf32>
+  %128 = vector.concat<0> %35, %47 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %129 = vector.concat<0> %59, %71 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %scale_high_exact = vector.concat<0> %128, %129 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %134 = vector.splatf 0.0 : vector<16xf32>
+  %109 = vector.fmaf<nnan|ninf|nsz|afn> %80, %35, %134 : vector<16xf32>
+  %133 = vector.splatf 0.0 : vector<16xf32>
+  %111 = vector.fmaf<nnan|ninf|nsz|afn> %88, %47, %133 : vector<16xf32>
+  %132 = vector.splatf 0.0 : vector<16xf32>
+  %113 = vector.fmaf<nnan|ninf|nsz|afn> %96, %59, %132 : vector<16xf32>
+  %131 = vector.splatf 0.0 : vector<16xf32>
+  %115 = vector.fmaf<nnan|ninf|nsz|afn> %104, %71, %131 : vector<16xf32>
+  %117 = vector.fmaf<nnan|ninf|nsz|afn> %81, %34, %109 : vector<16xf32>
+  %118 = vector.fmaf<nnan|ninf|nsz|afn> %89, %46, %111 : vector<16xf32>
+  %119 = vector.fmaf<nnan|ninf|nsz|afn> %97, %58, %113 : vector<16xf32>
+  %120 = vector.fmaf<nnan|ninf|nsz|afn> %105, %70, %115 : vector<16xf32>
+  %122 = vector.concat<0> %117, %118 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %123 = vector.concat<0> %119, %120 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %cross_sum = vector.concat<0> %122, %123 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %input_high_exact, %scale_high_exact, %cross_sum : vector<64xf32>
+  func.return %product : vector<64xf32>
+}
