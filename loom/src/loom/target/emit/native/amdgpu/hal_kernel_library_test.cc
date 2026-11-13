@@ -2235,6 +2235,19 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, RejectsArtifactWithOrWithoutDiagnosticSink) {
+  static const char kMissingNativeFormat[] =
+      "amdgpu.target<gfx1100> @target\n"
+      "low.kernel.def target<amdgpu.rdna3.core>(@target) "
+      "workgroup_size(64, 1, 1) @entry() {\n"
+      "  %zero = low.op<amdgpu.s_mov_b32>() {imm32 = 0} : "
+      "() -> reg<amdgpu.sgpr>\n"
+      "  %address = low.concat(%zero, %zero) : "
+      "(reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>\n"
+      "  %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%address) "
+      "{cache_swizzle_stride = 0, extent = 16} : "
+      "(reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>\n"
+      "  low.return\n"
+      "}\n";
   static const char kSource[] =
       "global.rodata.def @loom_kernel.kd = bytes(\"00\")\n"
       "amdgpu.target<gfx1100> @gfx_target\n"
@@ -2290,6 +2303,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsArtifactWithOrWithoutDiagnosticSink) {
     // One-based source line of the owning operation.
     uint32_t line;
   } cases[] = {
+      {kMissingNativeFormat, LOOM_ERR_BACKEND_062, 1,
+       "amdgpu.hal.buffer_descriptor", 5},
       {kSource, LOOM_ERR_BACKEND_057, 1, "loom_kernel.kd", 3},
       {kInvalidLayout, LOOM_ERR_AMDGPU_059, 0, "parameter_count", 2},
       {kUnboundData, LOOM_ERR_BACKEND_057, 1, "data", 4},

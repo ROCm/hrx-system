@@ -31,10 +31,18 @@ iree_status_t loom_native_assembly_emit_unsupported_operation(
     iree_string_view_t format,
     const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  const iree_string_view_t name =
+      context->packet->descriptor != NULL
+          ? loom_low_descriptor_set_string(
+                descriptor_set,
+                loom_low_descriptor_key_string_ref(descriptor_set,
+                                                   context->packet->descriptor))
+          : loom_op_name(context->schedule->module, op);
   const loom_diagnostic_param_t params[] = {
       loom_param_string(format),
-      loom_param_string(
-          loom_op_vtable_name(loom_op_vtable(context->schedule->module, op))),
+      loom_param_string(name),
   };
   const loom_diagnostic_emission_t emission = {
       .op = op,

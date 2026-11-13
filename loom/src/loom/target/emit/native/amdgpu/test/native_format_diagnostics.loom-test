@@ -1,0 +1,8 @@
+// RUN: emit amdgpu-native-words @entry
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @entry(%binding: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x4>) {
+  // ERROR@+1: BACKEND/062 {format="AMDGPU native encoding", operation_name="amdgpu.hal.buffer_descriptor"}
+  %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%binding) {cache_swizzle_stride = 0, extent = 16} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
+  low.return %descriptor : reg<amdgpu.sgpr x4>
+}

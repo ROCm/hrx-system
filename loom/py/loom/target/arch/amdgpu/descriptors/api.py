@@ -128,6 +128,24 @@ def _validate_descriptor_encoding_formats(
         amdgpu_encoding_format_id(format_name) for format_name in supported_format_names
     }
     for descriptor in descriptor_set.descriptors:
+        encoded_fields: set[int] = set()
+        for operand in descriptor.operands:
+            if (
+                not operand.encoding_field_id
+                or operand.encoding_field_id in encoded_fields
+            ):
+                continue
+            encoded_fields.add(operand.encoding_field_id)
+            if any(
+                alternative.reg_class is not None
+                and alternative.reg_class not in (_REG_SGPR, _REG_VGPR, _REG_AGPR)
+                for alternative in operand.reg_alts
+            ):
+                raise ValueError(
+                    f"AMDGPU descriptor '{descriptor.key}' encoded operand "
+                    f"'{operand.field_name}' requires an SGPR, VGPR, or AGPR; "
+                    f"got {tuple(alt.reg_class for alt in operand.reg_alts)}"
+                )
         format_id = descriptor.encoding_format_id
         if (
             format_id == AMDGPU_ENCODING_FORMAT_NONE
@@ -274,12 +292,56 @@ _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS = frozenset(
 
 def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
     for descriptor in descriptor_set.descriptors:
+        printed_fields = {
+            value.field_name
+            for form in descriptor.asm_forms
+            for value in form.native_assembly_values
+            if value.kind
+            in (
+                NativeAsmValueKind.RESULT,
+                NativeAsmValueKind.OPERAND,
+                NativeAsmValueKind.NEGATED_OPERAND,
+                NativeAsmValueKind.REGISTER_PART,
+            )
+        }
+        for operand in descriptor.operands:
+            if (
+                operand.role is OperandRole.IMPLICIT
+                or OperandFlag.IMPLICIT in operand.flags
+            ) and operand.field_name not in printed_fields:
+                continue
+            if any(
+                alternative.reg_class is not None
+                and alternative.reg_class
+                not in (_REG_SGPR, _REG_VGPR, _REG_AGPR, _REG_M0, _REG_VCC)
+                for alternative in operand.reg_alts
+            ):
+                raise ValueError(
+                    f"AMDGPU descriptor '{descriptor.key}' visible operand "
+                    f"'{operand.field_name}' has no native register spelling"
+                )
         immediate_by_name = {
             immediate.field_name: immediate for immediate in descriptor.immediates
         }
         for form in descriptor.asm_forms:
             saw_named_modifier = False
             for value in form.native_assembly_values:
+                if (
+                    value.kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT
+                    and value.target_format_id
+                    not in (
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL,
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL,
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK,
+                        AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8,
+                        *_NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS,
+                    )
+                ):
+                    raise ValueError(
+                        f"AMDGPU descriptor '{descriptor.key}' native asm "
+                        f"uses unknown immediate format {value.target_format_id}"
+                    )
                 is_named_modifier = (
                     value.kind is NativeAsmValueKind.MODIFIER_LITERAL
                     or (
