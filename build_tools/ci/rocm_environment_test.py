@@ -216,6 +216,53 @@ class AmdgpuTargetSelectionTest(unittest.TestCase):
             rocm_environment.target_map.exact_targets_for_selection("gfx-future")
 
 
+class AmdgpuKernelHealthTest(unittest.TestCase):
+    def test_rejects_systemic_boot_interrupt_failure(self):
+        output = "\n".join(
+            [
+                "amdgpu: Fence fallback timer expired on ring gfx_0.0.0",
+                "amdgpu: Fence fallback timer expired on ring comp_1.0.0",
+                "amdgpu: Fence fallback timer expired on ring sdma0",
+                "amdgpu: Fence fallback timer expired on ring vcn_unified_0",
+            ]
+        )
+        self.assertEqual(
+            rocm_environment.find_amdgpu_interrupt_failures(output),
+            output.splitlines(),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "refusing native GPU admission"
+        ) as raised:
+            rocm_environment.require_healthy_amdgpu_interrupts(output)
+        self.assertIn(output.splitlines()[-1], str(raised.exception))
+
+    def test_allows_one_historical_recovered_interrupt(self):
+        output = (
+            "amdgpu: Fence fallback timer expired on ring sdma0\n"
+            "another kernel warning\n"
+        )
+        self.assertEqual(rocm_environment.find_amdgpu_interrupt_failures(output), [])
+
+    def test_rejects_fallback_during_native_probe(self):
+        baseline = "amdgpu: Fence fallback timer expired on ring sdma0\n"
+        active = "amdgpu: Fence fallback timer expired on ring sdma1"
+        self.assertEqual(
+            rocm_environment.find_amdgpu_interrupt_failures(
+                baseline, baseline + active
+            ),
+            [active],
+        )
+
+    def test_counts_repeated_fallback_lines(self):
+        fallback = "amdgpu: Fence fallback timer expired on ring sdma0"
+        self.assertEqual(
+            rocm_environment.find_amdgpu_interrupt_failures(
+                fallback, f"{fallback}\n{fallback}\n"
+            ),
+            [fallback],
+        )
+
+
 class RocmSupervisorTest(unittest.TestCase):
     def test_selects_gnu_supervisor_when_default_is_another_implementation(self):
         paths = {"timeout": "/usr/bin/timeout", "gnutimeout": "/usr/bin/gnutimeout"}

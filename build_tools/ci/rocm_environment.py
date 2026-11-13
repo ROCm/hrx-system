@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import os
 import re
 import shutil
@@ -25,6 +26,10 @@ from typing import TextIO
 
 from build_tools.amdgpu import target_map
 
+AMDGPU_FENCE_FALLBACK_PATTERN = re.compile(
+    r"\bamdgpu\b.*Fence fallback timer expired on ring (?P<ring>\S+)"
+)
+
 
 @dataclass(frozen=True)
 class NativeGpuSelection:
@@ -33,6 +38,45 @@ class NativeGpuSelection:
     processor: str
     rocr_visible_device: str
     native_identity: str
+
+
+def parse_amdgpu_fence_fallbacks(output: str) -> list[tuple[str, str]]:
+    """Returns ring names and complete kernel lines for fence fallbacks."""
+    fallbacks = []
+    for line in output.splitlines():
+        if match := AMDGPU_FENCE_FALLBACK_PATTERN.search(line):
+            fallbacks.append((match.group("ring"), line))
+    return fallbacks
+
+
+def find_amdgpu_interrupt_failures(
+    baseline: str, current: str | None = None
+) -> list[str]:
+    """Finds systemic boot or newly observed AMDGPU interrupt failures."""
+    baseline_fallbacks = parse_amdgpu_fence_fallbacks(baseline)
+    engine_kinds = {
+        match.group(0)
+        for ring, _ in baseline_fallbacks
+        if (match := re.match(r"[a-z]+", ring))
+    }
+    # One fallback means the timer recovered a fence whose interrupt was lost.
+    # A boot sweep spanning command, compute, and transfer engines instead
+    # establishes that interrupt delivery is broken across the GPU.
+    if {"gfx", "comp", "sdma"}.issubset(engine_kinds):
+        return [line for _, line in baseline_fallbacks]
+    if current is None:
+        return []
+
+    # During the admission probe even one new fallback is an active failure.
+    # Compare as a multiset because the kernel may repeat identical messages.
+    previous_lines = collections.Counter(line for _, line in baseline_fallbacks)
+    failures = []
+    for _, line in parse_amdgpu_fence_fallbacks(current):
+        if previous_lines[line]:
+            previous_lines[line] -= 1
+        else:
+            failures.append(line)
+    return failures
 
 
 def select_native_gpu(
@@ -226,6 +270,43 @@ def require_gnu_timeout() -> str:
     )
 
 
+def read_kernel_warnings(timeout_tool: str) -> str:
+    """Reads the kernel warning/error log under an independent deadline."""
+    with tempfile.TemporaryFile(mode="w+") as output_file:
+        status = run_probe(
+            ["dmesg", "--level=err,warn"],
+            timeout_tool=timeout_tool,
+            timeout_seconds=5,
+            kill_after_seconds=1,
+            # The command supervisor owns this short deadline. Avoid invoking
+            # stalled-process diagnostics whose own kernel read would recurse.
+            diagnostic_delay_seconds=7,
+            stdout=output_file,
+        )
+        output_file.seek(0)
+        output = output_file.read()
+    if status:
+        raise RuntimeError(
+            f"kernel warning log probe failed with exit code {status}; "
+            "GPU health cannot be established"
+        )
+    return output
+
+
+def require_healthy_amdgpu_interrupts(
+    baseline: str, current: str | None = None
+) -> None:
+    """Rejects a runner with systemic or active fence-interrupt failures."""
+    failures = find_amdgpu_interrupt_failures(baseline, current)
+    if not failures:
+        return
+    detail = "\n".join(failures[-20:])
+    raise RuntimeError(
+        "AMDGPU fence interrupts are not healthy; refusing native GPU "
+        f"admission. Kernel evidence (last {min(len(failures), 20)}):\n{detail}"
+    )
+
+
 def run_probe(
     command: list[str],
     *,
@@ -324,6 +405,14 @@ def main() -> int:
     print(f"Checking ROCm hardware on runner {runner_name} (timeout: 30s).", flush=True)
     signal.signal(signal.SIGTERM, handle_termination)
     try:
+        kernel_warnings = read_kernel_warnings(timeout_tool)
+        require_healthy_amdgpu_interrupts(kernel_warnings)
+        print(
+            "AMDGPU kernel baseline: "
+            f"{len(parse_amdgpu_fence_fallbacks(kernel_warnings))} "
+            "fence fallback warning(s).",
+            flush=True,
+        )
         if args.export_libamdf_gpu_selection:
             if args.amdgpu_target is None:
                 raise RuntimeError(
@@ -355,6 +444,9 @@ def main() -> int:
                     export_native_gpu_selection(Path(github_env), selection)
         else:
             status = run_probe(["rocminfo"], timeout_tool=timeout_tool)
+        current_kernel_warnings = read_kernel_warnings(timeout_tool)
+        require_healthy_amdgpu_interrupts(kernel_warnings, current_kernel_warnings)
+        print("AMDGPU fence interrupt health verified.", flush=True)
     except KeyboardInterrupt:
         return 130
     except (OSError, ValueError, KeyError, RuntimeError) as error:
