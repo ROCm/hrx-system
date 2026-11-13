@@ -922,6 +922,55 @@ TEST_P(AqlPublicationTest, CooperativeCommandsAndKernargsHaveDistinctOwners) {
             0xCDCDCDCDu);
 }
 
+TEST_P(AqlPublicationTest,
+       CooperativeZeroArgumentDispatchDoesNotConsumeKernargs) {
+  context_.target_info.topology.xcc_count = std::get<1>(GetParam()) ? 8 : 1;
+  // Queue creation owns argument backing even when this dispatch has no ABI
+  // bytes. Cooperative scheduling must neither consume nor write that backing.
+  std::array<uint8_t, 64> argument_bytes;
+  argument_bytes.fill(0xCD);
+  const auto expected_arguments = argument_bytes;
+  arguments_.memory.contents =
+      iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
+  arguments_.address = 0x7000;
+  arguments_.capacity = argument_bytes.size();
+  request_.flags |= IREE_HAL_DISPATCH_FLAG_COOPERATIVE;
+  queue_.grid.memory = reinterpret_cast<amdf_memory_t*>(&queue_.grid);
+  queue_.grid.address = 0x123400005000;
+  std::array<uint32_t, 512> words;
+  words.fill(0xCDCDCDCD);
+  iree_hal_amd_gpu_byte_storage_t commands = {};
+  commands.memory.contents = iree_make_byte_span(words.data(), sizeof(words));
+  commands.address = 0xABCD00008000;
+  commands.capacity = sizeof(words);
+  queue_.commands = &commands;
+  const uint32_t prefix = context_.target_info.topology.xcc_count > 1 ? 2 : 0;
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  for (size_t i = 0; i < 2; ++i) {
+    request_.geometry.workgroup_count[0] = i + 2;
+    Publish(Semaphore(), waits);
+    const size_t offset = i * IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
+    EXPECT_EQ(PacketAddress(i * 2, 2), commands.address + offset);
+    EXPECT_EQ(PacketAddress(i * 2 + 1, 10), 0u);
+    EXPECT_EQ(packets_[i * 2].words[4], (1u << 23) | (prefix + 16));
+    iree_hal_amd_gpu_grid_sync_t grid;
+    std::memcpy(&grid, words.data() + offset / 4 + prefix + 4, sizeof(grid));
+    EXPECT_EQ(grid.multi_grid_sync, 0u);
+    EXPECT_EQ(grid.grid_ordinal, 0u);
+    EXPECT_EQ(grid.grid_count, 1u);
+    EXPECT_EQ(grid.preceding_workitem_count, 0u);
+    EXPECT_EQ(grid.total_workitem_count, (i + 2) * 64);
+    EXPECT_EQ(grid.single_grid_sync[0], 0u);
+    EXPECT_EQ(grid.single_grid_sync[1], 0u);
+    EXPECT_EQ(grid.workgroup_count, i + 2);
+    EXPECT_EQ(grid.reserved, 0u);
+    EXPECT_EQ(issued_[i].arguments, 0u);
+    EXPECT_EQ(arguments_.end, 0u);
+    EXPECT_EQ(argument_bytes, expected_arguments);
+    EXPECT_EQ(words[offset / 4 + prefix + 16], 0xCDCDCDCDu);
+  }
+}
+
 TEST_P(AqlPublicationTest, FullSamplesLeaveLaunchArgumentsAvailable) {
   auto operation = BeginProfile();
   constexpr size_t kSecondArgumentOffset =
