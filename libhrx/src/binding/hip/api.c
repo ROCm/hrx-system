@@ -15999,7 +15999,7 @@ HIPAPI hipError_t hipExtLaunchMultiKernelMultiDevice(
     // This runtime API accepts compiler-registered host functions. Tagged
     // module function handles are bound to one context and cannot name the
     // corresponding function across multiple devices.
-    if (iree_hal_streaming_symbol_has_tag(launch->func)) {
+    if (iree_hip_function_handle_has_tag(launch->func)) {
       result = hipErrorInvalidDeviceFunction;
       break;
     }

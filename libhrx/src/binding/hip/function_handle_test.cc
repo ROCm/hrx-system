@@ -45,7 +45,7 @@ TEST_F(FunctionHandleTest, RejectsStaleAndFabricatedHandles) {
   EXPECT_FALSE(iree_hip_function_handle_lookup(first_handle, &resolved_symbol,
                                                &resolved_module));
   EXPECT_FALSE(iree_hip_function_handle_lookup(
-      reinterpret_cast<void*>(IREE_HAL_STREAMING_SYMBOL_TAG_VALUE | 0xFFFF),
+      reinterpret_cast<void*>(IREE_HIP_FUNCTION_HANDLE_TAG_VALUE | 0xFFFF),
       &resolved_symbol, &resolved_module));
 
   void* second_handle = nullptr;

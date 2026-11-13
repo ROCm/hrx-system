@@ -13,6 +13,16 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Identifies opaque module-function handles separately from registered host
+// function addresses. The tag classifies a token; lookup establishes liveness.
+#define IREE_HIP_FUNCTION_HANDLE_TAG_MASK 0x00FF000000000000ULL
+#define IREE_HIP_FUNCTION_HANDLE_TAG_VALUE 0x00EE000000000000ULL
+
+static inline bool iree_hip_function_handle_has_tag(const void* handle) {
+  return ((uintptr_t)handle & IREE_HIP_FUNCTION_HANDLE_TAG_MASK) ==
+         IREE_HIP_FUNCTION_HANDLE_TAG_VALUE;
+}
+
 // Returns the stable opaque public handle for |symbol|, creating it on the
 // first query. The handle remains resolvable until |module| is retired.
 iree_status_t iree_hip_function_handle_get_or_create(

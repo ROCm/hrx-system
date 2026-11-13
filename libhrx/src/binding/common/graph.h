@@ -720,10 +720,6 @@ iree_status_t iree_hal_streaming_capture_status(
     iree_hal_streaming_capture_status_t* out_status,
     unsigned long long* out_id);
 
-// Synchronization: none (queries capture state).
-iree_status_t iree_hal_streaming_is_capturing(
-    iree_hal_streaming_stream_t* stream, bool* out_is_capturing);
-
 // Synchronization: none (updates dependencies).
 iree_status_t iree_hal_streaming_update_capture_dependencies(
     iree_hal_streaming_stream_t* stream,

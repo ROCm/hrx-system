@@ -3205,23 +3205,6 @@ iree_status_t iree_hal_streaming_capture_status(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_is_capturing(
-    iree_hal_streaming_stream_t* stream, bool* out_is_capturing) {
-  IREE_ASSERT_ARGUMENT(stream);
-  IREE_ASSERT_ARGUMENT(out_is_capturing);
-
-  iree_slim_mutex_lock(&stream->mutex);
-  *out_is_capturing =
-      stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
-      stream->capture_graph &&
-      iree_atomic_load(&stream->capture_graph->capture_state,
-                       iree_memory_order_acquire) ==
-          IREE_HAL_STREAMING_GRAPH_CAPTURE_STATE_ACTIVE;
-  iree_slim_mutex_unlock(&stream->mutex);
-
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_streaming_update_capture_dependencies(
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_graph_node_t** dependencies,

@@ -178,12 +178,6 @@ typedef enum iree_hal_streaming_mem_location_type_e {
 } iree_hal_streaming_mem_location_type_t;
 
 // Device pool accessors.
-// Returns a device-owned pool handle that remains valid while selected.
-iree_hal_streaming_mem_pool_t* iree_hal_streaming_device_default_mem_pool(
-    iree_hal_streaming_device_t* device);
-// Returns a device-owned pool handle that remains valid while selected.
-iree_hal_streaming_mem_pool_t* iree_hal_streaming_device_mem_pool(
-    iree_hal_streaming_device_t* device);
 // Retains the selected pool for use outside the device lock. The caller must
 // release the returned handle with iree_hal_streaming_mem_pool_release.
 iree_hal_streaming_mem_pool_t* iree_hal_streaming_device_retain_mem_pool(
