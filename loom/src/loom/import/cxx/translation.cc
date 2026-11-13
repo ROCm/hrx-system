@@ -982,8 +982,10 @@ class Translator final : private Initialization::Evaluation {
     FullExpression expression = {
         .mark = temporary_destructions_.size(),
         .parent_mark = full_expression_mark_,
+        .parent_extends_temporaries = extends_temporaries_,
     };
     full_expression_mark_ = expression.mark;
+    extends_temporaries_ = false;
     return expression;
   }
 
@@ -991,6 +993,18 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT(full_expression_mark_);
     IREE_ASSERT_EQ(*full_expression_mark_, expression.mark);
     IREE_ASSERT_LE(expression.mark, temporary_destructions_.size());
+    if (extends_temporaries_) {
+      // The range initializer's surviving caller-owned temporaries become
+      // lexical objects in their original construction order. Adopted function
+      // arguments and nested full expressions have already retired their slots.
+      for (size_t index = expression.mark;
+           index < temporary_destructions_.size(); ++index) {
+        if (temporary_destructions_[index]) {
+          active_destructions_.push_back(*temporary_destructions_[index]);
+          forget_temporary(index);
+        }
+      }
+    }
     for (size_t index = temporary_destructions_.size(); index > expression.mark;
          --index) {
       if (temporary_destructions_[index - 1]) {
@@ -1000,6 +1014,7 @@ class Translator final : private Initialization::Evaluation {
     }
     temporary_destructions_.resize(expression.mark);
     full_expression_mark_ = expression.parent_mark;
+    extends_temporaries_ = expression.parent_extends_temporaries;
   }
 
   // Result ownership transfers by construction identity, independently of
@@ -1015,12 +1030,23 @@ class Translator final : private Initialization::Evaluation {
   // A reference can extend a complete temporary through one of its
   // subobjects. Adopt the complete materialization rather than requiring the
   // initializer expression itself to be the owning prvalue.
-  void adopt_temporary_materialization(cxx::ExpressionAST* expression) {
+  void bind_temporary_materialization(cxx::ExpressionAST* expression,
+                                      cxx::Symbol* binding, cxx::AST* source) {
     auto* origin = control_->temporary_origins().materialization(expression);
     auto found = temporary_results_.find(origin);
     if (found != temporary_results_.end()) {
+      if (extends_temporaries_) {
+        // Preserve this object's construction position among the initializer's
+        // other temporaries, but read its mutable named value at scope exit.
+        auto& action = *temporary_destructions_[found->second];
+        action.binding = binding;
+        action.value.reset();
+        action.source = source;
+        return;
+      }
       forget_temporary(found->second);
     }
+    activate_automatic_destruction(binding, source);
   }
 
   void update_temporary(std::optional<TemporaryReference> temporary,
@@ -1065,7 +1091,8 @@ class Translator final : private Initialization::Evaluation {
         storage =
             storage_.subobject(storage, temporary->byte_offset, expression);
       }
-      if (control_->temporary_origins().extended(action.origin)) {
+      if (!extends_temporaries_ &&
+          control_->temporary_origins().extended(action.origin)) {
         active_destructions_.push_back(action);
         forget_temporary(temporary->index);
       }
@@ -1409,6 +1436,7 @@ class Translator final : private Initialization::Evaluation {
     temporary_destructions_.clear();
     temporary_results_.clear();
     full_expression_mark_.reset();
+    extends_temporaries_ = false;
     conditional_cleanup_anchors_.clear();
     break_destruction_marks_.clear();
     continue_destruction_marks_.clear();
@@ -1799,9 +1827,8 @@ class Translator final : private Initialization::Evaluation {
                                            ? LvalueAccess::Read
                                            : LvalueAccess::Write);
         materialized_reference_ = previous;
-        adopt_temporary_materialization(referent_expression);
+        bind_temporary_materialization(referent_expression, variable, owner);
         references_.emplace(variable, std::move(target));
-        activate_automatic_destruction(variable, owner);
         return;
       }
       auto target =
@@ -1922,6 +1949,7 @@ class Translator final : private Initialization::Evaluation {
       return;
     }
     auto mark = begin_full_expression();
+    extends_temporaries_ = control_->initializes_range(declaration);
     initialize_variable(variable, declaration->initializer, constexpr_contract,
                         declaration);
     finish_full_expression(mark);
@@ -2008,6 +2036,10 @@ class Translator final : private Initialization::Evaluation {
     FastMathScope math_scope(
         lexical_fastmath_flags_,
         resolve_fastmath(ast ? fastmath_.statement(ast) : std::nullopt));
+    if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(ast)) {
+      validate_statement_attributes(ast);
+      return returning_statement(control_->range_scope(range), continuation);
+    }
     const size_t selection_mark = active_destructions_.size();
     auto* selected = selected_statement(ast);
     if (selected != ast) {
@@ -2230,6 +2262,11 @@ class Translator final : private Initialization::Evaluation {
 
   StorageProjection object_address(cxx::ExpressionAST* ast) {
     ast = unwrap_object_identity(unit_, ast);
+    if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(ast);
+        binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+      effect(binary->leftExpression);
+      return object_address(binary->rightExpression);
+    }
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
         cast && is_class_adjustment(cast)) {
       auto object = object_address(cast->expression);
@@ -2888,6 +2925,12 @@ class Translator final : private Initialization::Evaluation {
                      LvalueAccess access = LvalueAccess::Write,
                      bool preserve_identity = false) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(projected);
+        binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+      effect(binary->leftExpression);
+      return destination(binary->rightExpression, owner, access,
+                         preserve_identity);
+    }
     if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(projected);
         dereference && !dereference->symbol &&
         dereference->op == cxx::TokenKind::T_STAR) {
@@ -7129,6 +7172,7 @@ class Translator final : private Initialization::Evaluation {
 
   void validate_statement_attributes(cxx::StatementAST* statement) {
     const bool loop = cxx::ast_cast<cxx::ForStatementAST>(statement) ||
+                      cxx::ast_cast<cxx::ForRangeStatementAST>(statement) ||
                       cxx::ast_cast<cxx::WhileStatementAST>(statement) ||
                       cxx::ast_cast<cxx::DoStatementAST>(statement);
     const bool declaration =
@@ -7180,6 +7224,10 @@ class Translator final : private Initialization::Evaluation {
         resolve_fastmath(ast ? fastmath_.statement(ast) : std::nullopt));
     if (ast) {
       validate_statement_attributes(ast);
+    }
+    if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(ast)) {
+      statement(control_->range_scope(range));
+      return;
     }
     const size_t selection_mark = active_destructions_.size();
     auto* selected = selected_statement(ast);
@@ -8297,6 +8345,9 @@ class Translator final : private Initialization::Evaluation {
   // Temporary prefix owned by the current full expression. Lexical caller
   // tokens retain parent marks without a heap-backed translator stack.
   std::optional<size_t> full_expression_mark_;
+  // A range initializer extends its surviving temporaries to the loop scope.
+  // Nested full expressions save and suspend this policy in their caller token.
+  bool extends_temporaries_ = false;
   // Structured conditional expressions hoist branch-only temporary storage
   // before the outermost conditional operation so cleanup remains dominated.
   std::vector<loom_builder_ip_t> conditional_cleanup_anchors_;

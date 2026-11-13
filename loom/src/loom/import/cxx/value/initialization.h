@@ -40,6 +40,9 @@ class Initialization {
       size_t mark;
       // Enclosing full expression restored after this one completes.
       std::optional<size_t> parent_mark;
+      // Whether the enclosing initializer transfers its surviving temporaries
+      // to lexical cleanup instead of destroying them at expression completion.
+      bool parent_extends_temporaries = false;
     };
 
     virtual Value expression(cxx::ExpressionAST* expression) = 0;

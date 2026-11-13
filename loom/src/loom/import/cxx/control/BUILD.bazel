@@ -128,6 +128,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:expressions",
         "//loom/src/loom/import/cxx/source:objects",
+        "//loom/src/loom/import/cxx/source:range_loops",
         "//loom/src/loom/import/cxx/value:bindings",
         "//loom/src/loom/import/cxx/value:types",
         "//runtime/src/iree/base/internal:arena",

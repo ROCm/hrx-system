@@ -202,6 +202,30 @@ loom_cc_test(
     ],
 )
 
+loom_cc_library(
+    name = "range_loops",
+    srcs = ["range_loops.cc"],
+    hdrs = ["range_loops.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = ["//third_party:cxx_parser"],
+)
+
+loom_cc_test(
+    name = "range_loops_test",
+    srcs = ["range_loops_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":options",
+        ":range_loops",
+        ":source",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)
+
 loom_cc_test(
     name = "dependency_test",
     srcs = ["dependency_test.cc"],

@@ -417,3 +417,87 @@ event 19
 event 31
 OK 0
 retired 0
+
+// ====
+// A builtin comma sequences its left operand while retaining the right
+// operand's destination for references, assignments, and borrowed addresses.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static void update(unsigned& value) { value += 10; }
+void run() {
+  unsigned value = 1;
+  unsigned& selected = (event(2), value);
+  selected = 3;
+  (event(4), value) += 5;
+  update((event(6), value));
+  unsigned* pointer = &(event(7), value);
+  *pointer += 2;
+  event(value);
+  unsigned values[] = {30, 40};
+  (event(8), values)[1] = 50;
+  event(values[1]);
+}
+
+// ----
+event 2
+event 4
+event 6
+event 7
+event 20
+event 8
+event 50
+OK 0
+retired 0
+
+// ====
+// Array deduction, mutable structured bindings, nested ranges, and the
+// C++20 initializer all share the ordinary declaration and loop paths.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+template <class T, unsigned Count>
+static unsigned sum(const T (&values)[Count]) {
+  unsigned total = 0;
+  for (auto value : values) total += value;
+  return total;
+}
+void run() {
+  int rows[2][2] = {{1, 2}, {3, 4}};
+  for (int increment = 10; auto& [first, second] : rows) {
+    first += increment;
+    second *= 2;
+  }
+  for (const auto& row : rows) event(sum(row));
+}
+
+// ----
+event 15
+event 21
+OK 0
+retired 0
+
+// ====
+// ADL lookup with pointer iterators preserves references to original elements.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+namespace custom {
+struct Range {
+  // Inclusive start and exclusive end of caller-owned storage.
+  int* first;
+  // One-past-end pointer, including for an empty range.
+  int* last;
+};
+static int* begin(Range& range) { return range.first; }
+static int* end(Range& range) { return range.last; }
+}
+void run() {
+  int values[3] = {2, 5, 9};
+  custom::Range range{values, values + 3};
+  for (auto& value : range) value += 10;
+  for (int value : values) event(value);
+  custom::Range empty{values, values};
+  for (int value : empty) event(99);
+}
+
+// ----
+event 12
+event 15
+event 19
+OK 0
+retired 0

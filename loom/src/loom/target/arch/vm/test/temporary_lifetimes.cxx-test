@@ -290,3 +290,205 @@ event 5
 event 8
 OK 0
 retired 0
+
+// ====
+// The hidden iterator copies begin()'s reference. Element destruction happens
+// on continue and break before iterator and temporary-range destruction.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Sentinel {
+  // Exclusive upper bound, with a different type from the iterator.
+  unsigned limit;
+};
+struct Element {
+  // Value observed during the iteration and at its cleanup boundary.
+  unsigned value;
+  ~Element() { observe(10 + value); }
+};
+struct Iterator {
+  // Current iteration value; copying must preserve the original range member.
+  unsigned value;
+  Iterator(unsigned initial) : value(initial) {}
+  Iterator(const Iterator& source) : value(source.value) { observe(5); }
+  ~Iterator() { observe(30 + value); }
+  Element operator*() const { return {value}; }
+  void operator++() { ++value; }
+  bool operator!=(Sentinel end) const { return value != end.limit; }
+};
+struct Range {
+  // Original iterator, never advanced by the loop's independent copy.
+  Iterator first{0};
+  // Bound supplied to the distinct sentinel.
+  unsigned limit;
+  Range(unsigned count) : limit(count) { observe(1); }
+  ~Range() { observe(40 + first.value); }
+  Iterator& begin() { observe(2); return first; }
+  Sentinel end() { observe(3); return {limit}; }
+};
+void run() {
+  for (auto value : Range{4}) {
+    observe(value.value);
+    if (value.value == 1) continue;
+    if (value.value == 2) break;
+  }
+  observe(50);
+}
+
+// ----
+event 1
+event 2
+event 5
+event 3
+event 0
+event 10
+event 1
+event 11
+event 2
+event 12
+event 32
+event 40
+event 30
+event 50
+OK 0
+retired 0
+
+// ====
+// C++23 extends caller-owned temporaries throughout the range initializer,
+// including a discarded comma operand and a range returned through an accessor.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Destruction marker for a temporary preceding the selected range.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Iterator {
+  // Current scalar index.
+  unsigned value;
+  unsigned operator*() const { return value; }
+  void operator++() { ++value; }
+  bool operator!=(const Iterator& other) const { return value != other.value; }
+};
+struct Range {
+  // Exclusive upper bound.
+  unsigned count;
+  Range& self() { return *this; }
+  Iterator begin() { return {0}; }
+  Iterator end() { return {count}; }
+  ~Range() { observe(100); }
+};
+void run() {
+  for (unsigned value : (Guard{7}, Range{3}.self())) observe(value);
+  observe(200);
+}
+
+// ----
+event 0
+event 1
+event 2
+event 100
+event 7
+event 200
+OK 0
+retired 0
+
+// ====
+// Temporary cleanup follows construction order even when the selected range
+// was constructed before a later subscript operand. Function parameters keep
+// their own cleanup boundary, and early return unwinds the entire loop scope.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Marker observed when this temporary or parameter is destroyed.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Ranges {
+  // Selected subarray keeps its containing temporary alive through the loop.
+  unsigned values[1][2] = {{11, 12}};
+  ~Ranges() { observe(100); }
+};
+static void consume(Guard value) { observe(value.value + 1); }
+static unsigned select(const Guard& value) { return value.value; }
+static unsigned early() {
+  for (unsigned value : Ranges{}.values[(consume(Guard{20}), Guard{30}, select(Guard{0}))]) {
+    if (value == 12) return value;
+    observe(value);
+  }
+  return 0;
+}
+void run() { observe(early()); }
+
+// ----
+event 21
+event 20
+event 11
+event 0
+event 30
+event 100
+event 12
+OK 0
+retired 0
+
+// ====
+// The semantic range stays in SSA. Binding its reference retains the original
+// temporary's cleanup position instead of appending another destructor. A
+// constructor member initializer still finishes its own temporary immediately.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Marker for the temporary preceding the range object.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Range {
+  // Borrowed elements, represented as a buffer identity and offset.
+  unsigned* first;
+  // Number of elements owned by the caller.
+  unsigned count;
+  Range(unsigned* input, unsigned length) : first(input), count((Guard{8}, length)) {}
+  unsigned* begin() { return first; }
+  unsigned* end() { return first + count; }
+  ~Range() { observe(100 + *first); }
+};
+void run() {
+  unsigned values[] = {1, 2};
+  for (auto& value : (Guard{7}, Range{values, 2})) value += 10;
+  observe(values[1]);
+}
+
+// ----
+event 8
+event 111
+event 7
+event 12
+OK 0
+retired 0
+
+// ====
+// Only the selected conditional arm constructs objects. Its materialized
+// range and side temporary survive the full expression and die at loop exit.
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Branch-local marker.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Range {
+  // One element whose address is returned by begin and end.
+  unsigned value;
+  Range& self() { return *this; }
+  unsigned* begin() { return &value; }
+  unsigned* end() { return &value + 1; }
+  ~Range() { observe(100 + value); }
+};
+static void selected(bool condition) {
+  for (unsigned value : condition ? (Guard{1}, Range{2}.self()) : (Guard{3}, Range{4}.self())) observe(value);
+}
+void run() { selected(true); selected(false); }
+
+// ----
+event 2
+event 102
+event 1
+event 4
+event 104
+event 3
+OK 0
+retired 0

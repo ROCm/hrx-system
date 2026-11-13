@@ -11,6 +11,7 @@ structured regions, state carried across joins, and observable effects.
 | Condition-variable initialization, scope, mutation, and destruction | `condition_declarations` |
 | Compile-time branch selection and runtime initializer effects | `constexpr_selection` |
 | Pre-test and post-test loops, recurrences, and mutable conditions | `loops` |
+| Bounded array and class range iteration through checked begin/end operations | `range_loops` |
 | Counted intervals, integer wrap boundaries, and native address domains | `counted_loops`, `address_counted_loops` |
 | Unbraced loop bodies and counted-loop admissibility | `loop_bodies` |
 | Loop schedule operands retained from source | `loop_schedules` |

@@ -32,6 +32,7 @@
 namespace loom::cxx_import {
 
 struct DirectOperatorCall;
+class RangeLoops;
 
 // Builtin fixed-array selection retained by the owning source traversal.
 // Subscripts preserve written evaluation order, including i[array] syntax.
@@ -262,6 +263,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   const TemporaryOrigins& temporary_origins() const {
     return temporary_origins_;
   }
+
+  // Ordinary scopes retained from checked range loops during this walk.
+  cxx::CompoundStatementAST* range_scope(cxx::ForRangeStatementAST* loop) const;
+  bool initializes_range(cxx::InitDeclaratorAST* declaration) const;
 
   // Unique bindings mutated under a structured statement, direct for-loop body,
   // or conditional value expression, in encounter order. Includes mutations in
@@ -521,6 +526,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::WhileStatementAST* ast) override;
   void visit(cxx::DoStatementAST* ast) override;
   void visit(cxx::ForStatementAST* ast) override;
+  void visit(cxx::ForRangeStatementAST* ast) override;
   void visit(cxx::ConditionalExpressionAST* ast) override;
   void visit(cxx::SwitchStatementAST* ast) override;
   void visit(cxx::AssignmentExpressionAST* ast) override;
@@ -817,6 +823,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::ExpressionAST*, cxx::Symbol*> object_owners_;
   // Proven intervals retained after each source loop's children are visited.
   std::unordered_map<cxx::ForStatementAST*, CountedLoop> counted_;
+  // Source adapters allocated only for functions containing range loops.
+  std::unique_ptr<RangeLoops> range_loops_;
   // Sparse path sets retain statements with function or iteration exits.
   std::unordered_map<cxx::StatementAST*, unsigned> paths_;
   // Statements requiring callable exits, including divergent continuations.
