@@ -57,6 +57,8 @@ void Check(hipError_t status) {
 // process. Per-row graphs differ only in node count and output memory class.
 class HrxRuntime {
  public:
+  using GraphType = hrx_graph_t;
+
   HrxRuntime() : api_(HrxLoader::instance()) {
     hrx_runtime_t runtime = nullptr;
     Check(api_.runtime_create(nullptr, api_.host_allocator_system(), &runtime));
@@ -148,9 +150,19 @@ class HrxRuntime {
     value_bias_ = next_bias;
   }
 
-  void Reinstantiate() {
+  void Reinstantiate() { InstallTemplate(graph_); }
+
+  GraphType ConstructTemplate() {
+    hrx_graph_t graph = nullptr;
+    BuildGraph(values_.size(), 0, &graph);
+    return graph;
+  }
+
+  void ReleaseTemplate(GraphType graph) { api_.graph_release(graph); }
+
+  void InstallTemplate(GraphType graph) {
     hrx_graph_exec_t executable = nullptr;
-    Check(api_.graph_instantiate(graph_, dispatch_queue_, 0, &executable));
+    Check(api_.graph_instantiate(graph, dispatch_queue_, 0, &executable));
     api_.graph_exec_release(executable_);
     executable_ = executable;
   }
@@ -280,6 +292,8 @@ class HrxRuntime {
 
 class HipRuntime {
  public:
+  using GraphType = hipGraph_t;
+
   HipRuntime() {
     Require(FLAG_graph_hip_library[0] != 0, "--graph_hip_library is required");
     library_.load(FLAG_graph_hip_library);
@@ -366,9 +380,21 @@ class HipRuntime {
     value_bias_ = next_bias;
   }
 
-  void Reinstantiate() {
+  void Reinstantiate() { InstallTemplate(graph_); }
+
+  GraphType ConstructTemplate() {
+    hipGraph_t graph = nullptr;
+    BuildGraph(values_.size(), 0, &graph);
+    return graph;
+  }
+
+  void ReleaseTemplate(GraphType graph) {
+    Check(Resolve<decltype(&hipGraphDestroy)>("hipGraphDestroy")(graph));
+  }
+
+  void InstallTemplate(GraphType graph) {
     hipGraphExec_t executable = nullptr;
-    Check(instantiate_(&executable, graph_, nullptr, nullptr, 0));
+    Check(instantiate_(&executable, graph, nullptr, nullptr, 0));
     Check(destroy_(executable_));
     executable_ = executable;
   }
@@ -578,6 +604,55 @@ void GraphEdit(benchmark::State& state) {
   }
 }
 
+// Builds a bounded live set of real dispatch templates. Native HRX constructs
+// explicit nodes and HIP captures the matching dispatch sequence. Compilation,
+// completion, and releasing the live set stay outside construction timing.
+template <typename Runtime>
+void RunGraphConstruct(benchmark::State& state) {
+  auto& runtime = GetRuntime<Runtime>();
+  const size_t node_count = state.range(0);
+  const size_t retained_count = state.range(1);
+  runtime.Prepare(node_count, /*host=*/true);
+  std::vector<typename Runtime::GraphType> graphs(retained_count);
+  for (auto& graph : graphs) {
+    graph = runtime.ConstructTemplate();
+  }
+  runtime.InstallTemplate(graphs.back());
+  runtime.Launch();
+  runtime.Wait();
+  runtime.Verify();
+  for (auto graph : graphs) {
+    runtime.ReleaseTemplate(graph);
+  }
+  state.SetLabel(runtime.label() + " output=host-coherent");
+  for (auto _ : state) {
+    for (auto& graph : graphs) {
+      graph = runtime.ConstructTemplate();
+    }
+    benchmark::DoNotOptimize(graphs.data());
+    state.PauseTiming();
+    for (auto graph : graphs) {
+      runtime.ReleaseTemplate(graph);
+    }
+    state.ResumeTiming();
+  }
+  runtime.Reset();
+  state.counters["nodes"] = static_cast<double>(node_count);
+  state.counters["retained_graphs"] = static_cast<double>(retained_count);
+  state.counters["host_interval"] = FLAG_graph_host_interval;
+  state.SetItemsProcessed(state.iterations() * node_count * retained_count);
+}
+
+void GraphConstruct(benchmark::State& state) {
+  const std::string runtime = FLAG_graph_runtime;
+  if (runtime == "hrx") {
+    RunGraphConstruct<HrxRuntime>(state);
+  } else {
+    Require(runtime == "hip" || runtime == "rocm", "unknown --graph_runtime");
+    RunGraphConstruct<HipRuntime>(state);
+  }
+}
+
 // Keeps a bounded window of launches, each consuming a different recording.
 // UpdateSubmit excludes the final join; UpdateComplete includes it. Neither
 // waits on the host between replacement and the next enqueue within a batch.
@@ -652,6 +727,21 @@ void GraphArguments(benchmark::Benchmark* benchmark) {
     }
   }
 }
+
+void GraphConstructArguments(benchmark::Benchmark* benchmark) {
+  for (int count : {16, 256, 4096}) {
+    for (int retained : {1, 16, 64}) {
+      benchmark->Args({count, retained});
+    }
+  }
+}
+
+BENCHMARK(GraphConstruct)
+    ->Name("Graph/Construct")
+    ->Apply(GraphConstructArguments)
+    ->ArgNames({"nodes", "retained"})
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
 
 BENCHMARK_TEMPLATE(Graph, false)
     ->Name("Graph/Submit")
