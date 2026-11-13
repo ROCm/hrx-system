@@ -1356,8 +1356,8 @@ ERR_TARGET_074 = ErrorDef(
         ErrorParam("expected_type", ParamKind.TYPE),
     ),
     fix_hint=(
-        "Match the helper register signature or provide source facts proving "
-        "a supported lossless argument conversion"
+        "Match the helper register signature; argument carrier conversions "
+        "require source facts proving a supported lossless conversion"
     ),
 )
 

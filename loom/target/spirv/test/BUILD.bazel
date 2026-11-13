@@ -53,6 +53,14 @@ loom_test(
 )
 
 loom_test(
+    name = "native_arguments_tests",
+    srcs = ["native_arguments.loom"],
+    benchmark_smoke = False,
+    compile_targets = ["//loom/target/spirv:vulkan1.3+bda+extended-types"],
+    execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
+)
+
+loom_test(
     name = "vulkan_tests",
     srcs = [
         "cooperative_integer.loom",

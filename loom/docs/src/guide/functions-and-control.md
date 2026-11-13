@@ -183,12 +183,22 @@ low.func.def target<amdgpu.gfx11.generic.core>(@schedule_target) @pack_pair(%eve
 %packed = low.invoke @pack_pair(%even, %odd) : (vector<2xf16>, vector<2xf16>) -> (vector<2xf16>)
 ```
 
-Lowering proves that each source operand and result maps exactly to the
-helper's register signature. Inlined helpers use virtual register allocation
-and receive inputs through arguments rather than `low.resource` or
-`low.live_in`. They may contain multiple control-flow blocks and nested Low
-calls. Each nested call must satisfy its own signature, target, and inline
-contracts; every returning path supplies the helper's declared results.
+Lowering matches the helper's register signature and can convert argument
+carriers when retained source facts prove the conversion is lossless. For
+example, AMDGPU can pass a subgroup-uniform value from vector registers to a
+scalar-register helper, including every word of a packed vector. A lane mask
+can become scalar truth only when participating lanes agree; inactive lanes
+do not contribute. A proven range can also permit a narrower native index
+argument, including SPIR-V's signed index carriers. Missing proofs reject the
+invocation. These are physical conversions at the explicit `low.invoke`
+boundary; ordinary source calls retain exact source-type matching, and native
+results use the helper's declared carriers.
+
+Inlined helpers use virtual register allocation and receive inputs through
+arguments rather than `low.resource` or `low.live_in`. They may contain
+multiple control-flow blocks and nested Low calls. Each nested call must
+satisfy its own signature, target, and inline contracts; every returning path
+supplies the helper's declared results.
 
 Target compatibility is directional. A concrete `gfx1151` caller can invoke a
 helper authored for `gfx11-generic` because the concrete target satisfies the
