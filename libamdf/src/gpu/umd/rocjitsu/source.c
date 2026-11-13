@@ -50,6 +50,9 @@ static amdf_status_t amdf_rocjitsu_source_destroy(
     source->library.rj_vm_config_destroy(source->configuration);
     source->configuration = NULL;
   }
+  const int mutex_error = pthread_mutex_destroy(&source->command_mutex);
+  amdf_assert(mutex_error == 0);
+  (void)mutex_error;
   amdf_rocjitsu_library_close(&source->library);
   amdf_free(source->host_allocator, source);
   return AMDF_STATUS_OK;
@@ -212,7 +215,14 @@ static amdf_status_t amdf_rocjitsu_source_create(
         sizeof(*source) + (size_t)gpu_count * sizeof(source->gpus[0]),
         amdf_alignof(amdf_rocjitsu_source_t), (void**)&source);
   }
+  if (amdf_status_is_ok(status)) {
+    const int error = pthread_mutex_init(&source->command_mutex, NULL);
+    if (error != 0) {
+      status = amdf_linux_error(error);
+    }
+  }
   if (!amdf_status_is_ok(status)) {
+    amdf_free(host_allocator, source);
     if (configuration != NULL) {
       library.rj_vm_config_destroy(configuration);
     }
@@ -482,6 +492,19 @@ amdf_status_t amdf_rocjitsu_source_prepare(amdf_rocjitsu_source_t* source) {
   return status;
 }
 
+static void amdf_rocjitsu_source_lock_commands(amdf_rocjitsu_source_t* source) {
+  const int error = pthread_mutex_lock(&source->command_mutex);
+  amdf_assert(error == 0);
+  (void)error;
+}
+
+static void amdf_rocjitsu_source_unlock_commands(
+    amdf_rocjitsu_source_t* source) {
+  const int error = pthread_mutex_unlock(&source->command_mutex);
+  amdf_assert(error == 0);
+  (void)error;
+}
+
 amdf_status_t amdf_rocjitsu_source_command(amdf_rocjitsu_source_t* source,
                                            uint32_t opcode, void* arguments,
                                            size_t byte_length) {
@@ -494,9 +517,18 @@ amdf_status_t amdf_rocjitsu_source_command(amdf_rocjitsu_source_t* source,
       .in_mem_handle = -1,
       .in_proc_handle = -1,
   };
+  // Canonical retirement rejects concurrent host mutations with EAGAIN.
+  // Waiters hold no publication state and must allow signaling to enter.
+  const bool blocking_wait = opcode == AMDKFD_IOC_WAIT_EVENTS;
+  if (!blocking_wait) {
+    amdf_rocjitsu_source_lock_commands(source);
+  }
   const amdf_status_t status =
       amdf_rocjitsu_status(source->library.rj_vm_execute_as(
           source->machine, source->process, &command));
+  if (!blocking_wait) {
+    amdf_rocjitsu_source_unlock_commands(source);
+  }
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -506,12 +538,24 @@ amdf_status_t amdf_rocjitsu_source_command(amdf_rocjitsu_source_t* source,
 
 amdf_status_t amdf_rocjitsu_source_map(amdf_rocjitsu_source_t* source,
                                        rj_vm_map_t* mapping) {
+  amdf_rocjitsu_source_lock_commands(source);
   const amdf_status_t status =
       amdf_rocjitsu_status(source->library.rj_vm_device_map_as(
           source->machine, source->process, mapping));
+  amdf_rocjitsu_source_unlock_commands(source);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
   return mapping->map_errno == 0 ? AMDF_STATUS_OK
                                  : amdf_linux_error(mapping->map_errno);
+}
+
+amdf_status_t amdf_rocjitsu_source_unmap(amdf_rocjitsu_source_t* source,
+                                         rj_vm_unmap_t* mapping) {
+  amdf_rocjitsu_source_lock_commands(source);
+  const amdf_status_t status =
+      amdf_rocjitsu_status(source->library.rj_vm_device_unmap_as(
+          source->machine, source->process, mapping));
+  amdf_rocjitsu_source_unlock_commands(source);
+  return status;
 }

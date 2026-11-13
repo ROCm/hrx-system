@@ -80,8 +80,7 @@ static amdf_status_t amdf_rocjitsu_user_queue_release(
   }
   if (amdf_status_is_ok(status) && queue->doorbell_mapping != 0) {
     rj_vm_unmap_t unmap = {.addr = queue->doorbell_mapping, .length = 4096};
-    status = amdf_rocjitsu_status(source->library.rj_vm_device_unmap_as(
-        source->machine, source->process, &unmap));
+    status = amdf_rocjitsu_source_unmap(source, &unmap);
   }
   if (amdf_status_is_ok(status)) {
     status = amdf_rocjitsu_buffer_destroy(queue->control);

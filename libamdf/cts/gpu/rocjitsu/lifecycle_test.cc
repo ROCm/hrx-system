@@ -9,6 +9,7 @@
 #include <sys/resource.h>
 
 #include <array>
+#include <barrier>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -16,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "amdf/rocjitsu.h"
@@ -697,6 +699,52 @@ TEST_P(RocjitsuQueueTest, IndependentMachinesSurviveQueueAndPeerTeardown) {
     ASSERT_NO_FATAL_FAILURE(ReleaseMachine(machines_[1]));
     AssertLibraryLoaded(false);
   }
+}
+
+TEST_P(RocjitsuQueueTest, ConcurrentRetirementPreservesHostEventProgress) {
+  auto& machine = machines_[0];
+  ASSERT_NO_FATAL_FAILURE(CreateInstance(machine));
+  ASSERT_NO_FATAL_FAILURE(Activate(machine, GetParam()));
+  if (IsSkipped()) {
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(Execute(machine, 0, 1));
+  ASSERT_NO_FATAL_FAILURE(Execute(machine, 1, 2));
+
+  amdf_gpu_event_t* event = nullptr;
+  const amdf_gpu_event_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO,
+      .structure_size = sizeof(create),
+  };
+  ASSERT_EQ(gpu_->event_create(machine.devices[0]->handle, &create, &event),
+            AMDF_STATUS_OK);
+  std::barrier<> start(static_cast<ptrdiff_t>(machine.devices.size() + 2));
+  std::thread waiter([&] {
+    start.arrive_and_wait();
+    EXPECT_EQ(gpu_->event_wait(event, AMDF_TIMEOUT_INFINITE), AMDF_STATUS_OK);
+  });
+  std::vector<std::thread> retiring;
+  for (auto& device : machine.devices) {
+    retiring.emplace_back([&, device = device.get()] {
+      start.arrive_and_wait();
+      for (auto& queue : device->queues) {
+        EXPECT_TRUE(queue.Release(api_));
+      }
+      EXPECT_TRUE(device->output.Release(api_));
+    });
+  }
+  start.arrive_and_wait();
+  EXPECT_EQ(gpu_->event_signal(event), AMDF_STATUS_OK);
+  for (auto& thread : retiring) {
+    thread.join();
+  }
+  // Release the waiter even when the overlapping signal reported a failure.
+  // The failure above remains visible; cleanup begins after every retiree
+  // joins.
+  EXPECT_EQ(gpu_->event_signal(event), AMDF_STATUS_OK);
+  waiter.join();
+  EXPECT_EQ(gpu_->event_destroy(event), AMDF_STATUS_OK);
+  ASSERT_NO_FATAL_FAILURE(ReleaseMachine(machine));
 }
 
 INSTANTIATE_TEST_SUITE_P(

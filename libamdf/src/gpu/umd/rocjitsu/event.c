@@ -35,9 +35,7 @@ amdf_status_t amdf_rocjitsu_event_source_release(
         .addr = (uintptr_t)storage->pointer,
         .length = storage->byte_length,
     };
-    const amdf_status_t status =
-        amdf_rocjitsu_status(source->library.rj_vm_device_unmap_as(
-            source->machine, source->process, &unmap));
+    const amdf_status_t status = amdf_rocjitsu_source_unmap(source, &unmap);
     if (!amdf_status_is_ok(status)) {
       return status;
     }

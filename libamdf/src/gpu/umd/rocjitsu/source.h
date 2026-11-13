@@ -48,6 +48,8 @@ struct amdf_rocjitsu_source_t {
   rj_vm_t* machine;
   // Explicit process domain, or zero before opening it.
   uint32_t process;
+  // Serializes host driver mutations; blocking event waits never acquire it.
+  pthread_mutex_t command_mutex;
   // Host-owned thread executing the VM.
   pthread_t thread;
   // Whether thread requires joining before VM destruction.
@@ -87,8 +89,8 @@ amdf_status_t amdf_rocjitsu_endpoint_open(amdf_instance_t* instance,
 // Prepares shared execution state under the instance's cold native-state lock.
 amdf_status_t amdf_rocjitsu_source_prepare(amdf_rocjitsu_source_t* source);
 
-// Dispatches a wire command; C transport failures and driver errno stay
-// distinct.
+// Serializes host driver commands except blocking event waits. C transport
+// failures and driver errno remain distinct.
 amdf_status_t amdf_rocjitsu_source_command(amdf_rocjitsu_source_t* source,
                                            uint32_t opcode, void* arguments,
                                            size_t byte_length);
@@ -96,6 +98,10 @@ amdf_status_t amdf_rocjitsu_source_command(amdf_rocjitsu_source_t* source,
 // Maps an explicit process view and preserves the driver-reported mmap errno.
 amdf_status_t amdf_rocjitsu_source_map(amdf_rocjitsu_source_t* source,
                                        rj_vm_map_t* mapping);
+
+// Unmaps an explicit process view in the same native command domain.
+amdf_status_t amdf_rocjitsu_source_unmap(amdf_rocjitsu_source_t* source,
+                                         rj_vm_unmap_t* mapping);
 
 // Cached engine liveness, with no native query or wait.
 static inline amdf_status_t amdf_rocjitsu_source_status(
