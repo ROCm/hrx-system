@@ -42,6 +42,8 @@ constexpr uint64_t kPageSize = 4096;
 constexpr uint64_t kCommandApertureAllocationSize = 0x1000;
 constexpr D3DGPU_VIRTUAL_ADDRESS kCommandApertureGpuVaBase = 0x04000000;
 constexpr uint64_t kCommandApertureGpuVaSize = 0x04000000;
+// Same bound as the Linux amdxdna dev_heap_max_size.
+constexpr uint64_t kMaxCommandApertureExtensionSize = 512ull << 20;
 constexpr uint32_t kQhdlCompletionSlotSize = 8;
 constexpr uint32_t kMaxSubmitPrivatePrefixSize = 0x78;
 constexpr size_t kLegacyContextCommandApertureCookieOffset = 0x40;
@@ -2882,6 +2884,181 @@ bool QueuePathBCodeRangeExtensionRelease(
                                        !UsesLegacyCpuBufferHandles(
                                            device.mcdm_abi),
                                    out_error);
+}
+
+bool EnsureCommandApertureExtension(const KmtApi& api, const Device& device,
+                                    Context* context,
+                                    const CommandAperture& aperture,
+                                    uint64_t code_size,
+                                    CommandApertureExtension* extension,
+                                    Error* out_error) {
+  if (!context || !context->hw_queue || !extension || !code_size ||
+      !aperture.gpu_allocation || !aperture.protocol_gpu_va) {
+    SetError(out_error,
+             "EnsureCommandApertureExtension called before aperture setup");
+    return false;
+  }
+  if (extension->allocation && extension->size >= code_size) return true;
+  if (code_size > kMaxCommandApertureExtensionSize) {
+    SetErrorFormat(out_error,
+                   "control code of %llu bytes exceeds the %llu MiB "
+                   "command-aperture extension limit",
+                   static_cast<unsigned long long>(code_size),
+                   static_cast<unsigned long long>(
+                       kMaxCommandApertureExtensionSize >> 20));
+    return false;
+  }
+  DestroyCommandApertureExtension(api, device, extension);
+  const uint64_t size = (code_size + kCommandApertureGpuVaSize - 1) &
+                        ~(kCommandApertureGpuVaSize - 1);
+
+  // Same allocation private as the primary aperture; only the size differs.
+  AllocPrivate alloc_private = {};
+  alloc_private.requested_size = size;
+  alloc_private.aligned_size = size;
+  alloc_private.reserved1 = 1;
+  alloc_private.private_type =
+      GetBufferKindInfo(BufferKind::cacheable).private_type;
+  alloc_private.policy = 2;
+  alloc_private.xcl_flags =
+      0x01000001u | (context->command_aperture_cookie << 16);
+  D3DDDI_ALLOCATIONINFO2 alloc_info = {};
+  alloc_info.pPrivateDriverData = &alloc_private;
+  alloc_info.PrivateDriverDataSize = sizeof(alloc_private);
+  D3DKMT_CREATEALLOCATION create = {};
+  create.hDevice = device.device;
+  create.NumAllocations = 1;
+  create.pAllocationInfo2 = &alloc_info;
+  NTSTATUS status = api.create_allocation2(&create);
+  if (!CheckStatus("D3DKMTCreateAllocation2(command aperture extension)",
+                   status, out_error)) {
+    return false;
+  }
+  CommandApertureExtension created = {};
+  created.allocation = alloc_info.hAllocation;
+  created.size = size;
+  created.protocol_gpu_va = aperture.protocol_gpu_va + aperture.gpu_va_size;
+
+  D3DDDI_MAPGPUVIRTUALADDRESS map = {};
+  map.hPagingQueue = device.paging_queue;
+  map.hAllocation = created.allocation;
+  map.SizeInPages = size / kPageSize;
+  map.Protection.Write = 1;
+  status = api.map_gpu_virtual_address(&map);
+  if (!CheckStatusOrPending("D3DKMTMapGpuVirtualAddress(command aperture "
+                            "extension)",
+                            status, out_error)) {
+    DestroyCommandApertureExtension(api, device, &created);
+    return false;
+  }
+  RecordPendingPagingFence(device, map.PagingFenceValue);
+  created.gpu_va = map.VirtualAddress;
+
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  std::array<uint8_t, kMaxSubmitPrivatePrefixSize> attach_private = {};
+  WriteU32(attach_private.data(), 0x00, 2);
+  WriteU64(attach_private.data(), 0x08, created.allocation);
+  // The bootstrap packet carries the region size here, not its address.
+  WriteU64(attach_private.data(), 0x10, created.size);
+  WriteU64(attach_private.data(), 0x50, 1);
+  D3DKMT_SUBMITCOMMANDTOHWQUEUE submit = {};
+  submit.hHwQueue = context->hw_queue;
+  submit.HwQueueProgressFenceId = context->next_fence_id++;
+  submit.CommandBuffer = created.gpu_va;
+  submit.CommandLength = static_cast<UINT>(size);
+  submit.PrivateDriverDataSize = abi.submit_private_prefix_size;
+  submit.pPrivateDriverData = attach_private.data();
+  if (!SubmitCommandToHwQueueAfterPaging(
+          api, device, &submit,
+          "D3DKMTSubmitCommandToHwQueue(command aperture extension attach)",
+          out_error)) {
+    DestroyCommandApertureExtension(api, device, &created);
+    return false;
+  }
+
+  D3DKMT_HANDLE resident_allocs[1] = {created.allocation};
+  D3DDDI_MAKERESIDENT resident = {};
+  resident.hPagingQueue = device.paging_queue;
+  resident.NumAllocations = 1;
+  resident.AllocationList = resident_allocs;
+  ConfigureMakeResidentFlags(&resident);
+  status = api.make_resident(&resident);
+  if (!CheckMakeResidentStatusOrPending(
+          api, device, "D3DKMTMakeResident(command aperture extension)", status,
+          resident, out_error)) {
+    DestroyCommandApertureExtension(api, device, &created);
+    return false;
+  }
+  RecordPendingPagingFence(device, resident.PagingFenceValue);
+
+  D3DKMT_LOCK2 lock = {};
+  lock.hDevice = device.device;
+  lock.hAllocation = created.allocation;
+  status = api.lock2(&lock);
+  if (!CheckStatus("D3DKMTLock2(command aperture extension)", status,
+                   out_error)) {
+    DestroyCommandApertureExtension(api, device, &created);
+    return false;
+  }
+  created.cpu_ptr = lock.pData;
+  *extension = created;
+  return true;
+}
+
+void DestroyCommandApertureExtension(const KmtApi& api, const Device& device,
+                                     CommandApertureExtension* extension) {
+  if (!extension || !extension->allocation) return;
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (extension->gpu_va && abi.explicit_gpu_va_free_on_destroy) {
+    D3DKMT_FREEGPUVIRTUALADDRESS free_va = {};
+    free_va.hAdapter = device.adapter;
+    free_va.BaseAddress = extension->gpu_va;
+    free_va.Size = extension->size;
+    api.free_gpu_virtual_address(&free_va);
+  }
+  if (extension->cpu_ptr) {
+    D3DKMT_UNLOCK2 unlock = {};
+    unlock.hDevice = device.device;
+    unlock.hAllocation = extension->allocation;
+    api.unlock2(&unlock);
+  }
+  D3DKMT_HANDLE allocs[1] = {extension->allocation};
+  D3DKMT_DESTROYALLOCATION2 destroy = {};
+  destroy.hDevice = device.device;
+  destroy.Flags.AssumeNotInUse = 1;
+  destroy.Flags.SynchronousDestroy = 1;
+  destroy.AllocationCount = 1;
+  destroy.phAllocationList = allocs;
+  api.destroy_allocation2(&destroy);
+  *extension = {};
+}
+
+bool StageCommandApertureExtensionCode(
+    const KmtApi& api, const Device& device,
+    const CommandApertureExtension& extension, const void* code,
+    uint64_t code_size, Error* out_error) {
+  if (!extension.cpu_ptr || !code || !code_size || code_size > extension.size) {
+    SetError(out_error, "invalid command-aperture extension code range");
+    return false;
+  }
+  CommandAperture view = {};
+  view.gpu_allocation = extension.allocation;
+  view.gpu_cpu_ptr = extension.cpu_ptr;
+  view.gpu_va_size = extension.size;
+  const CpuCopyRange range = {0, code, code_size};
+  if (!CopyAndCommitPathBCodeWrites(view, &range, 1, out_error)) return false;
+  // XRT invalidates the extension with KMT over the 32 KiB-aligned code size.
+  constexpr uint64_t kInvalidateGranularity = 0x8000;
+  D3DKMT_INVALIDATECACHE invalidate = {};
+  invalidate.hDevice = device.device;
+  invalidate.hAllocation = extension.allocation;
+  invalidate.Offset = 0;
+  invalidate.Length = static_cast<SIZE_T>(std::min<uint64_t>(
+      (code_size + kInvalidateGranularity - 1) & ~(kInvalidateGranularity - 1),
+      extension.size));
+  const NTSTATUS status = api.invalidate_cache(&invalidate);
+  return CheckStatus("D3DKMTInvalidateCache(command aperture extension)",
+                     status, out_error);
 }
 
 // Allocate the firmware completion ring using the status object selected by

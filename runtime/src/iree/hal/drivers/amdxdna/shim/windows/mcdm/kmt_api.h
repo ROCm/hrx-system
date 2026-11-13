@@ -362,6 +362,20 @@ struct CommandAperture {
   uint64_t code_size = 0;
 };
 
+// Context-owned control-code region for one command whose code exceeds the
+// 64 MiB command aperture. XRT attaches it with the aperture bootstrap opcode
+// as aperture index 1, advertised directly after the primary aperture, and
+// points the command's instruction buffer at its base.
+struct CommandApertureExtension {
+  D3DKMT_HANDLE allocation = 0;
+  uint64_t size = 0;
+  // Allocator-selected process VA used by KMT for mapping and bootstrap.
+  D3DGPU_VIRTUAL_ADDRESS gpu_va = 0;
+  // Context-local address of the region's first byte.
+  D3DGPU_VIRTUAL_ADDRESS protocol_gpu_va = 0;
+  void* cpu_ptr = nullptr;
+};
+
 struct PathBChainSubmitInfo {
   D3DGPU_VIRTUAL_ADDRESS descriptor_gpu_va = 0;
   uint32_t descriptor_bytes = 0;
@@ -603,6 +617,25 @@ bool QueuePathBCodeRangeExtensionRelease(
     const KmtApi& api, const Device& device, Context* context,
     const CommandAperture& aperture, uint64_t offset, uint64_t length,
     Error* out_error);
+
+// Ensures |extension| holds at least |code_size| bytes, sized in whole
+// command-aperture units and capped at 512 MiB. Growing replaces the region,
+// so the caller must guarantee no submitted command still executes from it.
+bool EnsureCommandApertureExtension(const KmtApi& api, const Device& device,
+                                    Context* context,
+                                    const CommandAperture& aperture,
+                                    uint64_t code_size,
+                                    CommandApertureExtension* extension,
+                                    Error* out_error);
+
+void DestroyCommandApertureExtension(const KmtApi& api, const Device& device,
+                                     CommandApertureExtension* extension);
+
+// Copies |code| to the start of |extension| and makes it device-visible.
+bool StageCommandApertureExtensionCode(
+    const KmtApi& api, const Device& device,
+    const CommandApertureExtension& extension, const void* code,
+    uint64_t code_size, Error* out_error);
 
 // Path B: per-dispatch hwqueue_aie4-style submit. Reserve an 8-byte completion
 // slot, build the driver-negotiated private packet with the ERT packet inline,

@@ -40,6 +40,8 @@ bool g_record_teardown = false;
 uint32_t g_submit_opcodes[16] = {};
 uint64_t g_submit_fences[16] = {};
 uint64_t g_submit_offsets[16] = {};
+uint64_t g_submit_aperture_indices[16] = {};
+uint32_t g_submit_command_lengths[16] = {};
 uint64_t g_wait_fences[16] = {};
 D3DKMT_HANDLE g_gpu_wait_context = 0;
 D3DKMT_HANDLE g_gpu_wait_object = 0;
@@ -91,6 +93,10 @@ void ResetFakes() {
   g_gpu_wait_count = 0;
   g_setup_call_count = 0;
   g_submit_count = 0;
+  std::fill(std::begin(g_submit_aperture_indices),
+            std::end(g_submit_aperture_indices), 0);
+  std::fill(std::begin(g_submit_command_lengths),
+            std::end(g_submit_command_lengths), 0);
   g_wait_count = 0;
   g_submit_failure_index = SIZE_MAX;
   g_submit_failure_status = static_cast<NTSTATUS>(0xC0000001u);
@@ -284,6 +290,12 @@ NTSTATUS APIENTRY FakeSubmitCommandToHwQueue(
   std::memcpy(&g_submit_offsets[g_submit_count],
               static_cast<const uint8_t*>(args->pPrivateDriverData) + 0x10,
               sizeof(uint64_t));
+  if (args->PrivateDriverDataSize >= 0x58) {
+    std::memcpy(&g_submit_aperture_indices[g_submit_count],
+                static_cast<const uint8_t*>(args->pPrivateDriverData) + 0x50,
+                sizeof(uint64_t));
+  }
+  g_submit_command_lengths[g_submit_count] = args->CommandLength;
   g_submit_fences[g_submit_count++] = args->HwQueueProgressFenceId;
   if (call_index == g_submit_failure_index) return g_submit_failure_status;
   return 0;
@@ -2112,6 +2124,111 @@ TEST(KmtApiTest, CreateDeviceClosesRetainedHandlesOnCreateFailure) {
   EXPECT_EQ(g_close_count, 2);
   EXPECT_EQ(g_closed_adapters[0], 0x20u);
   EXPECT_EQ(g_closed_adapters[1], 0x30u);
+}
+
+TEST(KmtApiTest, ApertureExtensionAttachesAfterPrimaryApertureLikeXrt) {
+  ResetFakes();
+  KmtApi api = {};
+  api.create_allocation2 = FakeCreateAllocation;
+  api.map_gpu_virtual_address = FakeMapGpuVirtualAddress;
+  api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+  api.make_resident = FakeMakeResident;
+  api.lock2 = FakeLock2;
+  api.wait_from_cpu = FakeWaitFromCpu;
+
+  Device device = {};
+  device.device = 0x10;
+  device.paging_queue = 0x11;
+  device.mcdm_abi = McdmAbi::compact;
+  Context context = {};
+  context.hw_queue = 0x20;
+  context.next_fence_id = 7;
+  context.command_aperture_cookie = 0x8c;
+  CommandAperture aperture = {};
+  aperture.gpu_allocation = 0x50;
+  aperture.protocol_gpu_va = 0x04000000;
+  aperture.gpu_va_size = 0x04000000;
+  CommandApertureExtension extension = {};
+  Error error = {};
+
+  // A 75,959,248-byte stream is the qwen3.6-moe 16k-token prefill that XRT
+  // places in a 128 MiB extension at 0x08000000.
+  ASSERT_TRUE(EnsureCommandApertureExtension(api, device, &context, aperture,
+                                             75959248u, &extension, &error))
+      << ErrorMessage(&error);
+  const SetupCall expected_calls[] = {SetupCall::wait, SetupCall::submit,
+                                      SetupCall::make_resident,
+                                      SetupCall::lock};
+  ASSERT_EQ(g_setup_call_count, std::size(expected_calls));
+  for (size_t i = 0; i < std::size(expected_calls); ++i) {
+    EXPECT_EQ(g_setup_calls[i], expected_calls[i]);
+  }
+  EXPECT_EQ(g_created_xcl_flags, 0x018c0001u);
+  ASSERT_EQ(g_submit_count, 1u);
+  EXPECT_EQ(g_submit_opcodes[0], 2u);
+  EXPECT_EQ(g_submit_offsets[0], 0x08000000u);
+  EXPECT_EQ(g_submit_aperture_indices[0], 1u);
+  EXPECT_EQ(g_submit_command_lengths[0], 0x08000000u);
+  EXPECT_EQ(g_submit_fences[0], 7u);
+  EXPECT_EQ(extension.allocation, 0x40u);
+  EXPECT_EQ(extension.size, 0x08000000u);
+  EXPECT_EQ(extension.gpu_va, 0x10000u);
+  EXPECT_EQ(extension.protocol_gpu_va, 0x08000000u);
+  EXPECT_EQ(extension.cpu_ptr, g_locked_aperture.data());
+
+  // A smaller stream reuses the attached extension.
+  ASSERT_TRUE(EnsureCommandApertureExtension(api, device, &context, aperture,
+                                             0x04100000u, &extension, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(g_submit_count, 1u);
+}
+
+TEST(KmtApiTest, ApertureExtensionAttachCarriesRegionSizeLikeXrt) {
+  ResetFakes();
+  KmtApi api = {};
+  api.create_allocation2 = FakeCreateAllocation;
+  api.map_gpu_virtual_address = FakeMapGpuVirtualAddress;
+  api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+  api.make_resident = FakeMakeResident;
+  api.lock2 = FakeLock2;
+  api.wait_from_cpu = FakeWaitFromCpu;
+
+  Device device = {};
+  device.device = 0x10;
+  device.paging_queue = 0x11;
+  device.mcdm_abi = McdmAbi::compact;
+  Context context = {};
+  context.hw_queue = 0x20;
+  context.next_fence_id = 7;
+  context.command_aperture_cookie = 0x8c;
+  CommandAperture aperture = {};
+  aperture.gpu_allocation = 0x50;
+  aperture.protocol_gpu_va = 0x04000000;
+  aperture.gpu_va_size = 0x04000000;
+  Error error = {};
+
+  // Two DocVQA images in one qwen3.6-moe prefill emit 151,918,480 bytes. XRT
+  // attaches a 192 MiB extension whose bootstrap packet carries 0x0C000000
+  // and runs the code from 0x08000000.
+  CommandApertureExtension extension = {};
+  ASSERT_TRUE(EnsureCommandApertureExtension(api, device, &context, aperture,
+                                             151918480u, &extension, &error))
+      << ErrorMessage(&error);
+  ASSERT_EQ(g_submit_count, 1u);
+  EXPECT_EQ(g_submit_offsets[0], 0x0C000000u);
+  EXPECT_EQ(g_submit_command_lengths[0], 0x0C000000u);
+  EXPECT_EQ(extension.size, 0x0C000000u);
+  EXPECT_EQ(extension.protocol_gpu_va, 0x08000000u);
+
+  // Streams past the limit fail before anything is allocated or submitted.
+  ResetFakes();
+  CommandApertureExtension too_large = {};
+  EXPECT_FALSE(EnsureCommandApertureExtension(
+      api, device, &context, aperture, (512ull << 20) + 1, &too_large, &error));
+  EXPECT_NE(std::strstr(ErrorMessage(&error), "512 MiB"), nullptr);
+  EXPECT_EQ(g_setup_call_count, 0u);
+  EXPECT_EQ(g_submit_count, 0u);
+  EXPECT_EQ(too_large.allocation, 0u);
 }
 
 }  // namespace

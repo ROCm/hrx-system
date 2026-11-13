@@ -563,6 +563,8 @@ struct iree_hal_amdxdna_native_context_t {
   mcdm::Context context;
   mcdm::CommandAperture command_aperture;
   bool has_command_aperture = false;
+  // Holds control code that exceeds the command aperture's code region.
+  mcdm::CommandApertureExtension command_aperture_extension;
   uint64_t pathb_persistent_code_bytes = 0;
   uint64_t pathb_persistent_code_slot_size = 0;
   std::vector<uint8_t> pathb_persistent_code_slots_in_use;
@@ -604,6 +606,9 @@ struct iree_hal_amdxdna_native_command_t {
   uint32_t arg_count = 0;
   bool windows_dpu_regmap_finalized = false;
   bool pathb_code_staged = false;
+  // The last staging placed this command's code in the context's aperture
+  // extension instead of its code slots.
+  bool pathb_code_in_extension = false;
   iree_device_size_t pathb_code_staged_size = 0;
   uint64_t pathb_single_code_aperture_offset = 0;
   uint64_t pathb_single_code_aperture_capacity = 0;
@@ -1254,6 +1259,94 @@ void set_windows_dpu_instruction_arg(iree_hal_amdxdna_native_command_t* command,
                                      uint64_t instruction_va,
                                      uint32_t instruction_words);
 
+iree_status_t set_pathb_instruction_fields(
+    iree_hal_amdxdna_native_command_t* command, bool is_partial_elf,
+    uint64_t code_gpu_va) {
+  if (is_partial_elf) {
+    ert_npu_data* npu_data = get_ert_npu_data(command->start_packet);
+    if (IREE_UNLIKELY(!npu_data)) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "amdxdna Windows MCDM PARTIAL_ELF packet has no NPU data");
+    }
+    npu_data->instruction_buffer = code_gpu_va;
+    npu_data->instruction_buffer_size =
+        static_cast<uint32_t>(command->control_buffer_size);
+    npu_data->instruction_prop_count = 0;
+  } else if (command->opcode ==
+             IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU_FULL_ELF) {
+    ert_npu_preempt_data* npu_data =
+        get_ert_npu_elf_data(command->start_packet);
+    if (IREE_UNLIKELY(!npu_data)) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "amdxdna Windows MCDM FULL_ELF packet has no NPU data");
+    }
+    npu_data->instruction_buffer = code_gpu_va;
+    npu_data->instruction_buffer_size =
+        static_cast<uint32_t>(command->control_buffer_size);
+    npu_data->instruction_prop_count = 0;
+  } else if (uses_windows_dpu_regmap(command) &&
+             command->windows_dpu_regmap_finalized) {
+    // Reclamation may move compact START_NPU code after the register map was
+    // finalized; keep its instruction pointer aligned with the new slot.
+    set_windows_dpu_instruction_arg(
+        command, code_gpu_va,
+        static_cast<uint32_t>(command->control_buffer_size / sizeof(uint32_t)));
+  }
+  return iree_ok_status();
+}
+
+// Stages control code that does not fit the aperture's code region into the
+// context's aperture extension, following XRT: the code starts at the
+// extension base, and one opcode-9 marker publishes the extent measured from
+// the first code slot.
+iree_status_t stage_pathb_extension_code(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* command, uint64_t slot_size,
+    bool is_partial_elf) {
+  iree_hal_amdxdna_native_context_t* context = queue->context;
+  mcdm::CommandAperture& aperture = context->command_aperture;
+  const uint64_t code_size =
+      static_cast<uint64_t>(command->control_buffer_size);
+  release_command_persistent_code_slots(command);
+  IREE_RETURN_IF_ERROR(close_pathb_single_code_ranges(queue));
+  mcdm::Error error;
+  if (!mcdm::EnsureCommandApertureExtension(
+          command->device->api, command->device->device, &context->context,
+          aperture, code_size, &context->command_aperture_extension, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM command aperture extension setup failed", error);
+  }
+  const mcdm::CommandApertureExtension& extension =
+      context->command_aperture_extension;
+  if (!mcdm::StageCommandApertureExtensionCode(
+          command->device->api, command->device->device, extension,
+          command->control_buffer->buffer.cpu_ptr, code_size, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM command aperture extension staging failed",
+        error);
+  }
+  const uint64_t extent =
+      (aperture.code_offset + code_size + slot_size - 1) & ~(slot_size - 1);
+  if (!mcdm::SubmitPathBApertureSync(
+          command->device->api, command->device->device, &context->context,
+          aperture, extent, /*wait_for_cpu=*/false, &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM command aperture extension publish failed",
+        error);
+  }
+  command->pathb_code_in_extension = true;
+  command->pathb_code_staged = false;
+  command->pathb_code_staged_size = 0;
+  command->pathb_single_code_aperture_offset = aperture.code_offset;
+  command->pathb_single_code_aperture_capacity = 0;
+  context->pathb_single_code_staged_size = 0;
+  context->pathb_single_code_staged_offset = 0;
+  return set_pathb_instruction_fields(command, is_partial_elf,
+                                      extension.protocol_gpu_va);
+}
+
 iree_status_t stage_windows_dpu_code_buffer(
     iree_hal_amdxdna_native_queue_t* queue,
     iree_hal_amdxdna_native_command_t* command) {
@@ -1302,6 +1395,13 @@ iree_status_t stage_windows_dpu_code_buffer(
   const bool uses_shared_command_code_view =
       mcdm::GetMcdmSubmissionPolicy(command->device->device.mcdm_abi)
           .uses_shared_command_code_view;
+  if (!uses_shared_command_code_view &&
+      static_cast<uint64_t>(command->control_buffer_size) >
+          aperture.code_size) {
+    return stage_pathb_extension_code(queue, command, slot_size,
+                                      is_partial_elf);
+  }
+  command->pathb_code_in_extension = false;
   if (uses_shared_command_code_view) {
     release_command_persistent_code_slots(command);
     command->pathb_single_code_aperture_offset = aperture.code_offset;
@@ -1339,40 +1439,7 @@ iree_status_t stage_windows_dpu_code_buffer(
       static_cast<uint8_t*>(aperture.code_cpu_ptr) + relative_code_offset;
   const uint64_t code_gpu_va = aperture.code_gpu_va + relative_code_offset;
   auto set_npu_instruction_fields = [&]() -> iree_status_t {
-    if (is_partial_elf) {
-      ert_npu_data* npu_data = get_ert_npu_data(command->start_packet);
-      if (IREE_UNLIKELY(!npu_data)) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "amdxdna Windows MCDM PARTIAL_ELF packet has no NPU data");
-      }
-      npu_data->instruction_buffer = code_gpu_va;
-      npu_data->instruction_buffer_size =
-          static_cast<uint32_t>(command->control_buffer_size);
-      npu_data->instruction_prop_count = 0;
-    } else if (command->opcode ==
-               IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU_FULL_ELF) {
-      ert_npu_preempt_data* npu_data =
-          get_ert_npu_elf_data(command->start_packet);
-      if (IREE_UNLIKELY(!npu_data)) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "amdxdna Windows MCDM FULL_ELF packet has no NPU data");
-      }
-      npu_data->instruction_buffer = code_gpu_va;
-      npu_data->instruction_buffer_size =
-          static_cast<uint32_t>(command->control_buffer_size);
-      npu_data->instruction_prop_count = 0;
-    } else if (uses_windows_dpu_regmap(command) &&
-               command->windows_dpu_regmap_finalized) {
-      // Reclamation may move compact START_NPU code after the register map was
-      // finalized; keep its instruction pointer aligned with the new slot.
-      set_windows_dpu_instruction_arg(
-          command, code_gpu_va,
-          static_cast<uint32_t>(command->control_buffer_size /
-                                sizeof(uint32_t)));
-    }
-    return iree_ok_status();
+    return set_pathb_instruction_fields(command, is_partial_elf, code_gpu_va);
   };
   const bool same_staged_code =
       command->pathb_code_staged &&
@@ -3439,6 +3506,10 @@ void iree_hal_amdxdna_native_context_destroy(
     }
   }
   context->pathb_pdi_allocations.clear();
+  if (kmt_alive) {
+    mcdm::DestroyCommandApertureExtension(context->device->api, context->kmt,
+                                          &context->command_aperture_extension);
+  }
   if (kmt_alive && context->has_command_aperture) {
     mcdm::DestroyContextWithCommandAperture(
         context->device->api, context->kmt, &context->context,
@@ -5063,7 +5134,24 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
   {
     queue->exec_command_count++;
     if (packet->state == ERT_CMD_STATE_COMPLETED) {
-      if (s->is_pathb_partial_elf) {
+      if (command->pathb_code_in_extension) {
+        // XRT shrinks the published extent back to the first code slot after
+        // a command that executed from the aperture extension.
+        const mcdm::CommandAperture& aperture =
+            queue->context->command_aperture;
+        const bool wait_for_cpu = pathb_release_waits_for_cpu(queue->context);
+        if (!mcdm::SubmitPathBApertureSync(
+                command->device->api, command->device->device,
+                &queue->context->context, aperture,
+                aperture.code_offset +
+                    mcdm::GetMcdmAbiInfo(queue->context->kmt.mcdm_abi)
+                        .command_aperture_code_slot_size,
+                wait_for_cpu, &error)) {
+          return status_from_mcdm_error(
+              "amdxdna Windows MCDM pathb extension release failed", error);
+        }
+        if (!wait_for_cpu) note_pathb_queued_release(queue->context);
+      } else if (s->is_pathb_partial_elf) {
         if (pathb_release_waits_for_cpu(queue->context)) {
           // Legacy XRT releases and waits after every state-3 completion.
           IREE_RETURN_IF_ERROR(close_pathb_single_code_range(
@@ -5087,8 +5175,7 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
         }
       } else if (!mcdm::SubmitPathBApertureSync(
                      command->device->api, command->device->device,
-                     &queue->context->context,
-                     queue->context->command_aperture,
+                     &queue->context->context, queue->context->command_aperture,
                      /*offset=*/queue->context->command_aperture.code_offset,
                      /*wait_for_cpu=*/true, &error)) {
         return status_from_mcdm_error(
