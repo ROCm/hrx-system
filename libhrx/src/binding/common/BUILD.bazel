@@ -102,6 +102,7 @@ hrx_cc_library(
         "graph_dependencies.c",
         "graph_exec.c",
         "graph_memory.c",
+        "graph_recording.c",
         "graph_update.c",
         "init.c",
         "kernel_arguments.c",
@@ -128,6 +129,7 @@ hrx_cc_library(
         "fat_binary.h",
         "graph.h",
         "graph_memory.h",
+        "graph_recording.h",
         "graph_update.h",
         "hrx_bridge.h",
         "init.h",
@@ -470,6 +472,20 @@ hrx_cc_test(
 hrx_cc_test(
     name = "graph_exec_test",
     srcs = ["graph_exec_test.cc"],
+    deps = [
+        ":common",
+        ":host_callback",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "graph_recording_test",
+    srcs = ["graph_recording_test.cc"],
     deps = [
         ":common",
         ":host_callback",

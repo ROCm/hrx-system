@@ -1328,8 +1328,12 @@ TEST_F(CpuStreamingMemoryTest, ExecutableCopiesOwnDistinctStaging) {
                                       ->command.copy.source_buffer
                                 : iree_hal_streaming_graph_node_memcpy(node)
                                       ->command.copy.target_buffer);
-      auto* first_node = iree_hal_streaming_graph_exec_lock_node(first, node);
-      auto* second_node = iree_hal_streaming_graph_exec_lock_node(second, node);
+      iree_hal_streaming_graph_exec_edit_t first_edit;
+      iree_hal_streaming_graph_exec_edit_t second_edit;
+      auto* first_node =
+          iree_hal_streaming_graph_exec_lock_node(first, node, &first_edit);
+      auto* second_node =
+          iree_hal_streaming_graph_exec_lock_node(second, node, &second_edit);
       auto* first_buffer =
           upload ? iree_hal_streaming_graph_node_memcpy(first_node)
                        ->command.copy.source_buffer
@@ -1343,8 +1347,8 @@ TEST_F(CpuStreamingMemoryTest, ExecutableCopiesOwnDistinctStaging) {
       EXPECT_NE(nullptr, first_buffer);
       EXPECT_NE(nullptr, second_buffer);
       EXPECT_NE(first_buffer, second_buffer);
-      iree_hal_streaming_graph_exec_unlock(second);
-      iree_hal_streaming_graph_exec_unlock(first);
+      iree_hal_streaming_graph_exec_end_edit(second, &second_edit);
+      iree_hal_streaming_graph_exec_end_edit(first, &first_edit);
       iree_hal_buffer_mapping_t first_mapping = {};
       iree_hal_buffer_mapping_t second_mapping = {};
       IREE_EXPECT_OK(iree_hal_buffer_map_range(

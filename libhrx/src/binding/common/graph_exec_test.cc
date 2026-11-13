@@ -1739,11 +1739,13 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
 
   // A later parameter update recompiles the graph and must preserve both
   // event replacements while leaving their template nodes untouched.
-  auto* private_node = iree_hal_streaming_graph_exec_lock_node(exec, host_node);
+  iree_hal_streaming_graph_exec_edit_t edit;
+  auto* private_node =
+      iree_hal_streaming_graph_exec_lock_node(exec, host_node, &edit);
   iree_hal_streaming_graph_node_host(private_node)->user_data =
       &replacement_called;
-  status = iree_hal_streaming_graph_exec_rebuild_locked(exec);
-  iree_hal_streaming_graph_exec_unlock(exec);
+  status = iree_hal_streaming_graph_exec_rebuild_locked(exec, &edit);
+  iree_hal_streaming_graph_exec_end_edit(exec, &edit);
   IREE_ASSERT_OK(status);
   iree_hal_streaming_graph_exec_launch_result_t launch_result;
   IREE_ASSERT_OK(
