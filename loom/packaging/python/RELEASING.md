@@ -180,11 +180,15 @@ on `main`; the release line takes only fixes needed to qualify the selected
 release.
 
 When the candidate is accepted, a final identity pull request on the same
-release line changes `X.Y.ZrcN` to `X.Y.Z` without changing the selected catalog.
-The stable tag runs the complete qualification again, publishes a normal GitHub
-release, and then publishes its two Release wheels to PyPI. Promoting GitHub
-metadata or reusing candidate artifacts cannot substitute for the stable build:
-the stable version has its own tag, wheel metadata, checksums, and attestations.
+release line changes both `package-version` to `X.Y.Z` and `model-catalog` to
+the coordinated `github:ROCm/hrx-loom-library@vX.Y.Z` tag. Build the stable SDK
+candidate, qualify its exact wheel and source revision through the library pin
+workflow, and publish the immutable stable library release before creating the
+HRX tag. The stable tag then runs the complete qualification again, publishes a
+normal GitHub release, and publishes its two Release wheels to PyPI. Promoting
+GitHub metadata or reusing candidate artifacts cannot substitute for the stable
+build: the stable version has its own library association, tag, wheel metadata,
+checksums, and attestations.
 
 ## Publish the reviewed tag
 
