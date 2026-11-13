@@ -208,7 +208,7 @@ class Functions {
       cxx::FunctionSymbol* function, cxx::AST* owner = nullptr,
       ImplicitObjectABI receiver_abi = ImplicitObjectABI::None);
   // Returns the concrete definition retained for a semantic declaration, or
-  // the frontend-owned definition of a reached concrete template instance.
+  // the frontend-owned definition of a reached member or template instance.
   cxx::FunctionSymbol* definition(cxx::FunctionSymbol* function) const;
   // Source case identity retained during declaration admission.
   bool is_check_case(cxx::FunctionSymbol* function) const;
