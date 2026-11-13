@@ -10,7 +10,6 @@
 #include <stdint.h>
 
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/pci.h"
 #include "libamdf/src/platform/windows/endpoint_properties.h"
 #include "libamdf/src/platform/windows/instance.h"
 
@@ -75,7 +74,7 @@ amdf_status_t amdf_platform_endpoint_open(
         &endpoint_info);
   }
   if (amdf_status_is_ok(status) &&
-      (!amdf_pci_is_amd(&endpoint_info.pci) ||
+      (!amdf_windows_endpoint_is_executable_amd(&endpoint_info) ||
        !amdf_endpoint_id_is_equal(id, &endpoint_info.id))) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
   }

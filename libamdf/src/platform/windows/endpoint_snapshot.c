@@ -11,7 +11,6 @@
 #include <string.h>
 
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/pci.h"
 #include "libamdf/src/platform/windows/endpoint_properties.h"
 
 // Every returned handle gets one close attempt, including partial enumeration
@@ -116,7 +115,8 @@ amdf_status_t amdf_windows_endpoint_snapshot_enumerate(
       status = amdf_windows_query_endpoint_info(
           api, adapters[adapter_index].hAdapter,
           adapters[adapter_index].AdapterLuid, physical_adapter_index, &info);
-      if (!amdf_status_is_ok(status) || !amdf_pci_is_amd(&info.pci)) {
+      if (!amdf_status_is_ok(status) ||
+          !amdf_windows_endpoint_is_executable_amd(&info)) {
         continue;
       }
       if (endpoint_count == UINT32_MAX) {

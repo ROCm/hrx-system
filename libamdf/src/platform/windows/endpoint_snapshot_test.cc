@@ -91,6 +91,9 @@ struct FakeKmt {
   uint32_t amd_revision_id = 1;
   // Native adapter capability distinguishing compute-only AMD endpoints.
   bool amd_compute_only = false;
+  // Native adapter capability of an indirect display adapter presenting on an
+  // AMD GPU, which reports the GPU's PCI identity without render support.
+  bool amd_display_only = false;
   // Number of calls in the native two-call snapshot protocol.
   uint32_t enumeration_call_count = 0;
   // Native release fault and consumption evidence.
@@ -193,7 +196,10 @@ NTSTATUS APIENTRY FakeQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
       type->Value = 0;
       type->ComputeOnly =
           query->hAdapter == kAmdAdapter && current_fake->amd_compute_only;
-      type->RenderSupported = !type->ComputeOnly;
+      const bool display_only =
+          query->hAdapter == kAmdAdapter && current_fake->amd_display_only;
+      type->DisplaySupported = display_only;
+      type->RenderSupported = !type->ComputeOnly && !display_only;
       return kSuccess;
     }
     case KMTQAITYPE_DRIVER_DESCRIPTION: {
@@ -392,6 +398,18 @@ TEST_F(EndpointSnapshotTest, LeavesNonComputeAmdIdentityUnclassified) {
   EXPECT_EQ(summary.engine_kind, AMDF_ENGINE_KIND_UNKNOWN);
 }
 
+TEST_F(EndpointSnapshotTest, SkipsDisplayOnlyAmdIdentity) {
+  fake_.amd_display_only = true;
+  uint32_t endpoint_count = 123;
+
+  const amdf_status_t status = amdf_platform_endpoint_enumerate(
+      platform_instance_, 0, nullptr, &endpoint_count);
+
+  EXPECT_TRUE(amdf_status_is_ok(status));
+  EXPECT_EQ(endpoint_count, 0u);
+  EXPECT_EQ(fake_.close.call_count, 2u);
+}
+
 TEST_F(EndpointSnapshotTest, CountsWithoutOutputStorage) {
   uint32_t endpoint_count = 0;
   const amdf_status_t status = amdf_platform_endpoint_enumerate(
@@ -540,6 +558,21 @@ TEST_F(EndpointSnapshotTest, RejectsStaleIdentityAndClosesOpenedAdapter) {
   EXPECT_EQ(amdf_status_code(status), AMDF_STATUS_CODE_NOT_FOUND);
   EXPECT_EQ(reinterpret_cast<uintptr_t>(endpoint), uintptr_t{1});
   EXPECT_EQ(fake_.enumeration_call_count, 0u);
+  EXPECT_EQ(fake_.close.call_count, 1u);
+}
+
+TEST_F(EndpointSnapshotTest, RejectsDisplayOnlyIdentityAndClosesOpenedAdapter) {
+  const amdf_endpoint_id_t id = EnumerateAmdEndpointId();
+  fake_.amd_display_only = true;
+  amdf_platform_endpoint_t* endpoint =
+      reinterpret_cast<amdf_platform_endpoint_t*>(uintptr_t{1});
+  amdf_endpoint_info_t info = {};
+  const amdf_status_t status =
+      amdf_platform_endpoint_open(platform_instance_, &id, &endpoint, &info);
+
+  EXPECT_EQ(amdf_status_domain(status), AMDF_STATUS_DOMAIN_API);
+  EXPECT_EQ(amdf_status_code(status), AMDF_STATUS_CODE_NOT_FOUND);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(endpoint), uintptr_t{1});
   EXPECT_EQ(fake_.close.call_count, 1u);
 }
 
