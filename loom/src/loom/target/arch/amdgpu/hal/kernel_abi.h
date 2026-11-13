@@ -20,30 +20,13 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/target/arch/amdgpu/hal/kernel_abi_layout.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Kernarg storage for one HAL binding pointer.
-#define LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_SIZE 8u
-
-// Required kernarg alignment for HAL binding pointers.
-#define LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT 8u
-
-// Kernarg storage for one 32-bit direct dispatch constant word. Logical
-// payloads narrower than a word occupy its low-address bytes. Padding is
-// unspecified; source lowering establishes each consumer's carrier contract.
-#define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE 4u
-
-// Required kernarg alignment for direct dispatch constant words.
-#define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT 4u
-
-// Maximum physical word count carried by one direct dispatch argument. This
-// covers the widest source vector representation admitted by AMDGPU lowering.
-#define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_ARG_MAX_UNIT_COUNT 32u
 
 // Stable low.live_in source spelling for the AMDGPU kernarg segment pointer.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_KERNARG_SEGMENT_PTR_SOURCE \
@@ -258,75 +241,9 @@ typedef enum loom_amdgpu_hal_kernel_abi_source_kind_e {
 iree_string_view_t loom_amdgpu_hal_kernel_abi_source_name(
     loom_amdgpu_hal_kernel_abi_source_kind_t source_kind);
 
-typedef struct loom_amdgpu_hal_kernarg_resource_t {
-  // Defining low.resource op for diagnostics and cross-checks.
-  const loom_op_t* resource_op;
-  // Arena-owned resource name used in emitted AMDGPU metadata.
-  iree_string_view_t name;
-  // HAL binding ordinal used by the runtime dispatch path.
-  uint32_t binding_index;
-  // Authored source kernel parameter index for native metadata ordering.
-  uint32_t parameter_index;
-  // Byte offset of the pointer entry in the kernarg segment.
-  uint32_t kernarg_offset;
-  // Byte length of the pointer entry in the kernarg segment.
-  uint32_t kernarg_size;
-  // Byte alignment of the pointer entry in the kernarg segment.
-  uint32_t kernarg_alignment;
-  // Source/storage semantic type declared by the resource record.
-  loom_type_t source_type;
-  // Target-low value type produced by low.resource for this binding.
-  loom_type_t abi_type;
-} loom_amdgpu_hal_kernarg_resource_t;
-
-typedef struct loom_amdgpu_hal_kernarg_direct_arg_t {
-  // Entry block argument loaded from the HAL constant segment, or INVALID
-  // when only its ABI metadata remains after argument materialization.
-  loom_value_id_t arg_id;
-  // Metadata name copied from the entry block argument when present.
-  iree_string_view_t name;
-  // Authored source kernel parameter index for native metadata ordering.
-  uint32_t parameter_index;
-  // Entry block argument index before ABI materialization removes arguments.
-  uint16_t argument_index;
-  // Byte offset of the direct argument in the kernarg segment.
-  uint32_t kernarg_offset;
-  // Byte length of the direct argument in the kernarg segment.
-  uint32_t kernarg_size;
-  // Byte length consumed from the dense HAL dispatch constant stream.
-  uint32_t payload_size;
-  // Byte alignment of the direct argument in the kernarg segment.
-  uint32_t kernarg_alignment;
-  // Target-low value type produced by materializing this argument.
-  loom_type_t abi_type;
-} loom_amdgpu_hal_kernarg_direct_arg_t;
-
-typedef struct loom_amdgpu_hal_kernel_abi_layout_t {
-  // Target-low function operation whose resources are laid out.
-  const loom_op_t* function_op;
-  // Authored source kernel parameter count represented by this ABI layout.
-  uint32_t parameter_count;
-  // Total kernarg segment size in bytes.
-  uint32_t kernarg_segment_size;
-  // Required kernarg segment alignment in bytes.
-  uint32_t kernarg_segment_alignment;
-  // True when surviving parameter uses require the kernarg segment pointer.
-  // Source lowering may initialize this conservatively; HAL ABI materialization
-  // refines it after low-level dead-code elimination.
-  bool uses_kernarg_segment_ptr;
-  // Physical kernarg word count occupied by direct arguments.
-  uint32_t constant_count;
-  // Resource records in HAL binding/kernarg offset order.
-  const loom_amdgpu_hal_kernarg_resource_t* resources;
-  // Number of resource records in |resources|.
-  iree_host_size_t resource_count;
-  // Direct argument records in entry block argument order.
-  const loom_amdgpu_hal_kernarg_direct_arg_t* direct_args;
-  // Number of direct argument records in |direct_args|.
-  iree_host_size_t direct_arg_count;
-} loom_amdgpu_hal_kernel_abi_layout_t;
-
 typedef struct loom_amdgpu_hal_kernel_abi_verify_result_t {
+  // Admitted parameter layout, owned by the verification arena.
+  loom_amdgpu_hal_kernel_abi_layout_t layout;
   // Number of AMDGPU HAL-kernel ABI errors emitted for the function.
   uint32_t error_count;
   // Verified kernarg pointer live-in, or INVALID when not yet materialized.
@@ -364,43 +281,6 @@ iree_status_t loom_amdgpu_hal_kernel_abi_verify_low(
     const loom_amdgpu_processor_properties_t* properties, uint32_t max_errors,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
     loom_amdgpu_hal_kernel_abi_verify_result_t* out_result);
-
-// Derives the AMDGPU HAL-kernel ABI layout for |function_op|.
-//
-// Source-lowered low.kernel.def ops carry a prepared ABI snapshot preserving
-// the source parameter count and native kernarg offsets. Direct low IR without
-// a snapshot falls back to dense low.resource imports with kind hal_binding,
-// unique binding indexes starting at zero, and result type reg<amdgpu.sgpr x2>.
-// Later lowering materializes the target buffer descriptor value consumed by
-// packets that need one.
-//
-// The function must already have passed
-// loom_amdgpu_hal_kernel_abi_verify_low. Status is reserved for allocation and
-// contract misuse that would otherwise make layout construction unsafe.
-iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
-    const loom_module_t* module, const loom_op_t* function_op,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_hal_kernel_abi_layout_t* out_layout);
-
-// Returns true when |function_op| carries a prepared AMDGPU HAL ABI layout.
-bool loom_amdgpu_hal_kernel_abi_has_layout_attr(const loom_op_t* function_op);
-
-// Builds a structured ABI layout snapshot attribute for a prepared
-// low.kernel.def.
-//
-// AMDGPU HAL binding materialization consumes low.resource ops and may remove
-// entry block arguments, so later emission cannot recover binding metadata by
-// walking the rewritten body. The snapshot is owned by the kernel op rather
-// than a companion metadata op to preserve function-local pass semantics.
-iree_status_t loom_amdgpu_hal_kernel_abi_make_layout_attr(
-    loom_module_t* module, const loom_amdgpu_hal_kernel_abi_layout_t* layout,
-    iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr);
-
-// Loads a prepared AMDGPU HAL ABI layout snapshot from low.kernel.def.
-iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
-    const loom_module_t* module, const loom_op_t* function_op,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_hal_kernel_abi_layout_t* out_layout);
 
 // Returns the ABI source kind for |value_id| when it is defined by an AMDGPU
 // low.live_in op, or UNKNOWN otherwise.

@@ -330,21 +330,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
                 "only letters, digits, '_', '$' or '.'"));
   }
 
-  loom_amdgpu_hal_kernel_abi_layout_t derived_abi_layout = {0};
-  const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout = options->abi_layout;
-  if (abi_layout != NULL) {
-    if (abi_layout->function_op != schedule->function_op) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU kernel record ABI layout does not belong to the scheduled "
-          "function");
-    }
-  } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
-        schedule->module, schedule->function_op, scratch_arena,
-        &derived_abi_layout));
-    abi_layout = &derived_abi_layout;
-  }
+  const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout = &abi_verify->layout;
 
   const loom_target_bundle_t* bundle =
       loom_low_resolved_target_bundle(&schedule->target);

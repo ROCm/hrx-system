@@ -23,8 +23,6 @@ extern "C" {
 typedef struct loom_amdgpu_native_preflight_t loom_amdgpu_native_preflight_t;
 
 typedef struct loom_amdgpu_kernel_record_options_t {
-  // Optional ABI layout captured before target resource materialization.
-  const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout;
   // Verified ABI facts captured before allocation.
   const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify;
   // Optional preflight result captured before kernel record construction.

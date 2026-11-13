@@ -2273,7 +2273,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_module_free(module);
 }
 
-TEST_F(AmdgpuHalKernelLibraryTest, RejectsDescriptorSymbolCollision) {
+TEST_F(AmdgpuHalKernelLibraryTest, RejectsArtifactWithOrWithoutDiagnosticSink) {
   static const char kSource[] =
       "global.rodata.def @loom_kernel.kd = bytes(\"00\")\n"
       "amdgpu.target<gfx1100> @gfx_target\n"
@@ -2281,31 +2281,43 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsDescriptorSymbolCollision) {
       "workgroup_size(64, 1, 1) @loom_kernel() {\n"
       "  low.return\n"
       "}\n";
-  for (bool capture_diagnostics : {false, true}) {
-    SCOPED_TRACE(capture_diagnostics);
-    loom_module_t* module = nullptr;
-    ASSERT_NO_FATAL_FAILURE(
-        ParseSource(iree_make_cstring_view(kSource), &module));
-    DiagnosticCapture capture;
-    loom_amdgpu_hal_kernel_library_t library = {};
-    loom_amdgpu_hal_kernel_library_options_t options = {
-        .diagnostic_sink =
-            capture_diagnostics ? capture.sink() : loom_diagnostic_sink_t{},
-        .max_errors = 20,
-    };
-    bool emitted = true;
-    IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
-        module, &options, iree_allocator_system(), &emitted, &library));
-    EXPECT_FALSE(emitted);
-    EXPECT_EQ(library.hsaco_data, nullptr);
-    if (capture_diagnostics) {
-      ASSERT_EQ(capture.diagnostics.size(), 1u);
-      const CapturedDiagnostic& diagnostic = capture.diagnostics.front();
-      EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_057);
-      EXPECT_EQ(GetStringParam(diagnostic, 1), "loom_kernel.kd");
-      EXPECT_EQ(diagnostic.origin_line, 3u);
+  static const char kInvalidLayout[] =
+      "amdgpu.target<gfx942> @target\n"
+      "low.kernel.def target<amdgpu.cdna3.core>(@target) "
+      "abi_layout({}) workgroup_size(64, 1, 1) @entry() {\n"
+      "  low.return\n"
+      "}\n";
+  for (bool invalid_layout : {false, true}) {
+    SCOPED_TRACE(invalid_layout);
+    const char* source = invalid_layout ? kInvalidLayout : kSource;
+    for (bool capture_diagnostics : {false, true}) {
+      SCOPED_TRACE(capture_diagnostics);
+      loom_module_t* module = nullptr;
+      ASSERT_NO_FATAL_FAILURE(
+          ParseSource(iree_make_cstring_view(source), &module));
+      DiagnosticCapture capture;
+      loom_amdgpu_hal_kernel_library_t library = {};
+      loom_amdgpu_hal_kernel_library_options_t options = {
+          .diagnostic_sink =
+              capture_diagnostics ? capture.sink() : loom_diagnostic_sink_t{},
+          .max_errors = 20,
+      };
+      bool emitted = true;
+      IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
+          module, &options, iree_allocator_system(), &emitted, &library));
+      EXPECT_FALSE(emitted);
+      EXPECT_EQ(library.hsaco_data, nullptr);
+      if (capture_diagnostics) {
+        ASSERT_EQ(capture.diagnostics.size(), 1u);
+        const CapturedDiagnostic& diagnostic = capture.diagnostics.front();
+        EXPECT_EQ(diagnostic.error,
+                  invalid_layout ? LOOM_ERR_AMDGPU_059 : LOOM_ERR_BACKEND_057);
+        EXPECT_EQ(GetStringParam(diagnostic, invalid_layout ? 0 : 1),
+                  invalid_layout ? "parameter_count" : "loom_kernel.kd");
+        EXPECT_EQ(diagnostic.origin_line, invalid_layout ? 2u : 3u);
+      }
+      loom_module_free(module);
     }
-    loom_module_free(module);
   }
 }
 

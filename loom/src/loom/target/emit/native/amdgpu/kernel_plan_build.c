@@ -282,7 +282,6 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
   }
 
   const loom_amdgpu_kernel_record_options_t record_options = {
-      .abi_layout = options->abi_layout,
       .abi_verify = options->abi_verify,
       .preflight = &function_plan->preflight,
       .minimum_sgpr_count =

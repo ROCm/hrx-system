@@ -108,8 +108,6 @@ typedef struct loom_amdgpu_hal_kernel_library_kernel_plan_t {
   const loom_low_loop_execution_map_t* loop_execution;
   // Resolved representation contract and function target facts.
   loom_low_resolved_target_t target;
-  // ABI layout derived from prepared target-low IR.
-  loom_amdgpu_hal_kernel_abi_layout_t abi_layout;
   // Verified ABI facts retained for allocation and native emission.
   loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify;
 } loom_amdgpu_hal_kernel_library_kernel_plan_t;
@@ -591,20 +589,6 @@ static iree_status_t loom_amdgpu_hal_kernel_library_verify_kernel_abi(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_abi_layout(
-    const loom_module_t* module,
-    loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
-    iree_arena_allocator_t* table_arena) {
-  if (loom_amdgpu_hal_kernel_abi_has_layout_attr(plan->low_function_op)) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_attr(
-        module, plan->low_function_op, table_arena, &plan->abi_layout));
-  } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
-        module, plan->low_function_op, table_arena, &plan->abi_layout));
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
     loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
@@ -662,7 +646,6 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
       &compilation.entry;
   loom_amdgpu_kernel_plan_t native_plan = {0};
   const loom_amdgpu_kernel_plan_options_t native_plan_options = {
-      .abi_layout = &plan->abi_layout,
       .abi_verify = &plan->abi_verify,
       .program_resources =
           compilation.has_retained_calls ? &compilation.resources : NULL,
@@ -820,13 +803,6 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
   }
   if (abi_failed) {
     diagnostics_failed = true;
-  }
-
-  for (uint16_t i = 0;
-       i < entries.count && iree_status_is_ok(status) && !diagnostics_failed;
-       ++i) {
-    status = loom_amdgpu_hal_kernel_library_build_kernel_abi_layout(
-        module, &plans[i], table_arena);
   }
 
   loom_amdgpu_program_artifact_t program_artifact = {0};

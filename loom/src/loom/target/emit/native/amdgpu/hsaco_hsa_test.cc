@@ -806,8 +806,8 @@ class LowKernelEmitter {
     }
     loom_amdgpu_hal_binding_materialization_result_t materialization = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize(
-        module_, low_function, descriptor_set, source_abi.kernarg_segment_ptr,
-        arena, &materialization));
+        module_, low_function, descriptor_set, &source_abi, arena,
+        &materialization));
 
     loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify_result = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
@@ -876,7 +876,6 @@ class LowKernelEmitter {
     StreamPtr stream = CreateStream();
     loom_amdgpu_kernel_plan_t plan = {};
     const loom_amdgpu_kernel_plan_options_t plan_options = {
-        .abi_layout = &materialization.abi_layout,
         .abi_verify = &abi_verify_result,
         .emitter = frame_options.emitter,
     };

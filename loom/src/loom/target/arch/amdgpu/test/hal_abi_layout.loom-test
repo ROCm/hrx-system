@@ -1,0 +1,216 @@
+// RUN: pass amdgpu-materialize-hal-kernel-abi
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="parameter_count"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({}) workgroup_size(64, 1, 1) @missing_field() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="uses_kernarg_segment_ptr"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = 0}) workgroup_size(64, 1, 1) @wrong_kind() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="resource_count"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = -1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @negative_count() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="parameter_count"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 4294967296, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @unrepresentable_count() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_count"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 65536, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @too_many_arguments() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="resource_count"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 65536, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @too_many_resources() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="parameter_count"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @parameter_sum() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="resource_offsets"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @array_count() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_sizes"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [4], parameter_count = 0, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = false}) workgroup_size(64, 1, 1) @empty_array_count() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_payload_sizes"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_payload_sizes = false, direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @optional_array_kind() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="resource_parameter_indices"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @resource_parameter_range() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_parameter_indices"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @parameter_duplicate() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_offsets"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [-1], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @offset_range() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="resource_offsets"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [4], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @resource_alignment() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_offsets"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [9], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @argument_alignment() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_sizes"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [132], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @argument_width() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_sizes"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [3], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @argument_words() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_payload_sizes"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_payload_sizes = [5], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @payload_extent() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_names"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @names_count() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="arg0"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = 0}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @name_kind() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="constant_count"}
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @constant_sum() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="kernarg_segment_size"}
+low.kernel.def target<amdgpu.cdna2.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [4294967288], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @segment_extent() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: AMDGPU/059 {field_name="direct_arg_count"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @live_arguments(%first: reg<amdgpu.sgpr>, %second: reg<amdgpu.sgpr>) asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 0, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = false}) workgroup_size(64, 1, 1) @undeclared_resource() asm {
+  // ERROR@+1: AMDGPU/010
+  %buffer = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  return
+}

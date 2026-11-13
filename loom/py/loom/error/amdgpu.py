@@ -1306,6 +1306,20 @@ ERR_AMDGPU_058 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_059: AMDGPU HAL parameter layout is malformed.
+ERR_AMDGPU_059 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=59,
+    severity=Severity.ERROR,
+    summary="AMDGPU HAL parameter layout is malformed.",
+    message="AMDGPU HAL ABI field '{field_name}' requires {constraint}",
+    params=(
+        ErrorParam("field_name", ParamKind.STRING),
+        ErrorParam("constraint", ParamKind.STRING),
+    ),
+    fix_hint="Correct the kernel's abi_layout parameter contract",
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1361,4 +1375,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_056,
     ERR_AMDGPU_057,
     ERR_AMDGPU_058,
+    ERR_AMDGPU_059,
 )
