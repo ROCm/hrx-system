@@ -10,6 +10,7 @@ import pytest
 
 from loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables import (
     _bit_range,
+    _compile_formats,
     _derive_inline_integer_range,
     _descriptor_encoding_field_names,
     _DescriptorEncodingContract,
@@ -244,3 +245,18 @@ def test_inline_integer_domains_share_adjacent_positive_and_negative_ranges(brok
     else:
         with pytest.raises(ValueError, match="has value"):
             _derive_inline_integer_range(spec)
+
+
+@pytest.mark.parametrize(("offset", "count"), [(-1, 1), (31, 2), (32, 1)])
+def test_generated_field_ranges_fit_packet(offset: int, count: int) -> None:
+    encoding = AmdgpuIsaEncoding(
+        name="ENC_SOP1",
+        order=0,
+        bit_count=32,
+        identifier_mask=0,
+        identifier_values=(0,),
+        fields=(_field("OP", _bit_range(offset, count)),),
+    )
+
+    with pytest.raises(ValueError, match="bit range exceeds its 32-bit packet"):
+        _compile_formats((encoding,), {})
