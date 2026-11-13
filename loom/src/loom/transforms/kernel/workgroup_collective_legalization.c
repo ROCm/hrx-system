@@ -23,6 +23,8 @@
 #include "loom/target/launch.h"
 
 typedef struct loom_kernel_workgroup_topology_t {
+  // Active invocations in the flattened workgroup.
+  uint32_t workitem_count;
   // Physical invocations per subgroup.
   uint32_t subgroup_size;
   // Subgroups covering the workgroup, including a partial final subgroup.
@@ -135,6 +137,7 @@ static bool loom_kernel_workgroup_collective_topology(
   }
   const uint32_t subgroup_size = bundle->snapshot->subgroup_size;
   *out_topology = (loom_kernel_workgroup_topology_t){
+      .workitem_count = flat_workgroup_size,
       .subgroup_size = subgroup_size,
       .subgroup_count = flat_workgroup_size / subgroup_size +
                         (flat_workgroup_size % subgroup_size != 0 ? 1u : 0u),
@@ -644,9 +647,67 @@ static iree_status_t loom_kernel_workgroup_linear_reduce(
   return iree_ok_status();
 }
 
+// Floating extrema have an empty-prefix seed, not an algebraic identity. A
+// nonempty prefix must never absorb that seed from an empty adjacent prefix.
+static bool loom_kernel_workgroup_scan_needs_presence(
+    const loom_kernel_workgroup_collective_state_t* state,
+    const loom_kernel_workgroup_payload_t* payload) {
+  double identity = 0.0;
+  return loom_scalar_type_is_float(
+             loom_type_element_type(payload->logical_type)) &&
+         !loom_combining_kind_float_identity(state->kind, &identity);
+}
+
+static iree_status_t loom_kernel_workgroup_build_scan_presence(
+    loom_kernel_workgroup_collective_state_t* state,
+    loom_kernel_subgroup_scan_mode_t mode,
+    loom_kernel_subgroup_scan_direction_t direction,
+    loom_value_id_t* out_outer_nonempty, loom_value_id_t* out_local_nonempty) {
+  *out_local_nonempty = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t edge_subgroup = state->zero_index;
+  if (direction == LOOM_KERNEL_SUBGROUP_SCAN_DIRECTION_REVERSE) {
+    IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_index_constant(
+        state, state->topology.subgroup_count - 1, state->index_type,
+        &edge_subgroup));
+  }
+  loom_op_t* outer_nonempty_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_cmp_build(
+      state->builder, LOOM_INDEX_CMP_PREDICATE_NE, state->subgroup_id,
+      edge_subgroup, state->location, &outer_nonempty_op));
+  *out_outer_nonempty = loom_index_cmp_result(outer_nonempty_op);
+  if (mode == LOOM_KERNEL_SUBGROUP_SCAN_MODE_INCLUSIVE) {
+    return iree_ok_status();
+  }
+
+  loom_value_id_t edge_lane = state->zero_index;
+  if (direction == LOOM_KERNEL_SUBGROUP_SCAN_DIRECTION_REVERSE) {
+    loom_value_id_t full_last_lane = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t tail_last_lane = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_index_constant(
+        state, state->topology.subgroup_size - 1, state->index_type,
+        &full_last_lane));
+    IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_index_constant(
+        state,
+        (state->topology.workitem_count - 1) % state->topology.subgroup_size,
+        state->index_type, &tail_last_lane));
+    loom_op_t* edge_lane_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scf_select_build(
+        state->builder, *out_outer_nonempty, full_last_lane, tail_last_lane,
+        state->index_type, state->location, &edge_lane_op));
+    edge_lane = loom_scf_select_result(edge_lane_op);
+  }
+  loom_op_t* local_nonempty_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_cmp_build(
+      state->builder, LOOM_INDEX_CMP_PREDICATE_NE, state->lane_id, edge_lane,
+      state->location, &local_nonempty_op));
+  *out_local_nonempty = loom_index_cmp_result(local_nonempty_op);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_kernel_workgroup_hierarchical_scan(
     loom_kernel_workgroup_collective_state_t* state,
     loom_kernel_workgroup_payload_t* payload,
+    loom_kernel_subgroup_scan_mode_t mode,
     loom_kernel_subgroup_scan_direction_t direction,
     loom_value_id_t local_prefix, loom_value_id_t* out_result) {
   loom_value_id_t first_subgroup_condition = LOOM_VALUE_ID_INVALID;
@@ -717,20 +778,45 @@ static iree_status_t loom_kernel_workgroup_hierarchical_scan(
       state->location, &result_slot_op));
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_load(
       state, payload, loom_index_add_result(result_slot_op), &adjustment));
-  if (direction == LOOM_KERNEL_SUBGROUP_SCAN_DIRECTION_FORWARD) {
-    return loom_kernel_workgroup_build_combine(state, payload, adjustment,
-                                               local_prefix, out_result);
+  const bool forward = direction == LOOM_KERNEL_SUBGROUP_SCAN_DIRECTION_FORWARD;
+  IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_combine(
+      state, payload, forward ? adjustment : local_prefix,
+      forward ? local_prefix : adjustment, out_result));
+  if (loom_kernel_workgroup_scan_needs_presence(state, payload)) {
+    loom_value_id_t outer_nonempty = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t local_nonempty = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_scan_presence(
+        state, mode, direction, &outer_nonempty, &local_nonempty));
+    if (local_nonempty != LOOM_VALUE_ID_INVALID) {
+      loom_op_t* local_select_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_scf_select_build(
+          state->builder, local_nonempty, *out_result, adjustment,
+          payload->logical_type, state->location, &local_select_op));
+      *out_result = loom_scf_select_result(local_select_op);
+    }
+    loom_op_t* outer_select_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scf_select_build(
+        state->builder, outer_nonempty, *out_result, local_prefix,
+        payload->logical_type, state->location, &outer_select_op));
+    *out_result = loom_scf_select_result(outer_select_op);
   }
-  return loom_kernel_workgroup_build_combine(state, payload, local_prefix,
-                                             adjustment, out_result);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_kernel_workgroup_linear_scan(
     loom_kernel_workgroup_collective_state_t* state,
     loom_kernel_workgroup_payload_t* payload,
+    loom_kernel_subgroup_scan_mode_t mode,
     loom_kernel_subgroup_scan_direction_t direction,
     loom_value_id_t local_prefix, loom_value_id_t* out_result) {
   loom_value_id_t accumulator = local_prefix;
+  loom_value_id_t nonempty = LOOM_VALUE_ID_INVALID;
+  if (mode == LOOM_KERNEL_SUBGROUP_SCAN_MODE_EXCLUSIVE &&
+      loom_kernel_workgroup_scan_needs_presence(state, payload)) {
+    loom_value_id_t outer_nonempty = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_scan_presence(
+        state, mode, direction, &outer_nonempty, &nonempty));
+  }
   for (uint32_t slot = 0; slot < state->topology.subgroup_count; ++slot) {
     loom_value_id_t slot_value = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_index_constant(
@@ -752,6 +838,19 @@ static iree_status_t loom_kernel_workgroup_linear_scan(
     } else {
       IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_combine(
           state, payload, accumulator, partial, &combined));
+    }
+    if (nonempty != LOOM_VALUE_ID_INVALID) {
+      loom_op_t* combine_select_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_scf_select_build(
+          state->builder, nonempty, combined, partial, payload->logical_type,
+          state->location, &combine_select_op));
+      combined = loom_scf_select_result(combine_select_op);
+      loom_op_t* nonempty_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_scalar_ori_build(
+          state->builder, nonempty, loom_index_cmp_result(include_op),
+          loom_type_scalar(LOOM_SCALAR_TYPE_I1), state->location,
+          &nonempty_op));
+      nonempty = loom_scalar_ori_result(nonempty_op);
     }
     loom_op_t* select_op = NULL;
     IREE_RETURN_IF_ERROR(loom_scf_select_build(
@@ -939,14 +1038,15 @@ iree_status_t loom_kernel_target_legalize_workgroup_scan(
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_collective_state_initialize(
       context, op, kind, math_flags, topology, &state));
   loom_value_id_t local_prefix = LOOM_VALUE_ID_INVALID;
+  const loom_kernel_subgroup_scan_mode_t mode =
+      loom_kernel_workgroup_subgroup_scan_mode(
+          loom_kernel_workgroup_scan_mode(op));
   const loom_kernel_subgroup_scan_direction_t direction =
       loom_kernel_workgroup_subgroup_scan_direction(
           loom_kernel_workgroup_scan_direction(op));
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_subgroup_scan(
-      &state, source, payload.logical_type,
-      loom_kernel_workgroup_subgroup_scan_mode(
-          loom_kernel_workgroup_scan_mode(op)),
-      direction, /*cluster_size=*/0, &local_prefix));
+      &state, source, payload.logical_type, mode, direction, /*cluster_size=*/0,
+      &local_prefix));
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_subgroup_reduce(
       &state, source, payload.logical_type, /*cluster_size=*/0,
       &payload.local_total));
@@ -958,10 +1058,10 @@ iree_status_t loom_kernel_target_legalize_workgroup_scan(
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
   if (topology.subgroup_count <= topology.subgroup_size) {
     IREE_RETURN_IF_ERROR(loom_kernel_workgroup_hierarchical_scan(
-        &state, &payload, direction, local_prefix, &replacement));
+        &state, &payload, mode, direction, local_prefix, &replacement));
   } else {
     IREE_RETURN_IF_ERROR(loom_kernel_workgroup_linear_scan(
-        &state, &payload, direction, local_prefix, &replacement));
+        &state, &payload, mode, direction, local_prefix, &replacement));
   }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, checkpoint));

@@ -30,5 +30,6 @@ loom_check_test_suite(
         "promote_private_fragments_loops.loom-test",
         "promote_private_storage.loom-test",
         "stage_loop_carried_fragments.loom-test",
+        "workgroup_scan_presence.loom-test",
     ],
 )
