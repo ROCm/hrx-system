@@ -40,6 +40,7 @@ loom_check_test_suite(
         "logarithms.cxx-test",
         "math_builtins.cxx-test",
         "math_builtins_invalid.cxx-test",
+        "math_library.cxx-test",
         "multiprecision_arithmetic.cxx-test",
         "narrow_float_subtraction.cxx-test",
         "numeric_conversion.cxx-test",

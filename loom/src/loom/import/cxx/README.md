@@ -173,13 +173,15 @@ values have no High scalar representation and receive the same unsupported-type
 diagnostic as other uses of `long double`. A constexpr conversion to `float` or
 `double` produces a supported runtime constant.
 
-## Standard math builtins
+## Standard-library math
 
-Compiler math builtins lower directly to typed scalar operations. For example:
+Standard math declarations and compiler builtins lower directly to typed scalar operations. With standard-library headers on the configured include paths, ordinary `<cmath>` calls need no wrapper header:
 
 ```cpp
+#include <cmath>
+
 double norm(double x, double y) {
-  return __builtin_sqrt(__builtin_fma(x, x, y * y));
+  return std::sqrt(std::fma(x, x, y * y));
 }
 ```
 
@@ -191,9 +193,11 @@ The imported body retains double precision throughout:
 %result = scalar.sqrtf %squared : f64
 ```
 
-The float and double families include `acos`, `acosh`, `asin`, `asinh`, `atan`, `atan2`, `atanh`, `cbrt`, `ceil`, `copysign`, `cos`, `cosh`, `erf`, `erfc`, `exp`, `exp2`, `expm1`, `fabs`, `floor`, `fma`, `fmax`, `fmin`, `fmod`, `log`, `log10`, `log1p`, `log2`, `pow`, `round`, `roundeven`, `sin`, `sinh`, `sqrt`, `tan`, `tanh`, and `trunc`. Prefix the C spelling with `__builtin_`; the trailing `f` selects float. `ldexp` and `scalbn` take an integer exponent, and `frexp` writes its exponent through the supplied `int*`. Integer `abs`, `labs`, and `llabs` preserve the selected source data model's widths.
+The float and double families include `acos`, `acosh`, `asin`, `asinh`, `atan`, `atan2`, `atanh`, `cbrt`, `ceil`, `copysign`, `cos`, `cosh`, `erf`, `erfc`, `exp`, `exp2`, `expm1`, `fabs`, `floor`, `fma`, `fmax`, `fmin`, `fmod`, `log`, `log10`, `log1p`, `log2`, `pow`, `round`, `roundeven`, `sin`, `sinh`, `sqrt`, `tan`, `tanh`, and `trunc`. The C spelling's trailing `f` selects float; prefixing it with `__builtin_` selects the compiler builtin. `ldexp` and `scalbn` take an integer exponent, and `frexp` writes its exponent through the supplied `int*`. Integer `abs`, `labs`, and `llabs` preserve the selected source data model's widths.
 
-Calls use the same operation semantics and floating-point permissions as the corresponding `loom::scalar` functions. They do not maintain `errno` or a host floating-point environment. Recognized unsupported math builtins receive a source diagnostic naming the builtin; runtime long-double math is rejected instead of narrowed. Exported C++ uses the explicit scalar projections, including `loom::scalar::absi` for integer absolute value.
+Library recognition requires a bodyless C-linkage declaration with the standard function's exact signature. A source definition or explicit `loom::import`/`loom::symbol` binding keeps its authored meaning, as do C++ overloads and nonstandard signatures. Once recognized, a call becomes a Loom operation and does not require a linked C math library.
+
+Calls use the same operation semantics and floating-point permissions as the corresponding `loom::scalar` functions. They do not maintain `errno` or a host floating-point environment. Recognized unsupported math receives a source diagnostic naming the function; runtime long-double math is rejected instead of narrowed. Exported C++ uses the explicit scalar projections, including `loom::scalar::absi` for integer absolute value and `loom::scalar::frexpf` plus an explicit exponent store.
 
 ## Explicit 16-bit floating-point types
 

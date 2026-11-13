@@ -669,6 +669,7 @@ loom_cc_library(
         ":command",
         ":decode",
         ":encoding",
+        ":exponent",
         ":fragment",
         ":function_contracts",
         ":index_values",

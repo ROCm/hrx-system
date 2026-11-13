@@ -521,6 +521,10 @@ class CxxRenderContext:
                     signed.update(operation.operands)
             elif operation.name in {"scalar.fptosi", "vector.fptosi"}:
                 signed.update(operation.results)
+            elif operation.name == "scalar.frexpf":
+                signed.add(operation.results[1])
+            elif operation.name == "scalar.ldexpf":
+                signed.add(operation.operands[1])
             elif operation.name == "vector.table.lookup":
                 if operation.operands and operation.operands[0] in signed:
                     signed.update(operation.results)

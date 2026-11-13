@@ -15,13 +15,14 @@
 
 namespace loom::cxx_import {
 
-// Resolves frontend-owned standard math builtins to process-lifetime scalar
-// projections. Unsupported math diagnoses at the call; unrelated builtins and
-// ordinary functions return null. Source signatures and conversions belong to
-// the frontend, while the intrinsic owner retains the concrete typed binding.
-const loom_cxx_scalar_binding_t* builtin_math_binding(
-    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-    cxx::FunctionSymbol* function, cxx::AST* owner);
+// Resolves standard math builtins and exact C library prototypes to existing
+// scalar projections. The caller owns declaration admission (definitions and
+// explicit bindings); the frontend owns signatures and argument conversions.
+// Unsupported math diagnoses at the call; unrelated functions return null.
+const loom_cxx_scalar_binding_t* math_binding(cxx::TranslationUnit& unit,
+                                              Diagnostics& diagnostics,
+                                              cxx::FunctionSymbol* function,
+                                              cxx::AST* owner);
 
 }  // namespace loom::cxx_import
 

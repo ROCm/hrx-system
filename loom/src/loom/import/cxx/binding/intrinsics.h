@@ -25,6 +25,7 @@
 #include "loom/import/cxx/binding/command.h"
 #include "loom/import/cxx/binding/decode.h"
 #include "loom/import/cxx/binding/encoding.h"
+#include "loom/import/cxx/binding/exponent.h"
 #include "loom/import/cxx/binding/fragment.h"
 #include "loom/import/cxx/binding/function_contracts.h"
 #include "loom/import/cxx/binding/index_values.h"
@@ -102,7 +103,8 @@ class Intrinsics {
       TargetIntrinsic, AssemblyIntrinsic, TemplateApplyIntrinsic,
       CheckIntrinsic, KernelLaunchIntrinsic, CommandLaunchIntrinsic,
       CommandParameterIntrinsic, PipelineMemoryIntrinsic,
-      PipelineComposeIntrinsic, AddressIntrinsic, NumericConversionIntrinsic>;
+      PipelineComposeIntrinsic, AddressIntrinsic, NumericConversionIntrinsic,
+      ExponentIntrinsic>;
 
   Intrinsics(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
              Scalars& scalars, Vectors& vectors, Locations& locations,
@@ -148,6 +150,11 @@ class Intrinsics {
   // remains stable until this invocation ends, including across nested calls.
   // NULL means an ordinary source function rather than an owned operation.
   Binding* lookup(cxx::FunctionSymbol* function, cxx::AST* owner);
+
+  // Admits a reached builtin or bodyless C math declaration into the same
+  // binding cache. Functions owns exclusion of authored definitions and
+  // explicit imports/symbols. Null means an ordinary external declaration.
+  Binding* bind_math(cxx::FunctionSymbol* function, cxx::AST* owner);
 
   // Resolves and materializes a LOOM_TEMPLATE_DECL family for a bodyful
   // provider. Other source functions diagnose at the provider annotation.

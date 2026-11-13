@@ -6,10 +6,15 @@
 
 #include "loom/import/cxx/binding/math.h"
 
+#include <cxx/builtin_signature.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
+#include <cxx/token.h>
+#include <cxx/type_traits.h>
+#include <cxx/types.h>
 
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -24,8 +29,8 @@ struct MathOperation {
   const char* scalar;
 };
 
-// The supported family has the same value signature as a scalar projection.
-// Pointer-result exponent builtins and floating constants have separate owners.
+// Scalar projections own both numeric signatures and operation emission. Frexp
+// adapts its exponent result to the C pointer-output calling convention.
 // Other contracts remain explicit rejections, not approximations to a nearby
 // operation (in particular rounding controlled by the floating environment).
 constexpr MathOperation kOperations[] = {
@@ -55,6 +60,7 @@ constexpr MathOperation kOperations[] = {
     {"fmin", "scalar.minnumf"},
     {"fmod", "scalar.remf"},
     {"fpclassify", nullptr},
+    {"frexp", "scalar.frexpf"},
     {"hypot", nullptr},
     {"ilogb", nullptr},
     {"isfinite", nullptr},
@@ -68,6 +74,7 @@ constexpr MathOperation kOperations[] = {
     {"isnormal", nullptr},
     {"isunordered", nullptr},
     {"labs", "scalar.absi"},
+    {"ldexp", "scalar.ldexpf"},
     {"lgamma", nullptr},
     {"llabs", "scalar.absi"},
     {"llrint", nullptr},
@@ -120,18 +127,58 @@ const MathOperation* find_operation(std::string_view name) {
                                                                      : nullptr;
 }
 
+// Reuse the frontend's signature catalog instead of duplicating C prototypes.
+// The spelling buffer is bounded by this table plus the builtin prefix and an
+// optional precision suffix; no temporary strings or symbols are allocated.
+bool matches_library_signature(cxx::TranslationUnit& unit,
+                               const cxx::FunctionType* signature,
+                               std::string_view name) {
+  constexpr std::string_view prefix = "__builtin_";
+  constexpr size_t maximum_name_length = [] {
+    size_t length = 0;
+    for (const auto& operation : kOperations) {
+      length = std::max(length, operation.name.size());
+    }
+    return length + 1;
+  }();
+  std::array<char, prefix.size() + maximum_name_length> spelling;
+  std::copy(prefix.begin(), prefix.end(), spelling.begin());
+  std::copy(name.begin(), name.end(), spelling.begin() + prefix.size());
+  const auto kind = cxx::Token::builtinFunctionKind(
+      {spelling.data(), prefix.size() + name.size()});
+  const auto catalog = cxx::builtinSignatureOf(kind);
+  if (catalog.count != 1) {
+    return false;
+  }
+  const auto expected = cxx::decodeBuiltinSignature(unit.control(), catalog, 0);
+  const auto same_type = [&](const cxx::Type* left, const cxx::Type* right) {
+    return unit.typeTraits().remove_cv(left) ==
+           unit.typeTraits().remove_cv(right);
+  };
+  return expected.type &&
+         signature->isVariadic() == expected.type->isVariadic() &&
+         same_type(signature->returnType(), expected.type->returnType()) &&
+         std::ranges::equal(signature->parameterTypes(),
+                            expected.type->parameterTypes(), same_type);
+}
+
 }  // namespace
 
-const loom_cxx_scalar_binding_t* builtin_math_binding(
-    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-    cxx::FunctionSymbol* function, cxx::AST* owner) {
-  if (function->builtinKind() == cxx::BuiltinFunctionKind::T_NONE) {
+const loom_cxx_scalar_binding_t* math_binding(cxx::TranslationUnit& unit,
+                                              Diagnostics& diagnostics,
+                                              cxx::FunctionSymbol* function,
+                                              cxx::AST* owner) {
+  const bool builtin =
+      function->builtinKind() != cxx::BuiltinFunctionKind::T_NONE;
+  if (!builtin && !function->hasCLinkage()) {
     return nullptr;
   }
   const auto& spelling =
       cxx::name_cast<cxx::Identifier>(function->name())->name();
   std::string_view name(spelling);
-  name.remove_prefix(std::string_view("__builtin_").size());
+  if (builtin) {
+    name.remove_prefix(std::string_view("__builtin_").size());
+  }
   const auto* operation = find_operation(name);
   bool long_double = false;
   if (!operation && (name.ends_with('f') || name.ends_with('l'))) {
@@ -141,16 +188,22 @@ const loom_cxx_scalar_binding_t* builtin_math_binding(
   if (!operation) {
     return nullptr;
   }
+  if (!builtin &&
+      !matches_library_signature(
+          unit, cxx::type_cast<cxx::FunctionType>(function->type()), name)) {
+    return nullptr;
+  }
+  const auto category = builtin ? "math builtin '" : "standard math function '";
   if (long_double) {
     diagnostics.reject(unit, owner,
-                       "math builtin '" + std::string(spelling) +
+                       category + std::string(spelling) +
                            "' requires long-double lowering; implicit "
                            "narrowing is not permitted");
   }
   if (!operation->scalar) {
     diagnostics.reject(
         unit, owner,
-        "unsupported math builtin '" + std::string(spelling) + "'");
+        std::string("unsupported ") + category + std::string(spelling) + "'");
   }
   return loom_cxx_scalar_binding_find(
       iree_make_cstring_view(operation->scalar));

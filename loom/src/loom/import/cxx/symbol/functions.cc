@@ -323,7 +323,14 @@ bool Functions::ordinary_analysis_call(const DirectCall& call) {
       intrinsics_.lookup(function, call.source)) {
     return false;
   }
-  return definition(function) != nullptr;
+  if (definition(function)) {
+    return true;
+  }
+  if (!function_imports_.lookup(function) &&
+      !explicit_names_.contains(function->canonical())) {
+    intrinsics_.bind_math(function, call.source);
+  }
+  return false;
 }
 
 void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,

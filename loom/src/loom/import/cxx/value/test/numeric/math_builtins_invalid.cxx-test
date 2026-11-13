@@ -59,3 +59,31 @@ double unsupported(double value) {
   // ERROR@+1: LOWERING/059 "math builtin '__builtin_scalbnl' requires long-double lowering; implicit narrowing is not permitted"
   return __builtin_scalbnl(value, 3);
 }
+
+// ====
+extern "C" double hypot(double, double);
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "unsupported standard math function 'hypot'"
+  return hypot(value, value);
+}
+
+// ====
+extern "C" float nearbyintf(float);
+float unsupported(float value) {
+  // ERROR@+1: LOWERING/059 "unsupported standard math function 'nearbyintf'"
+  return nearbyintf(value);
+}
+
+// ====
+extern "C" long double sqrtl(long double);
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "standard math function 'sqrtl' requires long-double lowering; implicit narrowing is not permitted"
+  return sqrtl(value);
+}
+
+// ====
+extern "C" long double frexpl(long double, int*);
+double unsupported(double value, int* exponent) {
+  // ERROR@+1: LOWERING/059 "standard math function 'frexpl' requires long-double lowering; implicit narrowing is not permitted"
+  return frexpl(value, exponent);
+}

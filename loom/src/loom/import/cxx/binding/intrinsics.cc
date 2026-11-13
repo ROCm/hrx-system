@@ -471,17 +471,29 @@ TemplateApplyIntrinsic::Family* Intrinsics::intern_template_family(
   return &entry->second;
 }
 
+Intrinsics::Binding* Intrinsics::bind_math(cxx::FunctionSymbol* function,
+                                           cxx::AST* owner) {
+  const auto* scalar = math_binding(unit_, diagnostics_, function, owner);
+  if (!scalar) {
+    return nullptr;
+  }
+  const auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+  Binding binding =
+      std::string_view(scalar->name) == "scalar.frexpf"
+          ? Binding(ExponentIntrinsic::resolve(types_, signature, owner))
+          : Binding(resolve_scalar({scalar}, signature, owner));
+  return &bindings_.try_emplace(function->canonical(), std::move(binding))
+              .first->second;
+}
+
 Intrinsics::Binding* Intrinsics::concrete_binding(cxx::FunctionSymbol* function,
                                                   cxx::AST* owner) {
   auto entry = bindings_.find(function->canonical());
   if (entry != bindings_.end()) {
     return &entry->second;
   }
-  if (auto* scalar =
-          builtin_math_binding(unit_, diagnostics_, function, owner)) {
-    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
-    auto binding = resolve_scalar({scalar}, signature, owner);
-    return &bindings_.try_emplace(function->canonical(), binding).first->second;
+  if (function->builtinKind() != cxx::BuiltinFunctionKind::T_NONE) {
+    return bind_math(function, owner);
   }
   if (!function->isSpecialization()) {
     return nullptr;
@@ -638,6 +650,9 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
   }
   if (auto* conversion = std::get_if<NumericConversionIntrinsic>(binding)) {
     return {conversion->call(arguments, arena, scalars_, vectors_, owner)};
+  }
+  if (auto* exponent = std::get_if<ExponentIntrinsic>(binding)) {
+    return {exponent->call(arguments, storage, owner, builder, location)};
   }
   std::array<loom_value_id_t, 8> inline_values;
   std::vector<loom_value_id_t> overflow;
