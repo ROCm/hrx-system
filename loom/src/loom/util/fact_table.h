@@ -407,7 +407,8 @@ struct loom_value_fact_table_t {
     iree_host_size_t page_capacity;
   } select_dependencies;
 
-  // Exact predicate-bearing identities awaiting path-local fact transport.
+  // Exact identities carrying authored or inherited relations awaiting
+  // path-local fact transport.
   // The pointer array is allocated only when such an identity is discovered.
   struct {
     // Operations observed exact during scope population or incremental change.
@@ -832,16 +833,16 @@ static inline loom_value_id_t loom_value_fact_table_query_numeric_identity(
              : loom_value_fact_table_query_identity(table, source);
 }
 
-// Returns true when exact predicate-bearing identities await consumption.
+// Returns true when exact relation-bearing identities await consumption.
 static inline bool loom_value_fact_table_has_pending_exact_relations(
     const loom_value_fact_table_t* table) {
   return table && table->exact_relations.count > 0;
 }
 
-// Returns exact predicate-bearing identity operations that still relate at
-// least one dynamic SSA value. The borrowed observation array may contain the
-// same operation more than once after a cyclic solve and remains valid until
-// the transient fact arena is reset. No storage is allocated when empty.
+// Returns exact identity operations with authored predicates on dynamic values
+// or retained counterpart relations. The borrowed observation array may contain
+// the same operation more than once after a cyclic solve and remains valid
+// until the transient fact arena is reset. No storage is allocated when empty.
 void loom_value_fact_table_pending_exact_relations(
     const loom_value_fact_table_t* table, loom_op_t* const** out_ops,
     iree_host_size_t* out_op_count);

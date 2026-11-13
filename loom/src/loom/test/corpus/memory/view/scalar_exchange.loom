@@ -182,3 +182,41 @@ check.scenario @ranked_exchange_packet_values {
   }
   check.return
 }
+
+// The input holds at most two records. Its runtime length bounds the selected
+// row before branch specialization; each branch may then use a constant row
+// while retaining that bound.
+func.def @branch_selected_record(%storage: buffer, %row_value: index, %output: buffer) {
+  %row = index.assume %row_value [range(%row_value, 0, 1)] : index
+  %origin = index.constant 0 : offset
+  %primary_row = index.constant 0 : index
+  %record_bytes = index.constant 36 : index
+  %storage_length = buffer.length %storage
+  %bytes = index.assume %storage_length [range(%storage_length, 0, 72)] : offset
+  %length = index.cast %bytes : offset to index
+  %capacity = index.div %length, %record_bytes : index
+  %records = buffer.view %storage[%origin] : buffer -> view<[%capacity]x9xi32>
+  %position = index.assume %row [lt(%row, %capacity)] : index
+  %primary = index.cmp eq, %position, %primary_row : index
+  %item = scf.if %primary -> (i32) {
+    %loaded = view.load %records[%position, 2] : view<[%capacity]x9xi32> -> i32
+    scf.yield %loaded : i32
+  } else {
+    %loaded = view.load %records[%position, 8] : view<[%capacity]x9xi32> -> i32
+    scf.yield %loaded : i32
+  }
+  %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %item, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @branch_selected_record_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-137) step(13) : tensor<2x9xi32>
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@branch_selected_record>(%input, %trial, %output) : (tensor<2x9xi32>, index, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}

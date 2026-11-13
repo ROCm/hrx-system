@@ -1068,14 +1068,22 @@ static iree_status_t loom_value_fact_table_record_exact_relation(
     return iree_ok_status();
   }
   const loom_value_id_t* results = loom_op_const_results(op);
+  bool has_retained_relations = false;
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] == LOOM_VALUE_ID_INVALID ||
         !loom_value_facts_is_exact(
             loom_value_fact_table_lookup(table, results[i]))) {
       return iree_ok_status();
     }
+    const loom_value_fact_relation_roots_t roots =
+        loom_value_fact_integer_relations_snapshot(table, results[i]);
+    for (uint8_t outcome = 0; outcome < LOOM_INTEGER_ORDER_OUTCOME_COUNT;
+         ++outcome) {
+      has_retained_relations |= roots.excluded[outcome] != 0;
+    }
   }
-  if (!loom_value_fact_table_op_has_dynamic_predicate(table, op)) {
+  if (!has_retained_relations &&
+      !loom_value_fact_table_op_has_dynamic_predicate(table, op)) {
     return iree_ok_status();
   }
   if (table->exact_relations.count == table->exact_relations.capacity) {
