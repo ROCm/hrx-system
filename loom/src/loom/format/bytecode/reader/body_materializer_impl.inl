@@ -514,6 +514,7 @@ loom_bytecode_body_reader_read_op_record(
   }
   loom_attribute_t* attrs = NULL;
   loom_trait_flags_t effective_traits = 0;
+  loom_memory_space_mask_t intrinsic_read_spaces = 0;
   loom_memory_space_mask_t intrinsic_write_spaces = 0;
   bool has_effective_traits = false;
   if (vtable->attribute_count > 0) {
@@ -595,6 +596,7 @@ loom_bytecode_body_reader_read_op_record(
       }
       attrs[attr_index] = loom_attr_scoped_enum(descriptor_value.ordinal);
       effective_traits = descriptor_value.effective_traits;
+      intrinsic_read_spaces = descriptor_value.intrinsic_read_spaces;
       intrinsic_write_spaces = descriptor_value.intrinsic_write_spaces;
       has_effective_traits = true;
     } else {
@@ -663,6 +665,7 @@ loom_bytecode_body_reader_read_op_record(
   }
   if (has_effective_traits) {
     op->traits = effective_traits;
+    op->intrinsic_read_spaces = intrinsic_read_spaces;
     op->intrinsic_write_spaces = intrinsic_write_spaces;
     IREE_RETURN_IF_ERROR(loom_low_repr_resolve_packet_attributes(
         loom_bytecode_body_policy_low_repr_environment(

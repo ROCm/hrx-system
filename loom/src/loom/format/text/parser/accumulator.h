@@ -126,6 +126,8 @@ struct loom_parsed_op_t {
   uint32_t field_span_coordinate_overflow_mask;
   // Effective traits resolved with a representation-scoped identity.
   loom_trait_flags_t effective_traits;
+  // Intrinsic read-space bound resolved with a Low descriptor's traits.
+  loom_memory_space_mask_t intrinsic_read_spaces;
   // Intrinsic write-space bound resolved with a Low descriptor's traits.
   loom_memory_space_mask_t intrinsic_write_spaces;
   uint8_t attribute_count;

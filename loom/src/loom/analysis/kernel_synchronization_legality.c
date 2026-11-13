@@ -717,6 +717,19 @@ static iree_status_t loom_kernel_synchronization_legality_check_region_access(
       state, stream, op, access_region, flags);
 }
 
+static bool loom_kernel_synchronization_legality_spaces_overlap(
+    loom_memory_space_mask_t spaces, loom_value_fact_memory_space_t endpoint) {
+  while (spaces) {
+    const uint32_t space = iree_math_count_trailing_zeros_u32(spaces);
+    if (!loom_view_memory_spaces_are_disjoint(
+            (loom_value_fact_memory_space_t)space, endpoint)) {
+      return true;
+    }
+    spaces &= spaces - 1;
+  }
+  return false;
+}
+
 static iree_status_t loom_kernel_synchronization_legality_check_call(
     loom_kernel_synchronization_legality_state_t* state,
     const loom_kernel_synchronization_legality_stream_t* stream,
@@ -726,8 +739,21 @@ static iree_status_t loom_kernel_synchronization_legality_check_call(
       loom_storage_access_require_call(state->options->storage_access, call,
                                        state->options->value_domain, &access));
   if (access.has_unbounded_memory_access) {
-    return loom_kernel_synchronization_legality_fail(state, call.op,
-                                                     LOOM_ERR_LOWERING_070);
+    for (iree_host_size_t i = stream->completed_endpoint_count;
+         i < stream->endpoint_count; ++i) {
+      const loom_movement_request_t* request = &stream->endpoints[i].request;
+      // A pending destination excludes readers and writers; its source
+      // excludes only writers. Unbounded accesses can still have a precise
+      // memory-space bound, independently of the argument footprints below.
+      if (loom_kernel_synchronization_legality_spaces_overlap(
+              access.unbounded_read_spaces | access.unbounded_write_spaces,
+              request->dest.memory_space) ||
+          loom_kernel_synchronization_legality_spaces_overlap(
+              access.unbounded_write_spaces, request->source.memory_space)) {
+        return loom_kernel_synchronization_legality_fail(state, call.op,
+                                                         LOOM_ERR_LOWERING_070);
+      }
+    }
   }
   if (!access.arguments) {
     return iree_ok_status();

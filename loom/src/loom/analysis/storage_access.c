@@ -109,7 +109,7 @@ static loom_func_like_t loom_storage_access_call_function(
   return (loom_func_like_t){0};
 }
 
-static loom_memory_space_mask_t loom_storage_access_call_write_spaces(
+static loom_func_like_t loom_storage_access_opaque_callee(
     const loom_module_t* module, loom_call_like_t call) {
   const loom_symbol_ref_t callee = loom_call_like_callee(call);
   const loom_func_like_t function =
@@ -117,7 +117,7 @@ static loom_memory_space_mask_t loom_storage_access_call_write_spaces(
           ? loom_func_like_cast(
                 module, module->symbols.entries[callee.symbol_id].defining_op)
           : (loom_func_like_t){0};
-  return loom_callable_effects_written_memory_spaces(function);
+  return function;
 }
 
 // Tagged branches and leaves share stable function-record storage. Every branch
@@ -378,14 +378,19 @@ static iree_status_t loom_storage_access_record_barrier(
 static void loom_storage_access_mark_unbounded(
     loom_storage_access_state_t* state,
     loom_storage_access_function_record_t* function,
+    loom_memory_space_mask_t read_spaces,
     loom_memory_space_mask_t write_spaces) {
+  const loom_memory_space_mask_t combined_reads =
+      function->graph.unbounded_read_spaces | read_spaces;
   const loom_memory_space_mask_t combined =
       function->graph.unbounded_write_spaces | write_spaces;
   if (function->graph.has_unbounded_memory_access &&
+      function->graph.unbounded_read_spaces == combined_reads &&
       function->graph.unbounded_write_spaces == combined) {
     return;
   }
   function->graph.has_unbounded_memory_access = true;
+  function->graph.unbounded_read_spaces = combined_reads;
   function->graph.unbounded_write_spaces = combined;
   if (function->unbounded_queued) {
     return;
@@ -452,7 +457,8 @@ static iree_status_t loom_storage_access_visit(
     callee_record->callers = caller;
     if (callee_record->graph.has_unbounded_memory_access) {
       loom_storage_access_mark_unbounded(
-          state, state->current, callee_record->graph.unbounded_write_spaces);
+          state, state->current, callee_record->graph.unbounded_read_spaces,
+          callee_record->graph.unbounded_write_spaces);
     }
     const loom_value_slice_t arguments = loom_call_like_operands(call);
     const uint16_t argument_offset = loom_call_like_operand_offset(call);
@@ -474,9 +480,17 @@ static iree_status_t loom_storage_access_visit(
     if (iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY |
                                      LOOM_TRAIT_WRITES_MEMORY |
                                      LOOM_TRAIT_UNKNOWN_EFFECTS)) {
-      loom_storage_access_mark_unbounded(
-          state, state->current,
-          loom_storage_access_call_write_spaces(module, call));
+      const loom_func_like_t callee =
+          loom_storage_access_opaque_callee(module, call);
+      // Ordering can invalidate a caller's memory observations without the
+      // callee accessing storage. Its cached access bound distinguishes that
+      // case before the conservative write-space bound enters this graph.
+      if (loom_callable_effects_may_access_memory(callee)) {
+        loom_storage_access_mark_unbounded(
+            state, state->current,
+            loom_callable_effects_read_memory_spaces(callee),
+            loom_callable_effects_written_memory_spaces(callee));
+      }
     }
   } else {
     bool described_read = false;
@@ -516,7 +530,8 @@ static iree_status_t loom_storage_access_visit(
           !described_write))) {
       state->current->graph.has_unknown_memory_access = true;
       loom_storage_access_mark_unbounded(
-          state, state->current, loom_op_written_memory_spaces(op, traits));
+          state, state->current, loom_op_read_memory_spaces(op, traits),
+          loom_op_written_memory_spaces(op, traits));
     }
     const loom_value_relation_mask_t mask =
         LOOM_VALUE_RELATION_MASK_ALL &
@@ -624,7 +639,8 @@ static void loom_storage_access_solve(loom_storage_access_state_t* state) {
     for (const loom_storage_access_caller_t* caller = function->callers; caller;
          caller = caller->next) {
       loom_storage_access_mark_unbounded(
-          state, caller->function, function->graph.unbounded_write_spaces);
+          state, caller->function, function->graph.unbounded_read_spaces,
+          function->graph.unbounded_write_spaces);
     }
   }
   while (state->first_effect) {
@@ -696,9 +712,20 @@ iree_status_t loom_storage_access_require_call(
     *out_call = (loom_storage_access_call_t){
         .arguments = (const loom_storage_reference_t* const*)summary->arguments,
         .has_unbounded_memory_access = summary->has_unbounded_memory_access,
+        .unbounded_read_spaces = summary->unbounded_read_spaces,
+        .unbounded_write_spaces = summary->unbounded_write_spaces,
     };
     return iree_ok_status();
   }
-  out_call->has_unbounded_memory_access = true;
+  const loom_func_like_t callee =
+      loom_storage_access_opaque_callee(scope->module, call);
+  out_call->has_unbounded_memory_access =
+      loom_callable_effects_may_access_memory(callee);
+  if (out_call->has_unbounded_memory_access) {
+    out_call->unbounded_read_spaces =
+        loom_callable_effects_read_memory_spaces(callee);
+    out_call->unbounded_write_spaces =
+        loom_callable_effects_written_memory_spaces(callee);
+  }
   return iree_ok_status();
 }

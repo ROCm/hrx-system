@@ -844,6 +844,7 @@ static iree_status_t loom_scf_region_branch_build_empty_clone(
       branch_op->attribute_count, branch_op->location, out_new_branch));
   (*out_new_branch)->instance_flags = branch_op->instance_flags;
   (*out_new_branch)->traits = branch_op->traits;
+  (*out_new_branch)->intrinsic_read_spaces = branch_op->intrinsic_read_spaces;
   (*out_new_branch)->intrinsic_write_spaces = branch_op->intrinsic_write_spaces;
 
   if (branch_op->operand_count > 0) {
@@ -914,6 +915,7 @@ static iree_status_t loom_scf_region_branch_clone_tail_after_branch(
   }
   (*out_cloned_tail)->instance_flags = tail_op->instance_flags;
   (*out_cloned_tail)->traits = tail_op->traits;
+  (*out_cloned_tail)->intrinsic_read_spaces = tail_op->intrinsic_read_spaces;
   (*out_cloned_tail)->intrinsic_write_spaces = tail_op->intrinsic_write_spaces;
 
   loom_value_slice_t new_branch_results = {

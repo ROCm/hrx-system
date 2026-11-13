@@ -308,6 +308,7 @@ static void loom_region_reset_summaries(loom_region_t* region) {
   region->observable_effect_count = 0;
   region->resource_identity_count = 0;
   region->memory_access_count = 0;
+  memset(region->read_space_counts, 0, sizeof(region->read_space_counts));
   memset(region->write_space_counts, 0, sizeof(region->write_space_counts));
   region->hint_source_count = 0;
   loom_block_t* block = NULL;

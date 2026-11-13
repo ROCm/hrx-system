@@ -1,0 +1,201 @@
+// RUN: pass kernel-synchronization-legality
+
+// Native access bounds survive the call boundary without becoming argument
+// footprints. A pending destination excludes reads; a source permits reads.
+test.target<low_core> @target
+
+low.func.def readonly target<test.low.core>(@target) @native_read(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %value = test.load.workgroup.v4i32 %address
+  return %value
+}
+
+func.def @allows_workgroup_read_workgroup_to_global(%output: buffer, %address: buffer) -> (vector<4xi32>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %local = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %global_view = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %local_view = buffer.view %local[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %local_view to %global_view {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %value = low.invoke readonly @native_read(%address) : (buffer) -> (vector<4xi32>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %value : vector<4xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def readonly target<test.low.core>(@target) @native_read(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %value = test.load.workgroup.v4i32 %address
+  return %value
+}
+
+func.def @rejects_workgroup_read_global_to_workgroup(%output: buffer, %address: buffer) -> (vector<4xi32>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %local = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %global_view = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %local_view = buffer.view %local[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %global_view to %local_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/070 {op_name="low.invoke", phase_name="kernel-synchronization-legality"}
+  %value = low.invoke readonly @native_read(%address) : (buffer) -> (vector<4xi32>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %value : vector<4xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def readonly target<test.low.core>(@target) @native_read(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %value = test.load.global.v4i32 %address
+  return %value
+}
+
+func.def @rejects_global_read_workgroup_to_global(%output: buffer, %address: buffer) -> (vector<4xi32>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %local = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %global_view = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %local_view = buffer.view %local[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %local_view to %global_view {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/070 {op_name="low.invoke", phase_name="kernel-synchronization-legality"}
+  %value = low.invoke readonly @native_read(%address) : (buffer) -> (vector<4xi32>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %value : vector<4xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def readonly target<test.low.core>(@target) @native_read(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %value = test.load.global.v4i32 %address
+  return %value
+}
+
+func.def @allows_global_read_global_to_workgroup(%output: buffer, %address: buffer) -> (vector<4xi32>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %local = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %global_view = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %local_view = buffer.view %local[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %global_view to %local_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %value = low.invoke readonly @native_read(%address) : (buffer) -> (vector<4xi32>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %value : vector<4xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def readonly target<test.low.core>(@target) @native_read(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %value = test.load.private.v4i32 %address
+  return %value
+}
+
+func.def @allows_private_read_global_to_workgroup(%output: buffer, %address: buffer) -> (vector<4xi32>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %local = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %global_view = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %local_view = buffer.view %local[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %global_view to %local_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %value = low.invoke readonly @native_read(%address) : (buffer) -> (vector<4xi32>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %value : vector<4xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def readonly target<test.low.core>(@target) @native_read(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %value = test.load.workgroup.v4i32 %address
+  return %value
+}
+
+func.def @read_wrapper(%address: buffer) -> (vector<4xi32>) {
+  %value = low.invoke readonly @native_read(%address) : (buffer) -> (vector<4xi32>)
+  func.return %value : vector<4xi32>
+}
+
+func.def @allows_workgroup_read_workgroup_to_global_transitive(%output: buffer, %address: buffer) -> (vector<4xi32>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %local = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %global_view = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %local_view = buffer.view %local[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %local_view to %global_view {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %independent = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %value = func.call @read_wrapper(%independent) : (buffer) -> (vector<4xi32>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %value : vector<4xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def readonly target<test.low.core>(@target) @native_read(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %value = test.load.workgroup.v4i32 %address
+  return %value
+}
+
+func.def @read_wrapper(%address: buffer) -> (vector<4xi32>) {
+  %value = low.invoke readonly @native_read(%address) : (buffer) -> (vector<4xi32>)
+  func.return %value : vector<4xi32>
+}
+
+func.def @rejects_workgroup_read_global_to_workgroup_transitive(%output: buffer, %address: buffer) -> (vector<4xi32>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %local = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %global_view = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %local_view = buffer.view %local[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %global_view to %local_view {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %independent = buffer.alloca<workgroup> align(16) %bytes : buffer
+  // ERROR@+1: LOWERING/070 {op_name="func.call", phase_name="kernel-synchronization-legality"}
+  %value = func.call @read_wrapper(%independent) : (buffer) -> (vector<4xi32>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %value : vector<4xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @native_write(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  test.store.workgroup.v4i32 %address, %value
+  return
+}
+
+func.def @rejects_native_source_write(%output: buffer, %address: buffer, %value: vector<4xi32>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %local = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %global_view = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %local_view = buffer.view %local[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %local_view to %global_view {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/070 {op_name="low.invoke", phase_name="kernel-synchronization-legality"}
+  low.invoke @native_write(%address, %value) : (buffer, vector<4xi32>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}

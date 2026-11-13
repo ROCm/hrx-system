@@ -156,6 +156,8 @@ TEST_F(CallableEffectsTest, DeclarationsUseExplicitEffectContracts) {
   EXPECT_FALSE(loom_callable_effects_is_pure(unspecified));
   EXPECT_TRUE(loom_callable_effects_may_access_memory(unspecified));
   EXPECT_TRUE(loom_callable_effects_may_create_resources(unspecified));
+  EXPECT_EQ(loom_callable_effects_read_memory_spaces(unspecified),
+            1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
   EXPECT_EQ(loom_callable_effects_written_memory_spaces(unspecified),
             1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
 
@@ -165,6 +167,7 @@ TEST_F(CallableEffectsTest, DeclarationsUseExplicitEffectContracts) {
   EXPECT_FALSE(loom_callable_effects_has_readonly_contract(pure));
   EXPECT_FALSE(loom_callable_effects_may_access_memory(pure));
   EXPECT_FALSE(loom_callable_effects_may_create_resources(pure));
+  EXPECT_EQ(loom_callable_effects_read_memory_spaces(pure), 0);
   EXPECT_EQ(loom_callable_effects_written_memory_spaces(pure), 0);
 
   loom_func_like_t readonly = {};
@@ -174,6 +177,8 @@ TEST_F(CallableEffectsTest, DeclarationsUseExplicitEffectContracts) {
   EXPECT_TRUE(loom_callable_effects_has_readonly_contract(readonly));
   EXPECT_TRUE(loom_callable_effects_may_access_memory(readonly));
   EXPECT_FALSE(loom_callable_effects_may_create_resources(readonly));
+  EXPECT_EQ(loom_callable_effects_read_memory_spaces(readonly),
+            1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
   EXPECT_EQ(loom_callable_effects_written_memory_spaces(readonly), 0);
 }
 

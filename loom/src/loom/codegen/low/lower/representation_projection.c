@@ -42,6 +42,8 @@ typedef struct loom_low_representation_descriptor_update_t {
   uint32_t ordinal;
   // Generic IR traits implied by the target representation descriptor.
   loom_trait_flags_t effective_traits;
+  // Intrinsic read-space bound in the target representation.
+  loom_memory_space_mask_t intrinsic_read_spaces;
   // Intrinsic write-space bound in the target representation.
   loom_memory_space_mask_t intrinsic_write_spaces;
 } loom_low_representation_descriptor_update_t;
@@ -311,15 +313,18 @@ static iree_status_t loom_low_representation_plan_descriptor(
         "target descriptor lookup returned an invalid ordinal %u",
         target_ordinal);
   }
+  loom_memory_space_mask_t read_spaces = 0;
   loom_memory_space_mask_t write_spaces = 0;
   const loom_trait_flags_t traits = loom_low_descriptor_effective_traits(
-      projection->target_descriptor_set, target_descriptor, &write_spaces);
+      projection->target_descriptor_set, target_descriptor, &read_spaces,
+      &write_spaces);
   plan->descriptor_updates[plan->descriptor_count++] =
       (loom_low_representation_descriptor_update_t){
           .op = op,
           .source_ordinal = source_ordinal,
           .ordinal = target_ordinal,
           .effective_traits = traits,
+          .intrinsic_read_spaces = read_spaces,
           .intrinsic_write_spaces = write_spaces,
       };
   return iree_ok_status();
@@ -445,9 +450,11 @@ iree_status_t loom_low_apply_function_representation(
       *out_changed = true;
     }
     if (update->op->traits != update->effective_traits ||
+        update->op->intrinsic_read_spaces != update->intrinsic_read_spaces ||
         update->op->intrinsic_write_spaces != update->intrinsic_write_spaces) {
       loom_module_drop_op_summaries(module, update->op);
       update->op->traits = update->effective_traits;
+      update->op->intrinsic_read_spaces = update->intrinsic_read_spaces;
       update->op->intrinsic_write_spaces = update->intrinsic_write_spaces;
       loom_module_record_op_summaries(module, update->op);
       *out_changed = true;

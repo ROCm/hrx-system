@@ -38,6 +38,16 @@ typedef struct loom_aie2p_array_route_sharing_t {
   bool used;
 } loom_aie2p_array_route_sharing_t;
 
+// Serialized SRAM senders with the same complete receiver set share one packet
+// identity. Their horizontal backbone and descending delivery lanes may merge;
+// northbound source prefixes remain private to preserve other packet classes.
+// The caller proves exclusion and assigns identities before routing any member.
+typedef struct loom_aie2p_array_route_multicast_t {
+  // Shared lane masks in north/south/west/east order, indexed by tile. The
+  // northbound mask remains empty: private classes use those source prefixes.
+  uint32_t* links;
+} loom_aie2p_array_route_multicast_t;
+
 // Mutable stream-network allocation state for one physical array plan.
 typedef struct loom_aie2p_array_route_builder_t {
   // Immutable array-family topology and stream-port capacities.
@@ -56,8 +66,7 @@ typedef struct loom_aie2p_array_route_builder_t {
     // Number of initialized nodes.
     iree_host_size_t node_count;
   } prefixes;
-  // Reusable suffix-planning storage, bounded by the array's Manhattan
-  // diameter.
+  // Reusable suffix-planning storage for vertical/horizontal/vertical paths.
   struct loom_aie2p_array_route_step_t* steps;
   // Per-link occupied channel masks grouped by traversal direction.
   struct {
@@ -73,8 +82,8 @@ typedef struct loom_aie2p_array_route_builder_t {
 } loom_aie2p_array_route_builder_t;
 
 // Initializes routing storage in |arena| for one validated physical plan.
-// |route_capacity| is the checked per-channel Manhattan route bound and also
-// bounds the prefix nodes. All allocations have the caller's arena lifetime.
+// |route_capacity| bounds all selected paths and their prefix nodes. All
+// allocations have the caller's arena lifetime.
 iree_status_t loom_aie2p_array_route_builder_initialize(
     const loom_xdna_array_family_t* family, iree_host_size_t route_capacity,
     iree_arena_allocator_t* arena,
@@ -128,6 +137,23 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                                    loom_xdna_tile_coordinate_t destination,
                                    loom_xdna_stream_port_t destination_port,
                                    uint8_t destination_channel, bool packet);
+
+// Initializes a shared packet domain without reserving any physical lanes.
+iree_status_t loom_aie2p_array_route_multicast_initialize(
+    const loom_aie2p_array_route_builder_t* builder,
+    iree_arena_allocator_t* arena,
+    loom_aie2p_array_route_multicast_t* out_multicast);
+
+// Routes one SRAM-to-core branch in a serialized multicast domain. Cross-column
+// branches turn on the last compute row and descend to their receivers. Local
+// receivers use the sender's private upward prefix. Members retain independent
+// source trees and complete packet paths; other classes cannot use shared
+// lanes.
+bool loom_aie2p_array_route_multicast(
+    loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
+    loom_aie2p_array_route_tree_t* tree, loom_xdna_tile_coordinate_t source,
+    uint8_t source_channel, loom_xdna_tile_coordinate_t destination,
+    uint8_t destination_channel, loom_aie2p_array_route_multicast_t* multicast);
 
 // Retains the directed lanes of the caller's already selected unicast route.
 // The exact edge interval comes from its route construction, not a search.

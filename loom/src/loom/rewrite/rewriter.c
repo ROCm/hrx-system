@@ -980,6 +980,7 @@ iree_status_t loom_rewriter_rebuild_direct_branch(
   if (iree_status_is_ok(status)) {
     replacement->instance_flags = source->instance_flags;
     replacement->traits = source->traits;
+    replacement->intrinsic_read_spaces = source->intrinsic_read_spaces;
     replacement->intrinsic_write_spaces = source->intrinsic_write_spaces;
     replacement->flags |= source->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
     if (argument_count != 0) {

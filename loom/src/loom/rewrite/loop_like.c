@@ -409,6 +409,7 @@ iree_status_t loom_loop_like_build_replacement(
   }
   target->instance_flags = source.op->instance_flags;
   target->traits = source.op->traits;
+  target->intrinsic_read_spaces = source.op->intrinsic_read_spaces;
   target->intrinsic_write_spaces = source.op->intrinsic_write_spaces;
   target->flags |= source.op->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
 

@@ -18,6 +18,7 @@ loom_check_test_suite(
         "kernel_async_calls.loom-test",
         "kernel_async_control.loom-test",
         "kernel_async_memory.loom-test",
+        "kernel_async_native_effects.loom-test",
         "kernel_barrier_control.loom-test",
         "kernel_resources.loom-test",
         "kernel_synchronization_legality.loom-test",

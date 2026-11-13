@@ -622,6 +622,7 @@ static iree_status_t loom_scf_pipeline_copy_op_presentation(
     loom_op_t* target) {
   target->instance_flags = source->instance_flags;
   target->traits = source->traits;
+  target->intrinsic_read_spaces = source->intrinsic_read_spaces;
   target->intrinsic_write_spaces = source->intrinsic_write_spaces;
   target->flags |= source->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
   iree_host_size_t comment_count = 0;

@@ -36,6 +36,21 @@ bool loom_callable_effects_may_create_resources(loom_func_like_t function) {
          contract != LOOM_CALLABLE_EFFECT_CONTRACT_READONLY;
 }
 
+loom_memory_space_mask_t loom_callable_effects_read_memory_spaces(
+    loom_func_like_t function) {
+  if (loom_func_like_isa(function)) {
+    const loom_region_t* body = loom_func_like_body(function);
+    if (body) {
+      return loom_region_read_memory_spaces(body);
+    }
+    if (loom_func_like_effect_contract(function) ==
+        LOOM_CALLABLE_EFFECT_CONTRACT_PURE) {
+      return 0;
+    }
+  }
+  return (loom_memory_space_mask_t)(1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+}
+
 loom_memory_space_mask_t loom_callable_effects_written_memory_spaces(
     loom_func_like_t function) {
   if (!loom_func_like_isa(function)) {

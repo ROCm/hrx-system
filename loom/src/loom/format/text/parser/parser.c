@@ -521,6 +521,7 @@ static iree_status_t loom_finalize_op(
   loom_op_refresh_effective_traits(parser->module, op);
   if (parsed->has_effective_traits) {
     op->traits = parsed->effective_traits;
+    op->intrinsic_read_spaces = parsed->intrinsic_read_spaces;
     op->intrinsic_write_spaces = parsed->intrinsic_write_spaces;
     IREE_RETURN_IF_ERROR(loom_low_repr_resolve_packet_attributes(
         &parser->low_asm_environment.low_repr, parser->low_repr.descriptor_set,

@@ -283,6 +283,8 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
       continue;
     }
     std::string source_text = Print(module);
+    const auto read_spaces = loom_region_read_memory_spaces(module->body);
+    const auto write_spaces = loom_region_written_memory_spaces(module->body);
     loom_module_free(module);
     ++supported_count;
 
@@ -297,6 +299,9 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
     ASSERT_NE(read_module, nullptr);
 
     EXPECT_EQ(source_text, Print(read_module));
+    EXPECT_EQ(loom_region_read_memory_spaces(read_module->body), read_spaces);
+    EXPECT_EQ(loom_region_written_memory_spaces(read_module->body),
+              write_spaces);
 
     std::vector<uint8_t> second;
     IREE_EXPECT_OK(WriteModule(read_module, low_repr_environment_, &second));
