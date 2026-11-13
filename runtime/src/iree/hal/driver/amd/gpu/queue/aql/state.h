@@ -33,6 +33,13 @@ extern "C" {
 
 typedef struct iree_hal_amd_gpu_aql_queue_t iree_hal_amd_gpu_aql_queue_t;
 
+enum {
+  // A single stable entry is queued or being consumed by the publisher.
+  IREE_HAL_AMD_GPU_AQL_SEAL_ENQUEUED = 1u << 0,
+  // Explicit flush seals even while an older completion is outstanding.
+  IREE_HAL_AMD_GPU_AQL_SEAL_FORCE = 1u << 1,
+};
+
 // Retirement credit owns both the native point and the inline host capture.
 // Firmware consumption alone never returns this storage.
 typedef struct iree_hal_amd_gpu_aql_retirement_t {
@@ -219,6 +226,20 @@ struct iree_hal_amd_gpu_aql_queue_t {
   // GPU fixup values with initial capacity acquired during queue construction.
   iree_hal_amd_gpu_byte_storage_pool_t values;
 };
+
+// Reads the optional shader-feedback terminal outcome without consuming
+// reports.
+iree_status_code_t iree_hal_amd_gpu_aql_queue_feedback_failure(
+    const iree_hal_amd_gpu_aql_queue_t* queue);
+
+// Resumes capacity-parked captures through one coalesced publication entry.
+void iree_hal_amd_gpu_aql_queue_capacity_available(
+    iree_hal_amd_gpu_aql_queue_t* queue);
+
+// Transfers a stable entry to the publisher, progressing it inline when idle
+// or handing the remaining FIFO to the existing publication service.
+void iree_hal_amd_gpu_aql_queue_enqueue_entry(
+    iree_hal_amd_gpu_aql_queue_t* queue, iree_hal_amd_gpu_aql_entry_t* entry);
 
 // Frees joined queue metadata after the device releases native ownership.
 void iree_hal_amd_gpu_aql_queue_destroy(iree_hal_queue_t* queue);
