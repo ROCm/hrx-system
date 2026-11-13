@@ -1355,6 +1355,21 @@ ERR_AMDGPU_061 = ErrorDef(
     fix_hint="Use the corresponding captured PC half in the relocation block",
 )
 
+ERR_AMDGPU_062 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=62,
+    severity=Severity.ERROR,
+    summary="Authored VGPR address transition disagrees with scheduled state.",
+    message=(
+        "s_set_vgpr_msb declares previous mode {previous_mode}, but the "
+        "scheduled VGPR address mode is {scheduled_mode}"
+    ),
+    params=(
+        ErrorParam("previous_mode", ParamKind.U32),
+        ErrorParam("scheduled_mode", ParamKind.U32),
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1413,4 +1428,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_059,
     ERR_AMDGPU_060,
     ERR_AMDGPU_061,
+    ERR_AMDGPU_062,
 )

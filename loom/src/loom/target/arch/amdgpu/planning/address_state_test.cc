@@ -167,8 +167,11 @@ class AmdgpuAddressStateTest : public ::testing::Test {
   }
 
   iree_status_t BuildPlan(loom_amdgpu_address_state_plan_t* out_plan) {
-    return loom_amdgpu_address_state_plan_build(&schedule_, &allocation_,
-                                                &arena_, out_plan);
+    bool accepted = false;
+    iree_status_t status = loom_amdgpu_address_state_plan_build(
+        &schedule_, &allocation_, &arena_, /*emitter=*/{}, &accepted, out_plan);
+    EXPECT_TRUE(accepted);
+    return status;
   }
 
   iree_arena_block_pool_t block_pool_;

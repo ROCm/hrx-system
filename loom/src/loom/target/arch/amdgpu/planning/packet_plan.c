@@ -14,13 +14,13 @@ iree_status_t loom_amdgpu_packet_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_packet_plan_options_t* options,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_vopd_rejection_table_t* out_vopd_rejections,
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_vopd_rejection_table_t* out_vopd_rejections,
     loom_amdgpu_packet_plan_t* out_plan) {
+  *out_accepted = true;
   if (out_vopd_rejections != NULL) {
     *out_vopd_rejections = (loom_amdgpu_vopd_rejection_table_t){0};
   }
-  *out_plan = (loom_amdgpu_packet_plan_t){0};
   *out_plan = (loom_amdgpu_packet_plan_t){
       .schedule = schedule,
       .allocation = allocation,
@@ -43,11 +43,12 @@ iree_status_t loom_amdgpu_packet_plan_build(
   iree_status_t status = loom_amdgpu_matrix_coexecution_allocate(
       schedule, allocation, matrix_coexecution_profile, &matrix_arena,
       &matrix_coexecution);
-  if (iree_status_is_ok(status)) {
+  if (*out_accepted && iree_status_is_ok(status)) {
     status = loom_amdgpu_address_state_plan_build(schedule, allocation, arena,
+                                                  emitter, out_accepted,
                                                   &out_plan->address_state);
   }
-  if (iree_status_is_ok(status)) {
+  if (*out_accepted && iree_status_is_ok(status)) {
     const iree_arena_checkpoint_t wait_plan_checkpoint =
         iree_arena_checkpoint_save(&transient_arena);
     const loom_amdgpu_wait_plan_options_t wait_options = {
@@ -61,11 +62,11 @@ iree_status_t loom_amdgpu_packet_plan_build(
                                          &matrix_results, &out_plan->wait_plan);
     iree_arena_checkpoint_restore(&wait_plan_checkpoint);
   }
-  if (iree_status_is_ok(status)) {
+  if (*out_accepted && iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_packet_plan_build(&out_plan->wait_plan, arena,
                                                 &out_plan->wait_packets);
   }
-  if (iree_status_is_ok(status)) {
+  if (*out_accepted && iree_status_is_ok(status)) {
     const iree_arena_checkpoint_t vopd_checkpoint =
         iree_arena_checkpoint_save(&transient_arena);
     status = loom_amdgpu_vopd_plan_build(
@@ -77,13 +78,14 @@ iree_status_t loom_amdgpu_packet_plan_build(
         &out_plan->vopd_plan);
     iree_arena_checkpoint_restore(&vopd_checkpoint);
   }
-  if (iree_status_is_ok(status) && matrix_coexecution != NULL) {
+  if (*out_accepted && iree_status_is_ok(status) &&
+      matrix_coexecution != NULL) {
     status = loom_amdgpu_matrix_coexecution_finalize_static(matrix_coexecution);
   }
-  if (iree_status_is_ok(status) && matrix_results != NULL) {
+  if (*out_accepted && iree_status_is_ok(status) && matrix_results != NULL) {
     status = loom_amdgpu_matrix_result_wait_finalize_static(matrix_results);
   }
-  if (iree_status_is_ok(status)) {
+  if (*out_accepted && iree_status_is_ok(status)) {
     const iree_arena_checkpoint_t wait_state_checkpoint =
         iree_arena_checkpoint_save(&transient_arena);
     const loom_amdgpu_wait_state_plan_options_t wait_state_options = {

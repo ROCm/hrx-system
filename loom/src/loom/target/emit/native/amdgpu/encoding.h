@@ -112,8 +112,9 @@ typedef struct loom_amdgpu_encoded_instruction_stream_t {
 } loom_amdgpu_encoded_instruction_stream_t;
 
 // Encodes one AMDGPU target-low function from an addressability-accepted
-// emission frame. Options select packet-plan insertions and optional products;
-// NULL options select an ordinary kernel body with no insertions.
+// emission frame with admitted address-state transitions. Options select
+// packet-plan insertions and optional products; NULL options require a
+// self-contained schedule needing no inserted transitions or waits.
 // Authored relocation constraints produce diagnostics and leave |out_accepted|
 // false, independently of callback presence. Status carries allocation or
 // diagnostic delivery failure. No partial instruction stream is published.

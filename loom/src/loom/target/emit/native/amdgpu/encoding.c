@@ -1277,21 +1277,6 @@ static iree_status_t loom_amdgpu_try_encode_special_descriptor_packet(
   }
 }
 
-static iree_status_t loom_amdgpu_verify_unplanned_descriptor_address_state(
-    loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
-  const loom_amdgpu_address_state_requirement_t requirement =
-      loom_amdgpu_address_state_requirement_for_packet(state->inputs.allocation,
-                                                       packet);
-  if ((state->traversal.current_vgpr_msb_mode & requirement.mask) !=
-      (requirement.value & requirement.mask)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU descriptor packet reached native encoding without its "
-        "required address-state transition");
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   IREE_ASSERT(state->inputs.encoding_table != NULL);
@@ -1407,11 +1392,6 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
 
 static iree_status_t loom_amdgpu_encode_regular_descriptor_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
-  if (state->packet_plan.address_state == NULL) {
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_verify_unplanned_descriptor_address_state(state, packet));
-  }
-
   bool encoded = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_try_encode_special_descriptor_packet(
       state, packet, &encoded));
@@ -2329,15 +2309,6 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
     }
     if (!state->accepted) {
       break;
-    }
-    if (state->packet_plan.address_state == NULL) {
-      if (state->traversal.current_vgpr_msb_mode != 0) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "AMDGPU native encoding block left VGPR-MSB address state active");
-      }
-    } else {
-      IREE_ASSERT_EQ(state->traversal.current_vgpr_msb_mode, 0);
     }
   }
   if (!state->accepted) {

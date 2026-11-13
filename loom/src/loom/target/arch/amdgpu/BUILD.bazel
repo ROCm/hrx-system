@@ -71,7 +71,8 @@ loom_generated_cc_library(
         _AMDGPU_HAL_VISIBILITY +
         _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
-        _AMDGPU_OPS_VISIBILITY
+        _AMDGPU_OPS_VISIBILITY +
+        _AMDGPU_PLANNING_VISIBILITY
     ),
     deps = ["//loom/src/loom/error:error_defs"],
 )

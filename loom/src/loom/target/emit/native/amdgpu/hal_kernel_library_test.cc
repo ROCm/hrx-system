@@ -2197,6 +2197,43 @@ TEST_F(AmdgpuHalKernelLibraryTest, AssemblyRejectionRequiresNoDiagnosticSink) {
   }
 }
 
+TEST_F(AmdgpuHalKernelLibraryTest,
+       AddressStateRejectionRequiresNoDiagnosticSink) {
+  if (!IsDescriptorSetLinked(IREE_SV("amdgpu.rdna4.gfx125x.core"))) {
+    GTEST_SKIP() << "amdgpu.rdna4.gfx125x.core is not linked in this build";
+  }
+  static const char kSource[] =
+      "amdgpu.target<gfx1250> @target\n"
+      "low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) "
+      "workgroup_size(32, 1, 1) @entry() asm {\n"
+      "  s_set_vgpr_msb 256\n"
+      "  return\n"
+      "}\n";
+  for (bool capture_diagnostics : {false, true}) {
+    loom_module_t* module = nullptr;
+    ASSERT_NO_FATAL_FAILURE(
+        ParseSource(iree_make_cstring_view(kSource), &module));
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        .diagnostic_sink =
+            capture_diagnostics ? capture.sink() : loom_diagnostic_sink_t{},
+        .max_errors = 20,
+    };
+    bool emitted = true;
+    IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
+        module, &options, iree_allocator_system(), &emitted, &library));
+    EXPECT_FALSE(emitted);
+    EXPECT_EQ(library.hsaco_data, nullptr);
+    if (capture_diagnostics) {
+      ASSERT_EQ(capture.diagnostics.size(), 1u);
+      EXPECT_EQ(capture.diagnostics.front().error, LOOM_ERR_AMDGPU_062);
+      EXPECT_EQ(capture.diagnostics.front().origin_line, 3u);
+    }
+    loom_module_free(module);
+  }
+}
+
 TEST_F(AmdgpuHalKernelLibraryTest, RejectsArtifactWithOrWithoutDiagnosticSink) {
   static const char kSource[] =
       "global.rodata.def @loom_kernel.kd = bytes(\"00\")\n"

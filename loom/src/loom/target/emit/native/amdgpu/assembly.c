@@ -94,8 +94,6 @@ typedef struct loom_amdgpu_assembly_packet_plan_state_t {
 } loom_amdgpu_assembly_packet_plan_state_t;
 
 typedef struct loom_amdgpu_assembly_traversal_state_t {
-  // Current scheduled block, or LOOM_LOW_PACKET_INDEX_NONE before emission.
-  uint32_t current_block_index;
   // Low byte of MODE's current VGPR-MSB selector state.
   uint8_t current_vgpr_msb_mode;
 } loom_amdgpu_assembly_traversal_state_t;
@@ -1597,33 +1595,6 @@ static iree_status_t loom_amdgpu_append_branch_groups_before_packet(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_prepare_packet(
-    void* user_data, const loom_native_assembly_packet_context_t* context) {
-  loom_amdgpu_assembly_emit_state_t* state =
-      (loom_amdgpu_assembly_emit_state_t*)user_data;
-  const uint32_t block_index = context->packet->node->block_index;
-  if (state->traversal.current_block_index == LOOM_LOW_PACKET_INDEX_NONE) {
-    state->traversal.current_block_index = block_index;
-    return iree_ok_status();
-  }
-  if (state->traversal.current_block_index == block_index) {
-    return iree_ok_status();
-  }
-  if (state->packet_plan.address_state == NULL) {
-    if (state->traversal.current_vgpr_msb_mode != 0) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU assembly left VGPR-MSB address state active at the end of "
-          "block %" PRIu32,
-          state->traversal.current_block_index);
-    }
-  } else {
-    IREE_ASSERT_EQ(state->traversal.current_vgpr_msb_mode, 0);
-  }
-  state->traversal.current_block_index = block_index;
-  return iree_ok_status();
-}
-
 static bool loom_amdgpu_address_state_matches_packet(
     const loom_amdgpu_address_state_transition_t* transition,
     const loom_low_packet_view_t* packet) {
@@ -1861,7 +1832,6 @@ static iree_status_t loom_amdgpu_append_entry_wait_states_after_instruction(
 
 static iree_status_t loom_amdgpu_append_insertions_before_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_packet(user_data, context));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_branch_groups_before_packet(
       (loom_amdgpu_assembly_emit_state_t*)user_data, context));
   IREE_RETURN_IF_ERROR(
@@ -2937,11 +2907,11 @@ static iree_status_t loom_amdgpu_append_descriptor_packet(
   return loom_amdgpu_append_canonical_asm_form_packet(context);
 }
 
-static iree_status_t loom_amdgpu_update_vgpr_msb_mode_after_descriptor(
+static void loom_amdgpu_update_vgpr_msb_mode_after_descriptor(
     loom_amdgpu_assembly_emit_state_t* state,
     const loom_native_assembly_packet_context_t* context) {
   if (state == NULL) {
-    return iree_ok_status();
+    return;
   }
   const loom_low_descriptor_t* set_vgpr_msb_descriptor =
       loom_amdgpu_descriptor_ref_descriptor(
@@ -2949,35 +2919,19 @@ static iree_status_t loom_amdgpu_update_vgpr_msb_mode_after_descriptor(
           LOOM_AMDGPU_DESCRIPTOR_REF_S_SET_VGPR_MSB);
   if (set_vgpr_msb_descriptor == NULL ||
       context->packet->descriptor != set_vgpr_msb_descriptor) {
-    return iree_ok_status();
+    return;
   }
   const int64_t mode = loom_attr_as_i64(
       loom_amdgpu_s_set_vgpr_msb_mode(loom_low_packet_attrs(context->packet)));
   state->traversal.current_vgpr_msb_mode = (uint8_t)((uint16_t)mode & 0xFFu);
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_append_stateful_descriptor_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
-  if (state == NULL || state->packet_plan.address_state == NULL) {
-    const loom_amdgpu_address_state_requirement_t requirement =
-        loom_amdgpu_address_state_requirement_for_packet(context->allocation,
-                                                         context->packet);
-    const uint8_t current_mode =
-        state == NULL ? 0 : state->traversal.current_vgpr_msb_mode;
-    if ((current_mode & requirement.mask) !=
-        (requirement.value & requirement.mask)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU descriptor packet reached assembly emission without its "
-          "required address-state transition");
-    }
-  }
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_descriptor_packet(NULL, context));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_update_vgpr_msb_mode_after_descriptor(state, context));
+  loom_amdgpu_update_vgpr_msb_mode_after_descriptor(state, context);
   return loom_amdgpu_append_wait_states_after_instruction(
       state, context,
       loom_amdgpu_descriptor_instruction_count(
@@ -3333,10 +3287,6 @@ iree_status_t loom_amdgpu_emit_assembly_fragment(
       .branches =
           {
               .layout = branch_layout,
-          },
-      .traversal =
-          {
-              .current_block_index = LOOM_LOW_PACKET_INDEX_NONE,
           },
   };
   IREE_RETURN_IF_ERROR(
