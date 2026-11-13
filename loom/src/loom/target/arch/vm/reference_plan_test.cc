@@ -99,6 +99,17 @@ class VMReferencePlanTest : public ::testing::Test {
     return type;
   }
 
+  iree_status_t Bind(loom_vm_reference_plan_t* plan, loom_type_t type,
+                     uint16_t* out_ordinal) {
+    bool bound = false;
+    iree_status_t status = loom_vm_reference_plan_bind(
+        plan, module_, type, &arena_, {}, nullptr, &bound, out_ordinal);
+    if (iree_status_is_ok(status)) {
+      EXPECT_TRUE(bound);
+    }
+    return status;
+  }
+
   static iree_status_t Allocate(void* self, iree_allocator_command_t command,
                                 const void* params, void** pointer) {
     if (command != IREE_ALLOCATOR_COMMAND_FREE &&
@@ -176,8 +187,7 @@ TEST_F(VMReferencePlanTest, InlineModesAndStaticAliasesShareExternalKeys) {
   const loom_type_t types[] = {nominal, other, owner, borrowed, alias};
   uint16_t ordinals[IREE_ARRAYSIZE(types)];
   for (size_t i = 0; i < IREE_ARRAYSIZE(types); ++i) {
-    IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, types[i],
-                                               &arena_, &ordinals[i]));
+    IREE_ASSERT_OK(Bind(&plan, types[i], &ordinals[i]));
   }
   EXPECT_EQ(plan.count, 2u);
   EXPECT_NE(ordinals[0], ordinals[1]);
@@ -188,8 +198,7 @@ TEST_F(VMReferencePlanTest, InlineModesAndStaticAliasesShareExternalKeys) {
   for (size_t i = 0; i < 10000; ++i) {
     const auto index = i % IREE_ARRAYSIZE(types);
     uint16_t ordinal;
-    IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, types[index],
-                                               &arena_, &ordinal));
+    IREE_ASSERT_OK(Bind(&plan, types[index], &ordinal));
     EXPECT_EQ(ordinal, ordinals[index]);
   }
   EXPECT_EQ(arena_.used_allocation_size, bytes);
@@ -207,8 +216,7 @@ TEST_F(VMReferencePlanTest, AliasesAndRepeatedUsesShareCanonicalOrdinals) {
   loom_vm_reference_plan_t plan = {};
   std::vector<uint16_t> ordinals(names_.size());
   for (uint32_t i = 0; i < names_.size(); ++i) {
-    IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, InternType(i),
-                                               &arena_, &ordinals[i]));
+    IREE_ASSERT_OK(Bind(&plan, InternType(i), &ordinals[i]));
   }
   EXPECT_EQ(plan.count, keys_.size());
   // 172 index entries use 256 buckets; 35 overflow keys use two 32-row chunks.
@@ -219,8 +227,7 @@ TEST_F(VMReferencePlanTest, AliasesAndRepeatedUsesShareCanonicalOrdinals) {
   for (uint32_t i = 0; i < 100000; ++i) {
     uint16_t ordinal = 0;
     const uint32_t index = i % names_.size();
-    IREE_ASSERT_OK(loom_vm_reference_plan_bind(
-        &plan, module_, InternType(index), &arena_, &ordinal));
+    IREE_ASSERT_OK(Bind(&plan, InternType(index), &ordinal));
     EXPECT_EQ(ordinal, ordinals[index]);
   }
   EXPECT_EQ(arena_.used_allocation_size, bytes);
@@ -240,8 +247,7 @@ TEST_F(VMReferencePlanTest, CanonicalOrderCrossesBothSegmentDirectories) {
   std::vector<uint16_t> ordinals(keys_.size());
   std::vector<const loom_type_reference_key_t*> expected;
   for (uint32_t i = 0; i < keys_.size(); ++i) {
-    IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, InternType(i),
-                                               &arena_, &ordinals[i]));
+    IREE_ASSERT_OK(Bind(&plan, InternType(i), &ordinals[i]));
     expected.push_back(&keys_[i]);
   }
   const auto bytes = arena_.used_allocation_size;
@@ -275,12 +281,9 @@ TEST_F(VMReferencePlanTest, SourceNamesRetainTheirFullWidth) {
   ASSERT_EQ(loom_type_dialect_name_id(second) - first_name, 65536u);
   loom_vm_reference_plan_t plan = {};
   uint16_t first_ordinal = 0, second_ordinal = 0, buffer_ordinal = 0;
-  IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, first, &arena_,
-                                             &first_ordinal));
-  IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, second, &arena_,
-                                             &second_ordinal));
-  IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, loom_type_buffer(),
-                                             &arena_, &buffer_ordinal));
+  IREE_ASSERT_OK(Bind(&plan, first, &first_ordinal));
+  IREE_ASSERT_OK(Bind(&plan, second, &second_ordinal));
+  IREE_ASSERT_OK(Bind(&plan, loom_type_buffer(), &buffer_ordinal));
   EXPECT_NE(first_ordinal, second_ordinal);
   EXPECT_NE(first_ordinal, buffer_ordinal);
   EXPECT_NE(second_ordinal, buffer_ordinal);
@@ -300,8 +303,7 @@ TEST_F(VMReferencePlanTest, AllocationFailureAtEachStorageGrowthBoundary) {
     loom_vm_reference_plan_t plan = {};
     uint16_t ordinal = 0;
     for (uint32_t i = 0; i < prior_count; ++i) {
-      IREE_ASSERT_OK(loom_vm_reference_plan_bind(&plan, module_, types[i],
-                                                 &arena_, &ordinal));
+      IREE_ASSERT_OK(Bind(&plan, types[i], &ordinal));
     }
     // Consume the current block's usable tail and release cached free blocks,
     // making the next pooled allocation reach the failing system allocator.
@@ -313,14 +315,27 @@ TEST_F(VMReferencePlanTest, AllocationFailureAtEachStorageGrowthBoundary) {
     }
     iree_arena_block_pool_trim(&pool_);
     fail_allocations_ = true;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        loom_vm_reference_plan_bind(&plan, module_, types[prior_count], &arena_,
-                                    &ordinal));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          Bind(&plan, types[prior_count], &ordinal));
     fail_allocations_ = false;
     // A failed plan is discarded; a fresh invocation reuses the same pool.
     iree_arena_reset(&arena_);
   }
+}
+
+TEST_F(VMReferencePlanTest, MissingIdentityRejectsWithoutDiagnosticCallback) {
+  ASSERT_NO_FATAL_FAILURE(CreateTypes(1, 1));
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("undeclared"), &name));
+  loom_vm_reference_plan_t plan = {};
+  bool bound = true;
+  uint16_t ordinal = 0;
+  IREE_ASSERT_OK(loom_vm_reference_plan_bind(
+      &plan, module_, loom_type_dialect_opaque(name), &arena_, {}, nullptr,
+      &bound, &ordinal));
+  EXPECT_FALSE(bound);
+  EXPECT_EQ(plan.count, 0u);
 }
 
 }  // namespace

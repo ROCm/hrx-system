@@ -22,6 +22,18 @@ package(
 # Target-neutral data shapes
 #===------------------------------------------------------------------------===#
 
+loom_cc_library(
+    name = "artifact_diagnostics",
+    srcs = ["artifact_diagnostics.c"],
+    hdrs = ["artifact_diagnostics.h"],
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//runtime/src/iree/base",
+    ],
+)
+
 # Borrowed target views need only declarations. Implementation libraries also
 # expose their own public headers so direct callers retain layering checks.
 loom_cc_library(

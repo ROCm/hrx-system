@@ -35,6 +35,7 @@ loom_check_test_suite(
 loom_check_test_suite(
     name = "artifact_test",
     srcs = [
+        "artifact_diagnostics.loom-test",
         "buffer_packets.loom-test",
         "buffer_projection.loom-test",
         "call_diagnostics.loom-test",

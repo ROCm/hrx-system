@@ -52,7 +52,9 @@ loom_cc_library(
     hdrs = ["reference_plan.h"],
     deps = [
         ":types",
+        "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:artifact_diagnostics",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
@@ -98,6 +100,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:artifact_diagnostics",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target/arch/vm/descriptors",
         "//runtime/src/iree/base",

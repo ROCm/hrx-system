@@ -1,0 +1,33 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+// ERROR@+1: BACKEND/055 {format="VM", export="untyped", constraint="signature fields carrying scalar or managed reference types"}
+low.func.def public target<vm.core>(@target) @untyped(%value: reg<vm.value>) -> (reg<vm.value>) asm {
+  return %value
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def public target(@target) export("same") @first() {
+  func.return
+}
+
+// ERROR@+1: BACKEND/056 {format="VM", symbol_name="same"}
+func.def public target(@target) export("same") @second() {
+  func.return
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: BACKEND/055 {format="VM", constraint="native callable imports with a module namespace"}
+low.func.decl import(native, "external") target<vm.core>(@target) @external()
+
+low.func.def public target<vm.core>(@target) @caller() asm {
+  low.func.call @external() : ()
+  return
+}
