@@ -62,9 +62,14 @@ iree_status_t loom_amdgpu_kernel_emission_build(
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(target_listing, "\n\n"));
     }
+    bool assembly_accepted = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_kernel_assembly(
         &frame->schedule, &frame->allocation, record, packet_plan,
-        &stream.layout, target_listing, table_arena));
+        &stream.layout, target_listing, table_arena, emitter,
+        &assembly_accepted));
+    if (!assembly_accepted) {
+      return iree_ok_status();
+    }
   }
 
   *out_result = (loom_amdgpu_kernel_emission_result_t){

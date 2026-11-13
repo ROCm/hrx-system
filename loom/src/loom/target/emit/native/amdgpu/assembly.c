@@ -10,6 +10,8 @@
 
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
@@ -459,13 +461,9 @@ static iree_status_t loom_amdgpu_append_delay_alu_dependency(
   } else if (value >= 5 && value <= 7) {
     return iree_string_builder_append_format(
         context->builder, "TRANS32_DEP_%" PRIu8, (uint8_t)(value - 4));
-  } else if (value >= 9 && value <= 11) {
-    return iree_string_builder_append_format(
-        context->builder, "SALU_CYCLE_%" PRIu8, (uint8_t)(value - 8));
   }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "AMDGPU s_delay_alu dependency code %" PRIu8 " is reserved", value);
+  return iree_string_builder_append_format(
+      context->builder, "SALU_CYCLE_%" PRIu8, (uint8_t)(value - 8));
 }
 
 static iree_status_t loom_amdgpu_append_delay_alu_skip(
@@ -473,27 +471,22 @@ static iree_status_t loom_amdgpu_append_delay_alu_skip(
   static const char* const kDelayAluSkipNames[] = {
       "SAME", "NEXT", "SKIP_1", "SKIP_2", "SKIP_3", "SKIP_4",
   };
-  if (value >= IREE_ARRAYSIZE(kDelayAluSkipNames)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU s_delay_alu skip code %" PRIu8 " is reserved", value);
-  }
   return iree_string_builder_append_cstring(context->builder,
                                             kDelayAluSkipNames[value]);
 }
 
 static iree_status_t loom_amdgpu_append_delay_alu_immediate(
     const loom_native_assembly_packet_context_t* context, uint16_t value) {
-  if ((value >> 11) != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU s_delay_alu immediate value 0x%04" PRIx16
-                            " sets reserved high bits",
-                            value);
-  }
-
   const uint8_t instid0 = (uint8_t)(value & 0x000F);
   const uint8_t instskip = (uint8_t)((value >> 4) & 0x0007);
   const uint8_t instid1 = (uint8_t)((value >> 7) & 0x000F);
+
+  // Numeric syntax retains encodings with no portable symbolic field names.
+  if (instid0 == 8 || instid0 > 11 || instid1 == 8 || instid1 > 11 ||
+      instskip > 5) {
+    return iree_string_builder_append_format(context->builder, "0x%03" PRIx16,
+                                             value);
+  }
 
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, "instid0("));
@@ -647,9 +640,19 @@ static iree_status_t loom_amdgpu_append_packet_immediate_gfx12_temporal(
       loom_string_pool_get(&kAmdgpuCacheNativeStrings,
                            kAmdgpuCacheTemporalNames[operation][keyword_index]);
   if (iree_string_view_is_empty(name)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU GFX12 TH value %" PRId64 " is reserved",
-                            temporal);
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(IREE_SV("AMDGPU assembly")),
+        loom_param_string(IREE_SV("th")),
+        loom_param_i64(temporal),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .op = context->packet->node->op,
+        .error = LOOM_ERR_BACKEND_063,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    *context->accepted = false;
+    return iree_diagnostic_emit(context->emitter, &emission);
   }
   return iree_string_builder_append_format(context->builder, " th:%.*s",
                                            (int)name.size, name.data);
@@ -1069,7 +1072,8 @@ static iree_status_t loom_amdgpu_append_native_asm_form_values(
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  for (uint16_t i = 0; i < layout->native_assembly_value_count; ++i) {
+  for (uint16_t i = 0;
+       i < layout->native_assembly_value_count && *context->accepted; ++i) {
     const uint32_t native_value_index = layout->native_assembly_value_start + i;
     IREE_ASSERT_LT(native_value_index, descriptor_set->native_asm_value_count);
     IREE_ASSERT(descriptor_set->native_asm_values != NULL);
@@ -3260,8 +3264,8 @@ static iree_status_t loom_amdgpu_append_structural_packet(
     default:
       break;
   }
-  return loom_native_assembly_make_unsupported_structural_packet_status(
-      IREE_SV("AMDGPU"), context);
+  return loom_native_assembly_emit_unsupported_operation(
+      IREE_SV("AMDGPU assembly"), context);
 }
 
 static loom_native_assembly_format_options_t loom_amdgpu_assembly_options(
@@ -3282,16 +3286,10 @@ static loom_native_assembly_format_options_t loom_amdgpu_assembly_options(
 iree_status_t loom_amdgpu_emit_assembly_fragment(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  return loom_amdgpu_emit_assembly_fragment_with_options(
-      schedule, allocation, /*options=*/NULL, builder, scratch_arena);
-}
-
-iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_assembly_fragment_options_t* options,
-    iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
+    iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted) {
+  *out_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_verify_assembly_target(schedule));
   loom_amdgpu_storage_layout_t derived_storage_layout;
   const loom_amdgpu_storage_layout_t* storage_layout =
@@ -3362,7 +3360,10 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
               .user_data = &emit_state,
           });
   IREE_RETURN_IF_ERROR(loom_native_assembly_format_fragment(
-      schedule, allocation, &format_options, builder, scratch_arena));
+      schedule, allocation, &format_options, builder, emitter, out_accepted));
+  if (!*out_accepted) {
+    return iree_ok_status();
+  }
   if (address_state != NULL) {
     IREE_ASSERT_EQ(emit_state.packet_plan.next_address_state_index,
                    address_state->transition_count);

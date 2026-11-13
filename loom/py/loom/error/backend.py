@@ -1372,6 +1372,32 @@ ERR_BACKEND_061 = ErrorDef(
 )
 
 
+ERR_BACKEND_062 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=62,
+    severity=Severity.ERROR,
+    summary="An operation has no representation in the requested output format.",
+    message="{format} cannot represent operation '{operation_name}'",
+    params=(
+        ErrorParam("format", ParamKind.STRING),
+        ErrorParam("operation_name", ParamKind.STRING),
+    ),
+)
+
+ERR_BACKEND_063 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=63,
+    severity=Severity.ERROR,
+    summary="An immediate has no spelling in the requested output format.",
+    message="{format} has no spelling for immediate '{field_name}' value {value}",
+    params=(
+        ErrorParam("format", ParamKind.STRING),
+        ErrorParam("field_name", ParamKind.STRING),
+        ErrorParam("value", ParamKind.I64),
+    ),
+)
+
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1425,4 +1451,6 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_059,
     ERR_BACKEND_060,
     ERR_BACKEND_061,
+    ERR_BACKEND_062,
+    ERR_BACKEND_063,
 )

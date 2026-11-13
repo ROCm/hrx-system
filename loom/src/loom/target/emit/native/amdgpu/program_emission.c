@@ -201,7 +201,9 @@ static iree_status_t loom_amdgpu_program_emission_append_listing(
     const loom_amdgpu_kernel_plan_t* entry_plan,
     const loom_amdgpu_encoded_instruction_stream_t* entry_stream,
     bool include_artifact_functions, iree_string_builder_t* target_listing,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted) {
+  *out_accepted = true;
   if (target_listing == NULL) {
     return iree_ok_status();
   }
@@ -249,7 +251,7 @@ static iree_status_t loom_amdgpu_program_emission_append_listing(
   }
   return loom_amdgpu_emit_kernel_program_assembly(
       &entry_plan->record, functions, function_count, target_listing,
-      scratch_arena);
+      scratch_arena, emitter, out_accepted);
 }
 
 static iree_status_t loom_amdgpu_program_emission_build_internal(
@@ -307,9 +309,14 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
       root, &entry_stream, entry_envelope->text.data_length, table_arena,
       &call_fixups));
 
+  bool assembly_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_append_listing(
       compilation, artifact_emission, entry_plan, &entry_stream,
-      include_artifact_functions_in_listing, target_listing, scratch_arena));
+      include_artifact_functions_in_listing, target_listing, scratch_arena,
+      emitter, &assembly_accepted));
+  if (!assembly_accepted) {
+    return iree_ok_status();
+  }
 
   *out_result = (loom_amdgpu_kernel_emission_result_t){
       .kernel =

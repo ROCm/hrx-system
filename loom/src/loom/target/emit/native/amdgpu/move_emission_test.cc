@@ -108,8 +108,11 @@ class AmdgpuMoveEmissionTest : public ::testing::Test {
 TEST_F(AmdgpuMoveEmissionTest, HighBankExchangeMatchesAssemblyAndEncoding) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
-  IREE_ASSERT_OK(loom_amdgpu_emit_assembly_fragment(&schedule_, &allocation_,
-                                                    &builder, &arena_));
+  bool assembly_accepted = false;
+  IREE_ASSERT_OK(loom_amdgpu_emit_assembly_fragment(
+      &schedule_, &allocation_, /*options=*/nullptr, &builder, &arena_,
+      /*emitter=*/{}, &assembly_accepted));
+  ASSERT_TRUE(assembly_accepted);
   const iree_string_view_t assembly = iree_string_builder_view(&builder);
   EXPECT_EQ(std::string(assembly.data, assembly.size),
             "  s_set_vgpr_msb 3\n"

@@ -189,8 +189,9 @@ static iree_status_t loom_amdgpu_loom_check_emit_assembly(
       .packet_plan = &packet_plan,
       .instruction_layout = &stream.layout,
   };
-  return loom_amdgpu_emit_assembly_fragment_with_options(
-      &frame->schedule, &frame->allocation, &assembly_options, builder, arena);
+  return loom_amdgpu_emit_assembly_fragment(
+      &frame->schedule, &frame->allocation, &assembly_options, builder, arena,
+      emitter, &accepted);
 }
 
 static iree_status_t loom_amdgpu_loom_check_encode_native(
