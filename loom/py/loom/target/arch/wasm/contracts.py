@@ -1402,6 +1402,54 @@ def _view_carrier_rules() -> Iterable[DescriptorRule]:
                 )
 
 
+def _buffer_compare_address_rules() -> tuple[DescriptorRule, ...]:
+    # Widen before adding: memory32's valid one-past endpoint can be 2**32
+    # and must not wrap onto the null address.
+    emits = []
+    for side in ("lhs", "rhs"):
+        emits.extend(
+            EmitDescriptorOp(
+                descriptor=_descriptor("wasm.i64.extend_i32_u"),
+                operands={"input": ValueRef.operand(field)},
+                results={"dst": ValueRef.temporary(f"{field}_wide")},
+                result_types={"dst": _I64},
+                form=DescriptorEmitForm.OP,
+            )
+            for field in (side, f"{side}_offset")
+        )
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=_descriptor("wasm.i64.add"),
+                operands={
+                    "lhs": ValueRef.temporary(f"{side}_wide"),
+                    "rhs": ValueRef.temporary(f"{side}_offset_wide"),
+                },
+                results={"dst": ValueRef.temporary(f"{side}_address")},
+                result_types={"dst": _I64},
+                form=DescriptorEmitForm.OP,
+            )
+        )
+    return tuple(
+        DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=(Guard.enum_attr_equals("predicate", predicate),),
+            emit=(
+                *emits,
+                EmitDescriptorOp(
+                    descriptor=_descriptor(f"wasm.i64.{predicate}"),
+                    operands={
+                        "lhs": ValueRef.temporary("lhs_address"),
+                        "rhs": ValueRef.temporary("rhs_address"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        )
+        for predicate in ("eq", "ne")
+    )
+
+
 def _buffer_byte_address_emits(
     buffer_field: str,
 ) -> tuple[ValueRef, tuple[EmitDescriptorOp, ...]]:
@@ -1599,6 +1647,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
     cases=(
         *uniform_shift_rules(),
         *_view_carrier_rules(),
+        *_buffer_compare_address_rules(),
         ValueAliasRule(
             source_op=view.view_refine,
             source=ValueRef.operand("source"),

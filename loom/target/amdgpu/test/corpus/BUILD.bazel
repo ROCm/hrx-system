@@ -46,6 +46,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "memory/buffer/buffers.loom",
     "memory/buffer/masked_memory.loom",
     "memory/buffer/null.loom",
+    "memory/buffer/positions.loom",
     "memory/buffer/packing.loom",
     "memory/buffer/selection.loom",
     "memory/packed/transport.loom",

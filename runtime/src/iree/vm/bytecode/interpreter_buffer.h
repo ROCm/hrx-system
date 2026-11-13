@@ -43,6 +43,21 @@ static inline iree_status_t iree_vm_bytecode_buffer_map_range(
                                   (iree_host_size_t)length, out_span);
 }
 
+// Compares bounded positions without narrowing an unrepresentable VM offset.
+// Native addresses remain private to the buffer implementation.
+static inline iree_status_t iree_vm_bytecode_buffer_compare_address(
+    const iree_vm_buffer_t* left, uint64_t left_offset,
+    const iree_vm_buffer_t* right, uint64_t right_offset, bool* out_equal) {
+  if (left_offset > IREE_HOST_SIZE_MAX || right_offset > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "buffer position is not representable on this host");
+  }
+  return iree_vm_buffer_compare_address(left, (iree_host_size_t)left_offset,
+                                        right, (iree_host_size_t)right_offset,
+                                        out_equal);
+}
+
 // Maps one naturally aligned READ|WRITE atomic carrier range. The address is
 // published only after range, liveness, rights, and concrete alignment checks
 // all succeed.

@@ -166,10 +166,10 @@ enum loom_amdgpu_i1_compare_flag_bits_e {
 };
 
 typedef struct loom_amdgpu_i1_compare_values_t {
-  // First source operand of the comparison.
-  loom_value_id_t lhs;
-  // Second source operand, or the first again for a unary predicate.
-  loom_value_id_t rhs;
+  // Borrowed operands contributing to the comparison result.
+  const loom_value_id_t* operands;
+  // Number of contributing source operands.
+  uint16_t operand_count;
   // Placement constraints implied by the comparison operation.
   loom_amdgpu_i1_compare_flags_t flags;
 } loom_amdgpu_i1_compare_values_t;
@@ -178,20 +178,19 @@ static bool loom_amdgpu_i1_compare_values(
     const loom_module_t* module,
     const loom_amdgpu_source_value_analysis_t* analysis,
     const loom_op_t* source_op, loom_amdgpu_i1_compare_values_t* out_values) {
-  out_values->lhs = LOOM_VALUE_ID_INVALID;
-  out_values->rhs = LOOM_VALUE_ID_INVALID;
+  out_values->operands = NULL;
+  out_values->operand_count = 0;
   out_values->flags = 0;
   const loom_amdgpu_source_producer_flags_t producer_flags =
       loom_amdgpu_source_producer_flags(source_op->kind);
   if (!iree_any_bit_set(producer_flags,
                         LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE) ||
-      (source_op->operand_count != 1 && source_op->operand_count != 2) ||
-      source_op->result_count != 1) {
+      source_op->operand_count == 0 || source_op->result_count != 1) {
     return false;
   }
   const loom_value_id_t* operands = loom_op_const_operands(source_op);
-  out_values->lhs = operands[0];
-  out_values->rhs = operands[source_op->operand_count - 1];
+  out_values->operands = operands;
+  out_values->operand_count = source_op->operand_count;
   if (iree_any_bit_set(
           producer_flags,
           LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL)) {
@@ -200,7 +199,7 @@ static bool loom_amdgpu_i1_compare_values(
   if (iree_any_bit_set(producer_flags,
                        LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_COMPARE)) {
     const loom_scalar_type_t element_type =
-        loom_type_element_type(loom_module_value_type(module, out_values->lhs));
+        loom_type_element_type(loom_module_value_type(module, operands[0]));
     if (analysis != NULL &&
         (element_type == LOOM_SCALAR_TYPE_F16 ||
          element_type == LOOM_SCALAR_TYPE_F32) &&
@@ -218,10 +217,14 @@ static bool loom_amdgpu_i1_compare_values(
 static bool loom_amdgpu_i1_compare_has_direct_vgpr_operand(
     const loom_module_t* module, const loom_amdgpu_i1_compare_values_t* values,
     loom_value_id_t excluded_value_id) {
-  return loom_amdgpu_source_value_directly_prefers_vgpr(
-             module, /*fact_table=*/NULL, values->lhs, excluded_value_id) ||
-         loom_amdgpu_source_value_directly_prefers_vgpr(
-             module, /*fact_table=*/NULL, values->rhs, excluded_value_id);
+  for (uint16_t i = 0; i < values->operand_count; ++i) {
+    if (loom_amdgpu_source_value_directly_prefers_vgpr(
+            module, /*fact_table=*/NULL, values->operands[i],
+            excluded_value_id)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static bool loom_amdgpu_i1_compare_has_vgpr_operand(
@@ -229,10 +232,13 @@ static bool loom_amdgpu_i1_compare_has_vgpr_operand(
     const loom_view_region_table_t* view_regions,
     loom_amdgpu_source_value_analysis_t* analysis,
     const loom_amdgpu_i1_compare_values_t* values) {
-  return loom_amdgpu_analyzed_source_value_prefers_vgpr(
-             module, fact_table, view_regions, analysis, values->lhs) ||
-         loom_amdgpu_analyzed_source_value_prefers_vgpr(
-             module, fact_table, view_regions, analysis, values->rhs);
+  for (uint16_t i = 0; i < values->operand_count; ++i) {
+    if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
+            module, fact_table, view_regions, analysis, values->operands[i])) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static bool loom_amdgpu_query_secondary_i1_native_mask(

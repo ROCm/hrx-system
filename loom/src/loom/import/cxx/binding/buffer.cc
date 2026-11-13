@@ -76,7 +76,7 @@ bool BufferIntrinsic::supports(std::string_view name) {
          name == "buffer.assume.noalias" ||
          name == "buffer.assume.memory_space" || name == "buffer.cast" ||
          name == "buffer.root" || name == "buffer.null" ||
-         name == "buffer.compare.null";
+         name == "buffer.compare.null" || name == "buffer.compare.address";
 }
 
 std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
@@ -115,6 +115,33 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
     return BufferIntrinsic(
         construct ? Operation::Null : Operation::CompareNull,
         construct ? &static_cast<const BufferPartition&>(partition) : nullptr);
+  }
+  if (name == "buffer.compare.address") {
+    if (attribute.arguments.size() != 1 || signature->isVariadic() ||
+        parameters.size() != 4 ||
+        types.partition(parameters[0], owner).kind != ValueKind::Buffer ||
+        !types.is_offset(parameters[1], owner) ||
+        types.partition(parameters[2], owner).kind != ValueKind::Buffer ||
+        !types.is_offset(parameters[3], owner) ||
+        types.unqualified(signature->returnType())->kind() !=
+            cxx::TypeKind::kBool) {
+      diagnostics.reject(unit, owner,
+                         "buffer.compare.address requires two typed buffer "
+                         "and offset pairs and a bool result");
+    }
+    auto arguments = function->templateArguments();
+    auto value = arguments.empty() ? std::nullopt
+                                   : cxx::template_argument_value(arguments[0]);
+    auto* predicate = value ? std::get_if<cxx::ConstInt>(&*value) : nullptr;
+    if (!predicate || predicate->isNegative() || predicate->toUWide() > 1) {
+      diagnostics.reject(unit, owner,
+                         "buffer.compare.address requires an eq or ne "
+                         "predicate as its first template argument");
+    }
+    return BufferIntrinsic(predicate->toUWide() == 0
+                               ? Operation::CompareAddressEqual
+                               : Operation::CompareAddressUnequal,
+                           nullptr);
   }
   if (name == "buffer.cast" || name == "buffer.root") {
     if (attribute.arguments.size() != 1 || signature->isVariadic() ||
@@ -409,6 +436,13 @@ Value BufferIntrinsic::call(std::span<const Value> arguments, ValueArena& arena,
   }
   if (operation_ == Operation::CompareNull) {
     return storage.compare_null(arguments[0].ssa(), true, owner);
+  }
+  if (operation_ == Operation::CompareAddressEqual ||
+      operation_ == Operation::CompareAddressUnequal) {
+    return storage.compare_address({arguments[0].ssa(), arguments[1].ssa()},
+                                   {arguments[2].ssa(), arguments[3].ssa()},
+                                   operation_ == Operation::CompareAddressEqual,
+                                   owner);
   }
   if (operation_ == Operation::Cast) {
     return arena.capture(*result_buffer_, arguments[0].components());

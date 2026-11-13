@@ -209,6 +209,36 @@ iree_status_t loom_buffer_compare_null_facts(
   return iree_ok_status();
 }
 
+iree_status_t loom_buffer_compare_address_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_make(0, 1, 1);
+  loom_value_fact_buffer_reference_t lhs = {0};
+  loom_value_fact_buffer_reference_t rhs = {0};
+  if (loom_value_facts_query_buffer_reference(context, operand_facts[0],
+                                              &lhs) &&
+      loom_value_facts_query_buffer_reference(context, operand_facts[2],
+                                              &rhs) &&
+      lhs.nullability != LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN &&
+      rhs.nullability != LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN &&
+      (lhs.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL ||
+       rhs.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL)) {
+    const bool equal = lhs.nullability == rhs.nullability;
+    result_facts[0] = loom_value_facts_exact_i64(
+        equal != (loom_buffer_compare_address_predicate(op) ==
+                  LOOM_BUFFER_COMPARE_ADDRESS_PREDICATE_NE));
+  }
+  loom_value_facts_propagate_ternary_distribution(
+      operand_facts[0], operand_facts[1], operand_facts[2], &result_facts[0]);
+  loom_value_facts_propagate_binary_distribution(
+      result_facts[0], operand_facts[3], &result_facts[0]);
+  if (loom_value_facts_is_lane_varying(result_facts[0])) {
+    loom_value_facts_mark_lane_predicate(&result_facts[0]);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_buffer_constant_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,

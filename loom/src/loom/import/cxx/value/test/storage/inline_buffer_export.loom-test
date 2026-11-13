@@ -1,19 +1,19 @@
-// RUN: emit cxx
+// RUN: emit cxx roundtrip
 // REQUIRES: loom-export-cxx
 kernel.def @payloads() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%output: buffer, %position: index) {
-  %raw = buffer.constant align(16) bytes("006666ff415c22") : buffer
+  %raw = buffer.constant align(16) bytes("00313233ff415c22") : buffer
   %text = buffer.constant utf8("café 🧵\n\u0000") : buffer
   %empty = buffer.constant bytes("") : buffer
   %empty_text = buffer.constant utf8("") : buffer
   %scratch = buffer.alloca.init<private> align(4) bytes("61626364") : buffer
   %shared = buffer.alloca.init<workgroup> align(16) utf8("abcd") : buffer
   %c0 = index.constant 0 : offset
-  %source = buffer.view %raw[%c0] : buffer -> view<7xi8>
+  %source = buffer.view %raw[%c0] : buffer -> view<8xi8>
   %destination = buffer.view %output[%c0] : buffer -> view<1xi8>
-  %value = view.load %source[%position] : view<7xi8> -> i8
+  %value = view.load %source[%position] : view<8xi8> -> i8
   view.store %value, %destination[0] : i8, view<1xi8>
   kernel.return
 }
@@ -23,13 +23,13 @@ kernel.def @payloads() {
 
 [[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
 void payloads(unsigned char* output, loom::type::index position) {
-  auto* raw = loom::buffer::constant<16>("\000ff\377A\\\"");
+  auto* raw = loom::buffer::constant<16>("\000123\377A\\\"");
   auto* text = loom::buffer::constant<1>(u8"café 🧵\n\000");
   auto* empty = loom::buffer::constant<1>("");
   auto* empty_text = loom::buffer::constant<1>(u8"");
   auto* scratch = loom::buffer::alloca_init<loom::memory_space::private_, 4>("abcd");
   auto* shared = loom::buffer::alloca_init<loom::memory_space::workgroup, 16>(u8"abcd");
-  auto source = loom::buffer::view<7>(raw, {});
+  auto source = loom::buffer::view<8>(raw, {});
   auto destination = loom::buffer::view<1>(output, {});
   unsigned char value = loom::view::load(source, position);
   loom::view::store(value, destination, 0);

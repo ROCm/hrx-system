@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
 
@@ -32,6 +31,7 @@ loom_check_test_suite(
         "opaque_pointers.cxx-test",
         "opaque_pointers_invalid.cxx-test",
         "packed_memory.cxx-test",
+        "pointer_equality.cxx-test",
         "pointer_origins.cxx-test",
         "pointer_updates.cxx-test",
         "pointer_walk.cxx-test",
@@ -66,18 +66,4 @@ loom_check_test(
     },
     tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-iree_cli_test(
-    name = "inline_buffer_roundtrip_test",
-    manifests = ["inline_buffer_roundtrip.test.json"],
-    tags = [
-        "hostonly",
-        "skip-bazel_to_cmake",
-    ],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    tools = {
-        "loom-export-cxx": "//loom/py/loom/tools:loom-export-cxx",
-        "loom-import-cxx": "//loom/src/loom/tools/loom-import-cxx",
-    },
 )

@@ -55,6 +55,8 @@ from loom.dsl import (
     BorrowedResult,
     CachePolicyInterface,
     Dialect,
+    EnumCase,
+    EnumDef,
     LegacyFormat,
     MemoryAccessInterface,
     Op,
@@ -150,6 +152,61 @@ buffer_compare_null = Op(
     eager_execution_cost=1,
     format=[Ref("buffer"), COLON, TypeOf("buffer")],
     examples=["%missing = buffer.compare.null %input : buffer"],
+)
+
+BufferAddressPredicate = EnumDef(
+    "BufferAddressPredicate",
+    [
+        EnumCase("eq", 0, doc="Equal positions."),
+        EnumCase("ne", 1, doc="Unequal positions."),
+    ],
+    doc="Equality predicates for opaque buffer positions.",
+)
+
+buffer_compare_address = Op(
+    name="buffer.compare.address",
+    group=buffer_ops,
+    doc=(
+        "Compare two byte positions without exposing their addresses. Each "
+        "nonnull buffer must be live and its offset must be in bounds or at "
+        "the one-past endpoint. A null buffer permits only offset zero and "
+        "differs from every nonnull buffer, including empty storage. Aliased "
+        "buffers compare by their selected positions, not wrapper identity. "
+        "An empty root without native storage retains a distinct logical "
+        "position shared by its subspans. The operation reads no payload "
+        "bytes and changes no ownership."
+    ),
+    operands=[
+        Operand("lhs", BUFFER, doc="Left storage reference."),
+        Operand("lhs_offset", OFFSET, doc="Left byte position."),
+        Operand("rhs", BUFFER, doc="Right storage reference."),
+        Operand("rhs_offset", OFFSET, doc="Right byte position."),
+    ],
+    results=[Result("result", I1, doc="Result of the selected predicate.")],
+    attrs=[AttrDef("predicate", ATTR_TYPE_ENUM, enum_def=BufferAddressPredicate)],
+    traits=[PURE],
+    ownership_effects=[Borrow("lhs"), Borrow("rhs")],
+    canonicalize="loom_buffer_compare_address_canonicalize",
+    facts="loom_buffer_compare_address_facts",
+    format=[
+        Attr("predicate"),
+        COMMA,
+        Ref("lhs"),
+        GLUE,
+        LBRACKET,
+        Ref("lhs_offset"),
+        RBRACKET,
+        COMMA,
+        Ref("rhs"),
+        GLUE,
+        LBRACKET,
+        Ref("rhs_offset"),
+        RBRACKET,
+    ],
+    examples=[
+        "%done = buffer.compare.address eq, %cursor[%position], %end[%limit]",
+        "%more = buffer.compare.address ne, %cursor[%position], %end[%limit]",
+    ],
 )
 
 # ============================================================================
@@ -825,4 +882,5 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_duplicate,
     buffer_null,
     buffer_compare_null,
+    buffer_compare_address,
 )

@@ -1,0 +1,268 @@
+// Runtime-selected roots and byte positions retain equality through a helper.
+func.def @same_position(%left: buffer, %left_offset: offset, %right: buffer, %right_offset: offset) -> (i1) {
+  %same = buffer.compare.address eq, %left[%left_offset], %right[%right_offset]
+  func.return %same : i1
+}
+
+func.def @position_observations(%ordinals: buffer, %first: buffer, %second: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %controls = buffer.view %ordinals[%origin] : buffer -> view<18xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<18x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 18 : index
+  %step = index.constant 1 : index
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c0 = scalar.constant 0 : i32
+  %endpoint = index.constant 8 : offset
+  %mask = scalar.constant 7 : i32
+  scf.for %row = [%begin to %end step %step] {
+    %ordinal = view.load %controls[%row] : view<18xi32> -> i32
+    %bounded = scalar.assume %ordinal [range(%ordinal, 0, 17)] : i32
+    %parity = scalar.andi %bounded, %c1 : i32
+    %use_first = scalar.cmpi eq, %parity, %c0 : i32
+    %word = scalar.divui %bounded, %c2 : i32
+    %position = index.cast %word : i32 to offset
+    %selected = scf.select %use_first, %first, %second : buffer
+    %same = func.call @same_position(%selected, %position, %first, %position) : (buffer, offset, buffer, offset) -> (i1)
+    %different = buffer.compare.address ne, %selected[%position], %first[%position]
+    %at_end = buffer.compare.address eq, %selected[%position], %selected[%endpoint]
+    %interior_word = scalar.andi %word, %mask : i32
+    %interior = index.cast %interior_word : i32 to offset
+    %at_begin = buffer.compare.address eq, %selected[%interior], %first[%origin]
+    %begin_word = scalar.extui %at_begin : i1 to i32
+    %same_word = scalar.extui %same : i1 to i32
+    %different_word = scalar.extui %different : i1 to i32
+    %at_end_word = scalar.extui %at_end : i1 to i32
+    view.store %same_word, %results[%row, 0] : i32, view<18x4xi32>
+    view.store %different_word, %results[%row, 1] : i32, view<18x4xi32>
+    view.store %at_end_word, %results[%row, 2] : i32, view<18x4xi32>
+    view.store %begin_word, %results[%row, 3] : i32, view<18x4xi32>
+  }
+  func.return
+}
+
+// The oracle derives all results from runtime ordinals without constructing
+// selected pointers or comparing addresses. Both roots have the same extent,
+// so distinct roots' equal offsets cannot meet through endpoint adjacency.
+func.def @position_oracle(%ordinals: buffer, %first: buffer, %second: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %controls = buffer.view %ordinals[%origin] : buffer -> view<18xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<18x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 18 : index
+  %step = index.constant 1 : index
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %endpoint_word = scalar.constant 8 : i32
+  %mask = scalar.constant 7 : i32
+  %c0 = scalar.constant 0 : i32
+  scf.for %row = [%begin to %end step %step] {
+    %ordinal = view.load %controls[%row] : view<18xi32> -> i32
+    %different = scalar.andi %ordinal, %c1 : i32
+    %same = scalar.xori %different, %c1 : i32
+    %position = scalar.divui %ordinal, %c2 : i32
+    %last = scalar.cmpi eq, %position, %endpoint_word : i32
+    %last_word = scalar.extui %last : i1 to i32
+    %interior = scalar.andi %position, %mask : i32
+    %first_position = scalar.cmpi eq, %interior, %c0 : i32
+    %first_word = scalar.extui %first_position : i1 to i32
+    %at_begin = scalar.andi %same, %first_word : i32
+    view.store %same, %results[%row, 0] : i32, view<18x4xi32>
+    view.store %different, %results[%row, 1] : i32, view<18x4xi32>
+    view.store %last_word, %results[%row, 2] : i32, view<18x4xi32>
+    view.store %at_begin, %results[%row, 3] : i32, view<18x4xi32>
+  }
+  func.return
+}
+
+check.scenario @buffer_position_equality {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %ordinals = check.generate.iota offset(0) step(1) : tensor<18xi32>
+    %first = check.generate.fill value(17) : tensor<8xi8>
+    %second = check.generate.fill value(23) : tensor<8xi8>
+    %output = check.generate.fill value(-1) : tensor<18x4xi32>
+    check.compare<@position_observations, @position_oracle>(%ordinals, %first, %second, %output) : (tensor<18xi32>, tensor<8xi8>, tensor<8xi8>, tensor<18x4xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<18x4xi32>
+    }
+  }
+  check.return
+}
+
+// Internal storage exercises native segment/SRAM identities independently of
+// how the execution profile transports external host buffers.
+func.def @local_position_observations(%ordinals: buffer, %output: buffer) {
+  %extent = index.constant 8 : offset
+  %first = buffer.alloca<private> align(8) %extent : buffer
+  %second = buffer.alloca<private> align(8) %extent : buffer
+  func.call @position_observations(%ordinals, %first, %second, %output) : (buffer, buffer, buffer, buffer)
+  func.return
+}
+
+func.def @local_position_oracle(%ordinals: buffer, %output: buffer) {
+  func.call @position_oracle(%ordinals, %output, %output, %output) : (buffer, buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario @local_position_equality {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %ordinals = check.generate.iota offset(0) step(1) : tensor<18xi32>
+    %output = check.generate.fill value(-1) : tensor<18x4xi32>
+    check.compare<@local_position_observations, @local_position_oracle>(%ordinals, %output) : (tensor<18xi32>, tensor<18x4xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<18x4xi32>
+    }
+  }
+  check.return
+}
+
+// Shared typed allocations may be packed into one physical arena. Interior
+// positions from distinct allocations remain distinct even when their authored
+// displacements are equal. A differently typed allocation exercises a separate
+// logical arena on targets that preserve typed storage.
+func.def @shared_position_observations(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<2xi32>
+  %left_word = view.load %inputs[0] : view<2xi32> -> i32
+  %right_word = view.load %inputs[1] : view<2xi32> -> i32
+  %left_bounded = scalar.assume %left_word [range(%left_word, 0, 15)] : i32
+  %right_bounded = scalar.assume %right_word [range(%right_word, 0, 15)] : i32
+  %left = index.cast %left_bounded : i32 to offset
+  %right = index.cast %right_bounded : i32 to offset
+  %extent = index.constant 16 : offset
+  %first = buffer.alloca<workgroup> align(16) %extent : buffer
+  %second = buffer.alloca<workgroup> align(16) %extent : buffer
+  %floats = buffer.alloca<workgroup> align(16) %extent : buffer
+  %first_view = buffer.view %first[%origin] : buffer -> view<4xi32>
+  %second_view = buffer.view %second[%origin] : buffer -> view<4xi32>
+  %float_view = buffer.view %floats[%origin] : buffer -> view<4xf32>
+  %number = scalar.constant 1.0 : f32
+  view.store<volatile> %left_bounded, %first_view[0] : i32, view<4xi32>
+  view.store<volatile> %right_bounded, %second_view[0] : i32, view<4xi32>
+  view.store<volatile> %number, %float_view[0] : f32, view<4xf32>
+  %equal = buffer.compare.address eq, %first[%left], %second[%right]
+  %different = buffer.compare.address ne, %first[%left], %second[%right]
+  %typed = buffer.compare.address eq, %first[%left], %floats[%right]
+  %equal_word = scalar.extui %equal : i1 to i32
+  %different_word = scalar.extui %different : i1 to i32
+  %typed_word = scalar.extui %typed : i1 to i32
+  %results = buffer.view %output[%origin] : buffer -> view<3xi32>
+  view.store %equal_word, %results[0] : i32, view<3xi32>
+  view.store %different_word, %results[1] : i32, view<3xi32>
+  view.store %typed_word, %results[2] : i32, view<3xi32>
+  func.return
+}
+
+func.def @distinct_positions_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<3xi32>
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  view.store %c0, %results[0] : i32, view<3xi32>
+  view.store %c1, %results[1] : i32, view<3xi32>
+  view.store %c0, %results[2] : i32, view<3xi32>
+  func.return
+}
+
+check.scenario @shared_position_equality {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %positions = check.generate.random.uniform seed(%seed) range(0 to 15) : tensor<2xi32>
+    %output = check.generate.fill value(-1) : tensor<3xi32>
+    check.compare<@shared_position_observations, @distinct_positions_oracle>(%positions, %output) : (tensor<2xi32>, tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3xi32>
+    }
+  }
+  check.return
+}
+
+// Matching numerical coordinates in distinct segment address spaces must not
+// become equal pointers. The externally supplied input is live global storage.
+func.def @storage_domain_observations(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 16 : offset
+  %local = buffer.alloca<private> align(16) %extent : buffer
+  %shared = buffer.alloca<workgroup> align(16) %extent : buffer
+  %equal = buffer.compare.address eq, %local[%origin], %shared[%origin]
+  %different = buffer.compare.address ne, %local[%origin], %input[%origin]
+  %global_equal = buffer.compare.address eq, %input[%origin], %shared[%origin]
+  %equal_word = scalar.extui %equal : i1 to i32
+  %different_word = scalar.extui %different : i1 to i32
+  %global_word = scalar.extui %global_equal : i1 to i32
+  %results = buffer.view %output[%origin] : buffer -> view<3xi32>
+  view.store %equal_word, %results[0] : i32, view<3xi32>
+  view.store %different_word, %results[1] : i32, view<3xi32>
+  view.store %global_word, %results[2] : i32, view<3xi32>
+  func.return
+}
+
+check.scenario @storage_domain_equality {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(17) : tensor<8xi8>
+    %output = check.generate.fill value(-1) : tensor<3xi32>
+    check.compare<@storage_domain_observations, @distinct_positions_oracle>(%input, %output) : (tensor<8xi8>, tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3xi32>
+    }
+  }
+  check.return
+}
+
+// Runtime i64 inputs keep full-width byte displacements through target planning;
+// the small actual positions permit execution without a giant allocation.
+func.def @wide_position_observations(%positions: buffer, %first: buffer, %second: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %positions[%origin] : buffer -> view<2xi64>
+  %left_word = view.load %inputs[0] : view<2xi64> -> i64
+  %right_word = view.load %inputs[1] : view<2xi64> -> i64
+  %left_unsigned = scalar.assume %left_word [range(%left_word, 0, 9223372036854775807)] : i64
+  %right_unsigned = scalar.assume %right_word [range(%right_word, 0, 9223372036854775807)] : i64
+  %left = index.cast %left_unsigned : i64 to offset
+  %right = index.cast %right_unsigned : i64 to offset
+  %c1 = scalar.constant 1 : i64
+  %c0 = scalar.constant 0 : i64
+  %parity = scalar.andi %left_word, %c1 : i64
+  %use_first = scalar.cmpi eq, %parity, %c0 : i64
+  %selected = scf.select %use_first, %first, %second : buffer
+  %equal = buffer.compare.address eq, %selected[%left], %first[%right]
+  %different = buffer.compare.address ne, %selected[%left], %first[%right]
+  %equal_word = scalar.extui %equal : i1 to i32
+  %different_word = scalar.extui %different : i1 to i32
+  %results = buffer.view %output[%origin] : buffer -> view<2xi32>
+  view.store %equal_word, %results[0] : i32, view<2xi32>
+  view.store %different_word, %results[1] : i32, view<2xi32>
+  func.return
+}
+
+func.def @wide_position_oracle(%positions: buffer, %first: buffer, %second: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %positions[%origin] : buffer -> view<2xi64>
+  %left = view.load %inputs[0] : view<2xi64> -> i64
+  %right = view.load %inputs[1] : view<2xi64> -> i64
+  %c1 = scalar.constant 1 : i64
+  %c0 = scalar.constant 0 : i64
+  %parity = scalar.andi %left, %c1 : i64
+  %use_first = scalar.cmpi eq, %parity, %c0 : i64
+  %same_offset = scalar.cmpi eq, %left, %right : i64
+  %equal = scalar.andi %use_first, %same_offset : i1
+  %true = scalar.constant true : i1
+  %different = scalar.xori %equal, %true : i1
+  %equal_word = scalar.extui %equal : i1 to i32
+  %different_word = scalar.extui %different : i1 to i32
+  %results = buffer.view %output[%origin] : buffer -> view<2xi32>
+  view.store %equal_word, %results[0] : i32, view<2xi32>
+  view.store %different_word, %results[1] : i32, view<2xi32>
+  func.return
+}
+
+check.scenario @wide_position_equality {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %positions = check.generate.random.uniform seed(%seed) range(0 to 7) : tensor<2xi64>
+    %first = check.generate.fill value(17) : tensor<8xi8>
+    %second = check.generate.fill value(23) : tensor<8xi8>
+    %output = check.generate.fill value(-1) : tensor<2xi32>
+    check.compare<@wide_position_observations, @wide_position_oracle>(%positions, %first, %second, %output) : (tensor<2xi64>, tensor<8xi8>, tensor<8xi8>, tensor<2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+    }
+  }
+  check.return
+}

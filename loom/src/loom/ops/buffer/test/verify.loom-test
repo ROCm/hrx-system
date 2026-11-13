@@ -61,3 +61,19 @@ func.def @store_i8_requires_i32(%value: i8, %target: buffer, %byte_offset: offse
   buffer.store.i8 %value, %target[%byte_offset]
   func.return
 }
+
+// ====
+
+func.def @positions_do_not_order_roots(%lhs: buffer, %rhs: buffer, %position: offset) {
+  // ERROR@+1: PARSE/017 "predicate"
+  %before = buffer.compare.address ult, %lhs[%position], %rhs[%position]
+  func.return
+}
+
+// ====
+
+func.def @positions_require_byte_offsets(%lhs: buffer, %rhs: buffer, %position: index, %origin: offset) -> (i1) {
+  // ERROR@+1: TYPE/003 "lhs_offset" "index" "offset"
+  %equal = buffer.compare.address eq, %lhs[%position], %rhs[%origin]
+  func.return %equal : i1
+}

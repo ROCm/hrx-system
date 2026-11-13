@@ -176,6 +176,7 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
+    RecipeRule,
     ResultTypeBinding,
     Scalar,
     SourceMemoryAddressCoordinateType,
@@ -749,6 +750,47 @@ def _buffer_view_rule(
                 else ()
             ),
         ),
+    )
+
+
+def _buffer_compare_address_rules() -> tuple[DescriptorRule, ...]:
+    addresses = tuple(
+        EmitDescriptorOp(
+            descriptor=_descriptor("spirv.op_iadd.storage_buffer.byte_offset"),
+            operands={
+                "lhs": ValueRef.operand(side),
+                "rhs": ValueRef.operand(f"{side}_offset"),
+            },
+            results={"dst": ValueRef.temporary(f"{side}_address")},
+            result_types={"dst": DescriptorResultType()},
+            form=DescriptorEmitForm.OP,
+        )
+        for side in ("lhs", "rhs")
+    )
+    return tuple(
+        DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=(
+                Guard.enum_attr_equals("predicate", predicate),
+                *(
+                    Guard.value_memory_space(side, _STORAGE_BUFFER_MEMORY_SPACES)
+                    for side in ("lhs", "rhs")
+                ),
+            ),
+            emit=(
+                *addresses,
+                EmitDescriptorOp(
+                    descriptor=_descriptor(f"spirv.op_{suffix}.storage_buffer"),
+                    operands={
+                        "lhs": ValueRef.temporary("lhs_address"),
+                        "rhs": ValueRef.temporary("rhs_address"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        )
+        for predicate, suffix in (("eq", "iequal"), ("ne", "inotequal"))
     )
 
 
@@ -1463,6 +1505,14 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,
         *_compare_rules(),
         *_select_rules(),
+        *(
+            RecipeRule(
+                source_op=buffer.buffer_compare_address,
+                guards=(Guard.value_memory_space(side, _WORKGROUP_MEMORY_SPACES),),
+            )
+            for side in ("lhs", "rhs")
+        ),
+        *_buffer_compare_address_rules(),
         _raw_storage_buffer_byte_load_rule(),
         _raw_storage_buffer_byte_store_rule(),
         DescriptorRule(

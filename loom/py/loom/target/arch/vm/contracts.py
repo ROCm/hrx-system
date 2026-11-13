@@ -16,6 +16,8 @@ from iree.vm.bytecode.spec.isa.core.buffer import (
     BUFFER_ATOMIC_RMW,
     BUFFER_ATOMIC_SCOPE_SELECTOR,
     BUFFER_COMPARE,
+    BUFFER_COMPARE_ADDRESS,
+    BUFFER_COMPARE_ADDRESS_SELECTOR,
     BUFFER_COPY,
     BUFFER_FILL,
     BUFFER_LENGTH,
@@ -1062,6 +1064,25 @@ def _view_cases():
 def _buffer_cases():
     # Source spelling is the only correspondence here: types and legal value
     # ranges come from the source op and wire fields respectively.
+    for predicate in BUFFER_COMPARE_ADDRESS_SELECTOR.values:
+        yield DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=(Guard.enum_attr_equals("predicate", predicate.name),),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_DESCRIPTORS[BUFFER_COMPARE_ADDRESS.opcode],
+                    operands={
+                        "left_r8": ValueRef.operand("lhs"),
+                        "left_offset_v8": ValueRef.operand("lhs_offset"),
+                        "right_r8": ValueRef.operand("rhs"),
+                        "right_offset_v8": ValueRef.operand("rhs_offset"),
+                    },
+                    results={"destination_v8": ValueRef.result("result")},
+                    immediates={"predicate_u8": predicate.value},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        )
     byte_format = next(
         value.value for value in MEMORY_FORMAT_SELECTOR.values if value.name == "i8.x1"
     )

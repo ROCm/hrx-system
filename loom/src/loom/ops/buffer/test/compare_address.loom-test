@@ -1,0 +1,70 @@
+// RUN: pass canonicalize
+
+// Exact base identity makes pointer iteration ordinary offset arithmetic.
+func.def @same_origin(%buffer: buffer, %begin: offset, %end: offset) -> (i1, i1) {
+  %equal = buffer.compare.address eq, %buffer[%begin], %buffer[%end]
+  %unequal = buffer.compare.address ne, %buffer[%begin], %buffer[%end]
+  func.return %equal, %unequal : i1, i1
+}
+
+func.def @identity_through_assumption(%buffer: buffer, %begin: offset, %end: offset) -> (i1) {
+  %aligned = buffer.assume.alignment %buffer {minimum_alignment = 16} : buffer
+  %equal = buffer.compare.address eq, %buffer[%begin], %aligned[%end]
+  func.return %equal : i1
+}
+
+// Independent incoming wrappers may overlap. Equal offsets or equal lengths
+// cannot establish equality without a common byte origin.
+func.def @independent_roots(%lhs: buffer, %rhs: buffer, %position: offset) -> (i1) {
+  %equal = buffer.compare.address eq, %lhs[%position], %rhs[%position]
+  func.return %equal : i1
+}
+
+func.def @null_and_empty() -> (i1, i1, i1) {
+  %null = buffer.null : buffer
+  %empty = buffer.constant bytes("") : buffer
+  %origin = index.constant 0 : offset
+  %equal_nulls = buffer.compare.address eq, %null[%origin], %null[%origin]
+  %equal_empty = buffer.compare.address eq, %empty[%origin], %null[%origin]
+  %unequal_empty = buffer.compare.address ne, %null[%origin], %empty[%origin]
+  func.return %equal_nulls, %equal_empty, %unequal_empty : i1, i1, i1
+}
+
+// Allocation identity is not a byte origin: two imported subspans may share
+// their allocation while starting at different positions.
+func.def @shared_allocation(%lhs: buffer, %rhs: buffer, %left: offset, %right: offset) -> (i1) {
+  %shared = buffer.assume.same_root %lhs, %rhs : buffer
+  %equal = buffer.compare.address eq, %shared[%left], %rhs[%right]
+  func.return %equal : i1
+}
+
+// ----
+func.def @same_origin(%buffer: buffer, %begin: offset, %end: offset) -> (i1, i1) {
+  %equal = index.cmp eq, %begin, %end : offset
+  %unequal = index.cmp ne, %begin, %end : offset
+  func.return %equal, %unequal : i1, i1
+}
+
+func.def @identity_through_assumption(%buffer: buffer, %begin: offset, %end: offset) -> (i1) {
+  %equal = index.cmp eq, %begin, %end : offset
+  func.return %equal : i1
+}
+
+func.def @independent_roots(%lhs: buffer, %rhs: buffer, %position: offset) -> (i1) {
+  %37 = index.constant 0 : offset
+  %equal = buffer.compare.address eq, %lhs[%37], %rhs[%37]
+  func.return %equal : i1
+}
+
+func.def @null_and_empty() -> (i1, i1, i1) {
+  %equal_nulls = scalar.constant true : i1
+  %equal_empty = scalar.constant false : i1
+  %unequal_empty = scalar.constant true : i1
+  func.return %equal_nulls, %equal_empty, %unequal_empty : i1, i1, i1
+}
+
+func.def @shared_allocation(%lhs: buffer, %rhs: buffer, %left: offset, %right: offset) -> (i1) {
+  %shared = buffer.assume.same_root %lhs, %rhs : buffer
+  %equal = buffer.compare.address eq, %shared[%left], %rhs[%right]
+  func.return %equal : i1
+}

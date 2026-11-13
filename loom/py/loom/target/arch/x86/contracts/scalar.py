@@ -756,6 +756,45 @@ def _view_alias_rules() -> Iterable[ValueAliasRule]:
     )
 
 
+def _buffer_compare_address_rule(
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    return DescriptorRule(
+        source_op=buffer.buffer_compare_address,
+        emit=(
+            *(
+                _op_emit(
+                    descriptor=descriptor_lookup("x86.scalar.lea.add.gpr64"),
+                    operands={
+                        "lhs": ValueRef.operand(side),
+                        "rhs": ValueRef.operand(f"{side}_offset"),
+                    },
+                    results={"dst": ValueRef.temporary(f"{side}_address")},
+                    result_types={"dst": _I64},
+                )
+                for side in ("lhs", "rhs")
+            ),
+            _op_emit(
+                descriptor=descriptor_lookup("x86.scalar.cmp.gpr64"),
+                operands={
+                    "lhs": ValueRef.temporary("lhs_address"),
+                    "rhs": ValueRef.temporary("rhs_address"),
+                },
+                results={"dst": ValueRef.result("result")},
+                immediates={
+                    "predicate": AttrProject.enum_remap(
+                        "predicate",
+                        {
+                            name: _INTEGER_CONDITION_CODE_MAP[name]
+                            for name in ("eq", "ne")
+                        },
+                    ),
+                },
+            ),
+        ),
+    )
+
+
 def _buffer_load_i8_u_rule(
     descriptor_lookup: _DescriptorLookup,
 ) -> DescriptorRule:
@@ -1239,6 +1278,7 @@ def _cases() -> Sequence[ContractCase]:
             descriptor_lookup, diagnostic=_SOURCE_MEMORY_DIAGNOSTIC
         ),
         *_view_alias_rules(),
+        _buffer_compare_address_rule(descriptor_lookup),
         _buffer_load_i8_u_rule(descriptor_lookup),
         _buffer_store_i8_rule(descriptor_lookup),
         DescriptorRule(

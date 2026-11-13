@@ -146,6 +146,8 @@ loom_corpus_build(
     xfails = {
         "//loom/target/vm:all": {
             "memory/atomic/float64.loom:@atomic_f64_values": "TARGET/003",
+            "memory/buffer/positions.loom:@shared_position_observations": "TARGET/003",
+            "memory/buffer/positions.loom:@storage_domain_observations": "TARGET/003",
             "memory/view/offset_recurrence.loom:@window_recurrence_observations": "SUBRANGE/026",
             "numeric/conversion/float8_schema_conversion.loom:@float8_schema_conversion": "TARGET/031",
             "numeric/matrix/nvfp4.loom:@nvfp4_matrix": "TARGET/031",
@@ -167,6 +169,7 @@ loom_corpus_test(
             "memory/address/uniform_loads.loom",
             "memory/buffer/boundaries.loom",
             "memory/buffer/null.loom",
+            "memory/buffer/positions.loom",
             "memory/buffer/packing.loom",
             "memory/buffer/selection.loom",
             "memory/view/bitcast.loom",
@@ -198,6 +201,8 @@ loom_corpus_test(
     },
     xfails = {
         VM_REFERENCE_PROFILE.name: {
+            "memory/buffer/positions.loom:@shared_position_equality": "TARGET/003",
+            "memory/buffer/positions.loom:@storage_domain_equality": "TARGET/003",
             "memory/view/offset_recurrence.loom:@window_recurrence_values": "SUBRANGE/026",
         },
     },

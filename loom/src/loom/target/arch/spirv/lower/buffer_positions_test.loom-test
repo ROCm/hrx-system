@@ -1,0 +1,61 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal
+
+// Both live allocations have typed storage. Their logical byte positions must
+// retain the physical arena bias; comparing only the two authored offsets
+// would incorrectly report equality after packing them into one arena.
+kernel.def @shared_positions() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %position_input: i32, %other_input: i32) {
+  %bounded = scalar.assume %position_input [range(%position_input, 0, 16)] : i32
+  %position = index.cast %bounded : i32 to offset
+  %other_bounded = scalar.assume %other_input [range(%other_input, 0, 16)] : i32
+  %other = index.cast %other_bounded : i32 to offset
+  %origin = index.constant 0 : offset
+  %extent = index.constant 16 : offset
+  %first = buffer.alloca<workgroup> align(16) %extent : buffer
+  %second = buffer.alloca<workgroup> align(16) %extent : buffer
+  %first_view = buffer.view %first[%origin] : buffer -> view<4xi32>
+  %second_view = buffer.view %second[%origin] : buffer -> view<4xi32>
+  view.store<volatile> %bounded, %first_view[0] : i32, view<4xi32>
+  view.store<volatile> %bounded, %second_view[0] : i32, view<4xi32>
+  %equal = buffer.compare.address eq, %first[%position], %second[%other]
+  %different = buffer.compare.address ne, %first[%position], %second[%other]
+  %equal_word = scalar.extui %equal : i1 to i32
+  %different_word = scalar.extui %different : i1 to i32
+  %result = buffer.view %output[%origin] : buffer -> view<2xi32>
+  view.store %equal_word, %result[0] : i32, view<2xi32>
+  view.store %different_word, %result[1] : i32, view<2xi32>
+  kernel.return
+}
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, i32, i32) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @shared_positions(%bounded: reg<spirv.id : i32>, %other_bounded: reg<spirv.id : i32>) asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %second = storage {byte_alignment = 16, byte_length = 32} : low.storage<workgroup>
+  %29 = OpBitcast.i32.u32 %bounded
+  %position = OpUConvert.u32.offset64 %29
+  %31 = OpBitcast.i32.u32 %other_bounded
+  %other = OpUConvert.u32.offset64 %31
+  %first_view = storage_address %second : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %35 = OpConstant.i32 0 : reg<spirv.id : index>
+  %36 = OpAccessChain.workgroup.i32.element_index %first_view, %35
+  OpStore.workgroup.i32<volatile> %36, %bounded
+  %37 = OpConstant.i32 4 : reg<spirv.id : index>
+  %38 = OpAccessChain.workgroup.i32.element_index %first_view, %37
+  OpStore.workgroup.i32<volatile> %38, %bounded
+  %39 = OpConstant.offset64 16
+  %40 = OpIAdd.offset64 %other, %39
+  %equal = OpIEqual.offset64 %position, %40
+  %different = OpINotEqual.offset64 %position, %40
+  %45 = OpConstant.i32 1
+  %46 = OpConstant.i32 0
+  %equal_word = OpSelect %equal, %45, %46
+  %different_word = OpSelect %different, %45, %46
+  %49 = OpConstant.offset64 0
+  %50 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %49
+  OpStore.storage_buffer.i32 %50, %equal_word
+  %51 = OpConstant.offset64 4
+  %52 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %51
+  OpStore.storage_buffer.i32 %52, %different_word
+  return
+}

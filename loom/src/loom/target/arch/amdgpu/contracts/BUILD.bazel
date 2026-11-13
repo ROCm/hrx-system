@@ -81,6 +81,7 @@ loom_target_contract_cc_libraries(
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/global",
+        "//loom/src/loom/target/arch/amdgpu/lower:materializers",
     ],
 )
 

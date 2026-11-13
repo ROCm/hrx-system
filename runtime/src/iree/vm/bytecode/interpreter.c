@@ -1538,6 +1538,26 @@ iree_vm_bytecode_dispatch_buffer_copy_rodata: {
   }
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_buffer_copy_rodata_t);
 }
+iree_vm_bytecode_dispatch_buffer_compare_address: {
+  const iree_vm_bytecode_buffer_compare_address_t* record =
+      (const iree_vm_bytecode_buffer_compare_address_t*)record_data;
+  const uint64_t left_offset = values[record->left_offset_v8];
+  const uint64_t right_offset = values[record->right_offset_v8];
+  void* left = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_ptr_from_ref_borrowed(
+      refs[record->left_r8], image->buffer_type, &left));
+  void* right = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_ptr_from_ref_borrowed(
+      refs[record->right_r8], image->buffer_type, &right));
+  bool equal = false;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_buffer_compare_address(
+      (const iree_vm_buffer_t*)left, left_offset,
+      (const iree_vm_buffer_t*)right, right_offset, &equal));
+  values[record->destination_v8] =
+      equal != (record->predicate_u8 ==
+                IREE_VM_BYTECODE_BUFFER_COMPARE_ADDRESS_PREDICATE_NE);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_buffer_compare_address_t);
+}
 iree_vm_bytecode_dispatch_buffer_rodata_load: {
   const iree_vm_bytecode_buffer_rodata_load_t* record =
       (const iree_vm_bytecode_buffer_rodata_load_t*)record_data;

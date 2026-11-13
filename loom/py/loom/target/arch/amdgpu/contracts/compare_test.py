@@ -8,10 +8,12 @@
 
 from __future__ import annotations
 
+from loom.dialect.buffer import defs as buffer
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import comparison as scalar
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
+from loom.target.arch.amdgpu.contracts.buffer import AMDGPU_BUFFER_CONTRACT_FRAGMENT
 from loom.target.arch.amdgpu.contracts.compare import (
     AMDGPU_COMPARE_CONTRACT_DIALECT_OPS,
     AMDGPU_COMPARE_CONTRACT_FRAGMENT,
@@ -201,3 +203,64 @@ def test_compact_offset_comparisons_preserve_unsigned_magnitude() -> None:
         for emit in rule.emit:
             if isinstance(emit, EmitDescriptorOp):
                 assert not emit.descriptor.key.startswith(signed_word_prefixes)
+
+
+def test_buffer_positions_cover_address_offset_and_predicate_carriers() -> None:
+    # Each full-address addition accepts independently narrow or wide byte
+    # displacements. Segment coordinates use the existing narrow carrier.
+    signatures = []
+    for rule in AMDGPU_BUFFER_CONTRACT_FRAGMENT.cases:
+        if (
+            not isinstance(rule, DescriptorRule)
+            or rule.source_op is not buffer.buffer_compare_address
+        ):
+            continue
+        spaces = {
+            guard.field: guard.memory_spaces
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_MEMORY_SPACE
+        }
+        if spaces["lhs"] != spaces["rhs"]:
+            # Unknown flat addresses provide no proof of disjointness.
+            assert "unknown" not in spaces["lhs"] + spaces["rhs"]
+            assert "generic" not in spaces["lhs"] + spaces["rhs"]
+            continue
+        counts = {
+            guard.field: guard.count
+            for guard in rule.guards
+            if guard.kind is GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT
+        }
+        predicate = next(
+            guard.enum_keyword
+            for guard in rule.guards
+            if guard.kind is GuardKind.ENUM_ATTR_EQUALS
+        )
+        result_class = next(
+            guard.register_class
+            for guard in rule.guards
+            if guard.field == "result"
+            and guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+        )
+        signatures.append(
+            (
+                spaces["lhs"][0],
+                counts["lhs_offset"],
+                counts["rhs_offset"],
+                predicate,
+                result_class,
+                counts["result"],
+            )
+        )
+    assert len(signatures) == len(set(signatures))
+    assert set(signatures) == {
+        (space, left, right, predicate, register_class, result_units)
+        for space in ("unknown", "private", "workgroup")
+        for left in ((1, 2) if space == "unknown" else (1,))
+        for right in ((1, 2) if space == "unknown" else (1,))
+        for predicate in ("eq", "ne")
+        for register_class, result_units in (
+            ("amdgpu.scc", 1),
+            ("amdgpu.sgpr", 1),
+            ("amdgpu.sgpr", 2),
+        )
+    }

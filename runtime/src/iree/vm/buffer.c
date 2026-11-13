@@ -306,6 +306,48 @@ iree_vm_buffer_length(const iree_vm_buffer_t* buffer) {
   return buffer->length;
 }
 
+// Position queries admit one-past endpoints and null at offset zero without
+// admitting an arbitrary address outside the supplied storage capability.
+static iree_status_t iree_vm_buffer_check_position(
+    const iree_vm_buffer_t* buffer, iree_host_size_t offset) {
+  if (buffer && iree_vm_buffer_effective_access(buffer) ==
+                    IREE_VM_BUFFER_ACCESS_FLAG_NONE) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "buffer root is closed");
+  }
+  const iree_host_size_t length = buffer ? buffer->length : 0;
+  if (offset > length) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "buffer position %" PRIhsz " exceeds length %" PRIhsz, offset, length);
+  }
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_vm_buffer_compare_address(
+    const iree_vm_buffer_t* left, iree_host_size_t left_offset,
+    const iree_vm_buffer_t* right, iree_host_size_t right_offset,
+    bool* out_equal) {
+  if (!out_equal) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "out_equal is required");
+  }
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_check_position(left, left_offset));
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_check_position(right, right_offset));
+  if (!left || !right) {
+    *out_equal = left == right;
+  } else if (!left->data || !right->data) {
+    // An empty external span may have no native address. Its root identity
+    // distinguishes it from other such spans while preserving derived views.
+    *out_equal =
+        !left->data && !right->data &&
+        (left->root ? left->root : left) == (right->root ? right->root : right);
+  } else {
+    *out_equal = left->data + left_offset == right->data + right_offset;
+  }
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_status_t iree_vm_buffer_map_read(
     const iree_vm_buffer_t* buffer, iree_host_size_t offset,
     iree_host_size_t length, iree_const_byte_span_t* out_span) {

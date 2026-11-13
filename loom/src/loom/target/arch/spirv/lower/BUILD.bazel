@@ -149,6 +149,13 @@ loom_cc_library(
 )
 
 loom_check_test_suite(
+    name = "buffer_position_tests",
+    srcs = ["buffer_positions_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
     name = "index_tests",
     srcs = [
         "index_control_test.loom-test",
