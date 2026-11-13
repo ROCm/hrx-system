@@ -162,62 +162,64 @@ static iree_status_t loom_aie2p_program_source_append_helper(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_program_source_build_closure(
+static iree_status_t loom_aie2p_program_source_append_closure(
     loom_aie2p_program_source_table_t* table,
-    loom_aie2p_program_source_function_t* source, uint8_t* membership,
-    bool* out_admitted) {
-  loom_symbol_ref_t* helpers = NULL;
-  iree_host_size_t helper_count = 0;
-  iree_host_size_t helper_capacity = 0;
-  const loom_low_direct_callee_requirement_list_t calls =
-      source->requirements.direct_callees;
-  iree_status_t status = iree_ok_status();
-  bool rejected = false;
-  for (iree_host_size_t i = 0;
-       i < calls.count && iree_status_is_ok(status) && !rejected; ++i) {
-    const loom_aie2p_program_source_function_t* helper =
-        loom_aie2p_program_source_table_lookup(table, calls.values[i].symbol);
-    if (helper->requirements.resource_count != 0 ||
-        helper->requirements.storage_layout.record_count != 0) {
-      const loom_diagnostic_param_t params[] = {
-          loom_param_string(loom_aie2p_program_source_symbol_name(
-              table->module, helper->symbol.symbol_id)),
-      };
-      const loom_diagnostic_emission_t emission = {
-          .module = table->module,
-          .op = helper->function_op,
-          .error = LOOM_ERR_XDNA_065,
-          .params = params,
-          .param_count = IREE_ARRAYSIZE(params),
-      };
-      status = iree_diagnostic_emit(table->diagnostic_emitter, &emission);
-      rejected = true;
-    }
-    for (iree_host_size_t j = 0;
-         j < helper->helpers.count && iree_status_is_ok(status) && !rejected;
-         ++j) {
-      status = loom_aie2p_program_source_append_helper(
-          helper->helpers.values[j], membership, table->arena, &helpers,
-          &helper_count, &helper_capacity);
-    }
-    if (iree_status_is_ok(status) && !rejected) {
-      status = loom_aie2p_program_source_append_helper(
-          helper->symbol, membership, table->arena, &helpers, &helper_count,
-          &helper_capacity);
-    }
+    const loom_aie2p_program_source_function_t* helper, uint8_t* membership,
+    loom_symbol_ref_t** helpers, iree_host_size_t* helper_count,
+    iree_host_size_t* helper_capacity, bool* out_admitted) {
+  *out_admitted = false;
+  if (helper->requirements.resource_count != 0 ||
+      helper->requirements.storage_layout.record_count != 0) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_aie2p_program_source_symbol_name(
+            table->module, helper->symbol.symbol_id)),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .module = table->module,
+        .op = helper->function_op,
+        .error = LOOM_ERR_XDNA_065,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    return iree_diagnostic_emit(table->diagnostic_emitter, &emission);
   }
+  // A previously requested root may also be a helper here. The graph stops at
+  // that root, so import its completed closure before appending the root
+  // itself. Other functions retain only their direct edges, already visited by
+  // SCC.
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < helper->helpers.count && iree_status_is_ok(status); ++i) {
+    status = loom_aie2p_program_source_append_helper(
+        helper->helpers.values[i], membership, table->arena, helpers,
+        helper_count, helper_capacity);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_aie2p_program_source_append_helper(
+        helper->symbol, membership, table->arena, helpers, helper_count,
+        helper_capacity);
+  }
+  *out_admitted = iree_status_is_ok(status);
+  return status;
+}
+
+static iree_status_t loom_aie2p_program_source_finish_closure(
+    loom_aie2p_program_source_table_t* table,
+    loom_aie2p_program_source_function_t* entry,
+    loom_symbol_ref_array_t helpers) {
   loom_low_read_only_data_builder_t data_builder = {0};
   bool has_helper_data = false;
-  for (iree_host_size_t i = 0;
-       i < helper_count && iree_status_is_ok(status) && !rejected; ++i) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < helpers.count && iree_status_is_ok(status);
+       ++i) {
     const loom_aie2p_program_source_function_t* helper =
-        loom_aie2p_program_source_table_lookup(table, helpers[i]);
+        loom_aie2p_program_source_table_lookup(table, helpers.values[i]);
     const loom_low_read_only_data_set_t* data =
         &helper->requirements.read_only_data;
     if (data->count != 0) {
       if (!has_helper_data) {
         status = loom_low_read_only_data_builder_extend(
-            &data_builder, &source->requirements.read_only_data, table->arena);
+            &data_builder, &entry->requirements.read_only_data, table->arena);
         has_helper_data = true;
       }
       if (iree_status_is_ok(status)) {
@@ -226,23 +228,17 @@ static iree_status_t loom_aie2p_program_source_build_closure(
       }
     }
   }
-  if (iree_status_is_ok(status) && !rejected && has_helper_data) {
+  if (iree_status_is_ok(status) && has_helper_data) {
     loom_low_read_only_data_set_t* data = NULL;
     status = iree_arena_allocate(table->arena, sizeof(*data), (void**)&data);
     if (iree_status_is_ok(status)) {
       *data = loom_low_read_only_data_builder_finish(&data_builder);
-      source->program_data = data;
+      entry->program_data = data;
     }
   }
-  // Clear only visited members; many small closures do not repeatedly clear
-  // the whole source symbol domain.
-  for (iree_host_size_t i = 0; i < helper_count; ++i) {
-    membership[helpers[i].symbol_id] = 0;
-  }
-  if (iree_status_is_ok(status) && !rejected) {
-    source->helpers = loom_make_symbol_ref_array(helpers, helper_count);
-    source->helpers_admitted = true;
-    *out_admitted = true;
+  if (iree_status_is_ok(status)) {
+    entry->helpers = helpers;
+    entry->helpers_admitted = true;
   }
   return status;
 }
@@ -270,6 +266,9 @@ static iree_status_t loom_aie2p_program_source_admit_helpers_impl(
       iree_arena_allocate_array(scratch_arena, graph.node_count,
                                 sizeof(*membership), (void**)&membership));
   memset(membership, 0, graph.node_count * sizeof(*membership));
+  loom_symbol_ref_t* helpers = NULL;
+  iree_host_size_t helper_count = 0;
+  iree_host_size_t helper_capacity = 0;
   bool admitted = true;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
@@ -291,11 +290,15 @@ static iree_status_t loom_aie2p_program_source_admit_helpers_impl(
       };
       status = iree_diagnostic_emit(table->diagnostic_emitter, &emission);
       admitted = false;
-    } else if (!source->helpers_admitted) {
-      admitted = false;
-      status = loom_aie2p_program_source_build_closure(table, source,
-                                                       membership, &admitted);
+    } else if (source != entry) {
+      status = loom_aie2p_program_source_append_closure(
+          table, source, membership, &helpers, &helper_count, &helper_capacity,
+          &admitted);
     }
+  }
+  if (admitted && iree_status_is_ok(status)) {
+    status = loom_aie2p_program_source_finish_closure(
+        table, entry, loom_make_symbol_ref_array(helpers, helper_count));
   }
   *out_admitted = admitted && iree_status_is_ok(status);
   return status;

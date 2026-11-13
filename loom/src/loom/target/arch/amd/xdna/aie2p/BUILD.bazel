@@ -283,6 +283,17 @@ loom_cc_benchmark(
     ],
 )
 
+loom_cc_test(
+    name = "program_source_test",
+    srcs = ["program_source_test.cc"],
+    deps = [
+        ":program_source_test_util",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "ir_provider",
     srcs = ["ir_provider.c"],

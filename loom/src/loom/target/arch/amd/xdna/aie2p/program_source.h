@@ -40,10 +40,11 @@ typedef struct loom_aie2p_program_source_function_t {
   // Unique immutable definitions used by this entry and its admitted helpers.
   // Aliases the function inventory until helper admission adds definitions.
   const loom_low_read_only_data_set_t* program_data;
-  // Unique reachable helpers in callee-before-caller order. Direct call
-  // edges remain in requirements; this closure owns physical composition.
+  // Unique reachable helpers for a requested program root, in
+  // callee-before-caller order. Interior functions keep direct edges in
+  // requirements without materializing their own transitive closures.
   loom_symbol_ref_array_t helpers;
-  // Whether the acyclic native call closure has been admitted.
+  // Whether this function's complete program-root closure has been admitted.
   bool helpers_admitted;
 } loom_aie2p_program_source_function_t;
 
