@@ -62,7 +62,7 @@ class GraphAnalysisTest : public ::testing::Test {
   void Check(const std::vector<Edge>& edges) {
     const uint32_t count = schedule_.node_count;
     std::vector<uint32_t> ranks(count, UINT32_MAX);
-    std::vector<uint32_t> partitions(count);
+    std::vector<uint32_t> partitions(count, UINT32_MAX);
     std::vector<std::vector<uint32_t>> predecessors(count);
     for (uint32_t i = 0; i < count; ++i) {
       ASSERT_LT(schedule_.order[i], count);
@@ -72,17 +72,30 @@ class GraphAnalysisTest : public ::testing::Test {
     uint32_t covered = 0;
     for (uint32_t p = 0; p < schedule_.partition_count; ++p) {
       const auto& partition = schedule_.partitions[p];
-      ASSERT_EQ(partition.start_index, covered);
-      covered += partition.count;
+      ASSERT_GE(partition.start_index, covered);
+      for (; covered < partition.start_index; ++covered) {
+        EXPECT_EQ(schedule_.flags[schedule_.order[covered]] &
+                      HRX_GRAPH_ANALYSIS_NODE_KIND_MASK,
+                  HRX_GRAPH_ANALYSIS_NODE_EMPTY);
+      }
+      covered = partition.start_index + partition.count;
       ASSERT_LE(covered, count);
       for (uint32_t i = partition.start_index; i < covered; ++i) {
+        EXPECT_NE(schedule_.flags[schedule_.order[i]] &
+                      HRX_GRAPH_ANALYSIS_NODE_KIND_MASK,
+                  HRX_GRAPH_ANALYSIS_NODE_EMPTY);
         partitions[schedule_.order[i]] = p;
       }
     }
-    ASSERT_EQ(covered, count);
+    for (; covered < count; ++covered) {
+      EXPECT_EQ(schedule_.flags[schedule_.order[covered]] &
+                    HRX_GRAPH_ANALYSIS_NODE_KIND_MASK,
+                HRX_GRAPH_ANALYSIS_NODE_EMPTY);
+    }
     for (auto [from, to] : edges) {
       EXPECT_LT(ranks[from], ranks[to]);
-      if (partitions[from] == partitions[to]) {
+      if (partitions[from] != UINT32_MAX &&
+          partitions[from] == partitions[to]) {
         EXPECT_EQ(schedule_.flags[from] >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT,
                   schedule_.flags[to] >> HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT);
       }
@@ -164,11 +177,43 @@ TEST_F(GraphAnalysisTest, IsolatedAndEmptyNodesKeepDependencies) {
   const std::vector<Edge> edges = {{0, 1}, {1, 2}, {2, 3}};
   IREE_ASSERT_OK(Analyze(4, edges, kinds));
   Check(edges);
-  EXPECT_EQ(schedule_.partition_count, 4u);
+  EXPECT_EQ(schedule_.partition_count, 3u);
   for (uint32_t i = 0; i < 4; ++i) {
     EXPECT_EQ(schedule_.flags[i] & HRX_GRAPH_ANALYSIS_NODE_KIND_MASK, kinds[i]);
     EXPECT_FALSE(Barrier(i));
   }
+}
+
+TEST_F(GraphAnalysisTest, EmptyDependenciesNeedNoRuntimeBlocks) {
+  const std::vector<uint8_t> kinds(4096, HRX_GRAPH_ANALYSIS_NODE_EMPTY);
+  std::vector<Edge> edges;
+  for (uint32_t i = 1; i < kinds.size(); ++i) {
+    edges.emplace_back(i, i - 1);
+  }
+  IREE_ASSERT_OK(Analyze(kinds.size(), edges, kinds));
+  Check(edges);
+  EXPECT_EQ(schedule_.partition_count, 0u);
+  EXPECT_EQ(schedule_.block_count, 0u);
+  EXPECT_EQ(schedule_.partitions, nullptr);
+
+  edges.emplace_back(0, kinds.size() - 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Analyze(kinds.size(), edges, kinds));
+}
+
+TEST_F(GraphAnalysisTest, EmptyRunsRetainRecordingCuts) {
+  const std::vector<uint8_t> kinds = {
+      HRX_GRAPH_ANALYSIS_NODE_EMPTY,      HRX_GRAPH_ANALYSIS_NODE_RECORDABLE,
+      HRX_GRAPH_ANALYSIS_NODE_EMPTY,      HRX_GRAPH_ANALYSIS_NODE_EMPTY,
+      HRX_GRAPH_ANALYSIS_NODE_RECORDABLE, HRX_GRAPH_ANALYSIS_NODE_EMPTY};
+  const std::vector<Edge> edges = {{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}};
+  IREE_ASSERT_OK(Analyze(kinds.size(), edges, kinds));
+  Check(edges);
+  ASSERT_EQ(schedule_.partition_count, 2u);
+  EXPECT_EQ(schedule_.partitions[0].start_index, 1u);
+  EXPECT_EQ(schedule_.partitions[0].count, 1u);
+  EXPECT_EQ(schedule_.partitions[1].start_index, 4u);
+  EXPECT_EQ(schedule_.partitions[1].count, 1u);
 }
 
 TEST_F(GraphAnalysisTest, CyclesAreRejected) {
@@ -246,7 +291,36 @@ TEST_F(GraphAnalysisTest, WorkstreamsAndPartitionBoundaries) {
           kinds[i] = HRX_GRAPH_ANALYSIS_NODE_ISOLATED;
         }
       }
+      if (seed & 4) {
+        for (uint32_t i = 0; i < count; i += 7) {
+          kinds[i] = HRX_GRAPH_ANALYSIS_NODE_EMPTY;
+        }
+      }
       IREE_ASSERT_OK(Analyze(count, edges, kinds));
+      Check(edges);
+    }
+  }
+}
+
+TEST_F(GraphAnalysisTest, ExhaustiveEmptyNodePlacements) {
+  for (uint32_t edge_mask = 0; edge_mask < (1u << 6); ++edge_mask) {
+    std::vector<Edge> edges;
+    uint32_t bit = 0;
+    for (uint32_t to = 1; to < 4; ++to) {
+      for (uint32_t from = 0; from < to; ++from, ++bit) {
+        if (edge_mask & (1u << bit)) {
+          edges.emplace_back(3 - from, 3 - to);
+        }
+      }
+    }
+    for (uint32_t empty_mask = 0; empty_mask < (1u << 4); ++empty_mask) {
+      std::vector<uint8_t> kinds(4, HRX_GRAPH_ANALYSIS_NODE_RECORDABLE);
+      for (uint32_t node = 0; node < 4; ++node) {
+        if (empty_mask & (1u << node)) {
+          kinds[node] = HRX_GRAPH_ANALYSIS_NODE_EMPTY;
+        }
+      }
+      IREE_ASSERT_OK(Analyze(4, edges, kinds));
       Check(edges);
     }
   }

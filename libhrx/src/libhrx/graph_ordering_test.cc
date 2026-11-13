@@ -309,6 +309,19 @@ TEST_F(GraphOrderingTest, EmptyGraphPreservesStreamPosition) {
   EXPECT_EQ(streams_[0]->timepoint, position);
 }
 
+TEST_F(GraphOrderingTest, EmptyDependenciesPreserveStreamPosition) {
+  hrx_graph_node_t previous = nullptr;
+  for (size_t i = 0; i < 4096; ++i) {
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_empty_node(
+        graph_, previous ? &previous : nullptr, previous ? 1 : 0, &previous)));
+  }
+  Instantiate();
+  const uint64_t position = streams_[0]->timepoint;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
+  EXPECT_TRUE(queue_.submissions.empty());
+  EXPECT_EQ(streams_[0]->timepoint, position);
+}
+
 TEST_F(GraphOrderingTest, EmptyReplacementPreservesAcceptedCrossStreamWork) {
   AddFills(17);
   Instantiate();
@@ -317,6 +330,8 @@ TEST_F(GraphOrderingTest, EmptyReplacementPreservesAcceptedCrossStreamWork) {
   hrx_graph_release(graph_);
   graph_ = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_empty_node(graph_, nullptr, 0, nullptr)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_update(exec_, graph_)));
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
   ASSERT_EQ(queue_.submissions.size(), 3u);
@@ -449,15 +464,14 @@ TEST_F(GraphOrderingTest, IntermediatePartitionJoinsAllPredecessors) {
   AddFills(1, join);
   Instantiate();
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, streams_[0])));
-  ASSERT_EQ(queue_.submissions.size(), 4u);
+  ASSERT_EQ(queue_.submissions.size(), 3u);
+  EXPECT_NE(queue_.submissions[2]->command_buffer, nullptr);
   const auto& waits = queue_.submissions[2]->waits;
   ASSERT_EQ(waits.count, 2u);
   for (size_t i = 0; i < 2; ++i) {
     EXPECT_EQ(waits.semaphores[i],
               queue_.submissions[i]->signals.semaphores[0]);
   }
-  EXPECT_EQ(queue_.submissions[3]->waits.semaphores[0],
-            queue_.submissions[2]->signals.semaphores[0]);
   SubmitReverse();
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(streams_[0])));
   VerifyContents(17);

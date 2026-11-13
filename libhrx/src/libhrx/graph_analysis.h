@@ -50,7 +50,7 @@ typedef struct hrx_graph_analysis_t {
   uint8_t* flags;
 } hrx_graph_analysis_t;
 
-// One bounded recordable range or one isolated/empty operation. The 24-bit
+// One bounded recordable range or one isolated operation. The 24-bit
 // count covers the recording bound; stream_count is at most eight.
 typedef struct hrx_graph_partition_t {
   // First position in the schedule's order array.
@@ -77,7 +77,8 @@ typedef struct hrx_graph_schedule_t {
   uint32_t* order;
   // Packed node kind, barrier-before flag, and workstream by source ordinal.
   uint8_t* flags;
-  // Recording boundaries, sized to the actual partition count.
+  // Recording boundaries, sized to the actual partition count. Gaps contain
+  // only empty nodes; joins between partitions preserve their dependencies.
   hrx_graph_partition_t* partitions;
 } hrx_graph_schedule_t;
 

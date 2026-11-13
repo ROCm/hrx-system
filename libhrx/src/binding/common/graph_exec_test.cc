@@ -690,9 +690,9 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
 
 TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
   for (const size_t fill_count : {size_t{1}, size_t{64}}) {
-    for (const bool append_barrier : {false, true}) {
+    for (const bool append_empty_join : {false, true}) {
       SCOPED_TRACE(fill_count);
-      SCOPED_TRACE(append_barrier);
+      SCOPED_TRACE(append_empty_join);
       iree_hal_streaming_buffer_t* storage = nullptr;
       iree_hal_streaming_graph_t* graph = nullptr;
       iree_hal_streaming_graph_exec_t* executable = nullptr;
@@ -718,7 +718,7 @@ TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
             graph, nullptr, 0, storage->device_ptr + i,
             static_cast<uint32_t>(i + 1), 1, 1, &fills[i]));
       }
-      if (append_barrier) {
+      if (append_empty_join) {
         IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
             graph, fills.data(), fills.size(), nullptr));
       }
@@ -744,7 +744,7 @@ TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
             iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
         EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, result);
         IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
-        EXPECT_EQ(fill_count > 1 || append_barrier, queue.joined);
+        EXPECT_EQ(fill_count > 1, queue.joined);
         if (fill_count > 1) {
           EXPECT_GT(queue.completions.size(), 1u);
         } else {
@@ -795,9 +795,11 @@ TEST_F(GraphExecTest, ReorderedBranchesJoinAcrossHostAndDeviceOperations) {
   iree_hal_streaming_graph_node_t* root = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_fill_ptr_node(
       graph, nullptr, 0, storage->device_ptr, 0, sizeof(uint32_t), 4, &root));
-  iree_hal_streaming_graph_node_t* from[] = {root, root, branches[0],
-                                             branches[1], host};
-  iree_hal_streaming_graph_node_t* to[] = {branches[0], branches[1], host, host,
+  iree_hal_streaming_graph_node_t* join = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      graph, branches, IREE_ARRAYSIZE(branches), &join));
+  iree_hal_streaming_graph_node_t* from[] = {root, root, join, host};
+  iree_hal_streaming_graph_node_t* to[] = {branches[0], branches[1], host,
                                            tail};
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
       graph, from, to, IREE_ARRAYSIZE(from)));
@@ -1067,6 +1069,9 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
         gate->release.acquire();
       },
       &gate, &gate_node));
+  iree_hal_streaming_graph_node_t* gate_dependency = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(graph, &gate_node, 1,
+                                                         &gate_dependency));
   Copy* copy = nullptr;
   IREE_ASSERT_OK(iree_arena_allocate(&graph->arena, sizeof(*copy),
                                      reinterpret_cast<void**>(&copy)));
@@ -1075,7 +1080,7 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
   *copy = {initial_value, &output};
   iree_hal_streaming_graph_node_t* node = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_operation_node(
-      graph, &gate_node, 1,
+      graph, &gate_dependency, 1,
       +[](void* user_data) {
         const auto* copy = static_cast<const Copy*>(user_data);
         *copy->output = copy->value->value;
