@@ -459,6 +459,7 @@ def bazel_test_step(
     test_env: tuple[tuple[str, str], ...] = (),
     bazel_options: tuple[str, ...] = (),
     available_resources: tuple[str, ...] = (),
+    build_all_requested_targets: bool = False,
 ) -> CiStep:
     for option_name, argument_name in (
         ("--test_tag_filters", "test_tag_filters"),
@@ -473,7 +474,8 @@ def bazel_test_step(
     for key, value in sanitizer_env(config) + test_env:
         options.append(f"--test_env={key}={value}")
     options.extend(bazel_options)
-    options.append("--build_tests_only")
+    if not build_all_requested_targets:
+        options.append("--build_tests_only")
     # Focus filters compose with mandatory all-participant admission.
     test_tag_filters = tuple(
         dict.fromkeys(
@@ -679,6 +681,9 @@ def cpu_steps(targets: tuple[str, ...]) -> list[CiStep]:
     scoped_targets = targets + ci_config.CPU_BAZEL_TARGET_EXCLUDES
     return [
         bazel_configure_step(),
+        # Negative target patterns keep XFAILs out of execution but also remove
+        # them from this test graph. The separate platform build owns compile
+        # coverage for those excluded targets.
         *platform_coverage_build_steps(bazel_build_step("Build IREE", scoped_targets)),
         bazel_test_step(
             "Test IREE",
@@ -737,27 +742,22 @@ def repository_integration_steps(
         test_language_filters = ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS
     steps = [
         repository_configure_step(),
+        # The integration lane owns both complete compiler coverage and host
+        # tests. One Bazel graph lets tests start as soon as their prerequisites
+        # complete while still building targets filtered from execution.
         bazel_test_step(
             "Test repository",
             ci_config.BAZEL_REPOSITORY_TEST_TARGETS,
             test_tag_filters=test_tag_filters,
             test_language_filters=test_language_filters,
-            bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
-        ),
-        # Resource filters deliberately omit tests that cannot execute on this
-        # host. Build the complete graph after the selected tests so those
-        # targets and standalone products still retain Windows compiler
-        # coverage in the same output base.
-        bazel_build_step(
-            "Build repository",
-            ("//...",),
             bazel_options=ci_config.REPOSITORY_BUILD_BAZEL_OPTIONS,
+            build_all_requested_targets=True,
         ),
     ]
     if amdgpu_target_selector is not None:
         # The device probe is manual and needs an explicit target selector.
-        # Keep that setting off the complete repository build so the preceding
-        # test and build phases retain one reusable host configuration.
+        # Keep that setting off the complete repository graph so the preceding
+        # combined build-and-test graph retains one host configuration.
         steps.append(
             bazel_build_step(
                 "Build repository AMDGPU device probe",
@@ -822,11 +822,15 @@ def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     # subjects. Their tags own admission independently of the harness language.
     test_language_filters = ()
     if not test_tag_filters:
-        steps = platform_coverage_build_steps(
-            bazel_build_step(
-                f"Build IREE with {config.upper()}",
-                scoped_targets,
-                config=config,
+        # Negative sanitizer XFAIL patterns are absent from the test graph, so
+        # the separate platform build owns their compile coverage.
+        steps.extend(
+            platform_coverage_build_steps(
+                bazel_build_step(
+                    f"Build IREE with {config.upper()}",
+                    scoped_targets,
+                    config=config,
+                )
             )
         )
         if config == "asan":
@@ -859,14 +863,6 @@ def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
             enabled_loom_execution_substrates=("iree_hal", "iree_vm"),
             extra_options=options,
         ),
-        *platform_coverage_build_steps(
-            bazel_build_step(
-                f"Build IREE / XDNA{config_name}",
-                targets,
-                config=config,
-                bazel_options=options,
-            )
-        ),
         bazel_test_step(
             f"Test IREE / XDNA{config_name}",
             targets,
@@ -875,6 +871,7 @@ def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
             available_resources=ci_config.XDNA_RESOURCES,
             test_env=amd_test_env(),
             bazel_options=options,
+            build_all_requested_targets=platform_coverage_enabled(),
         ),
     ]
 
@@ -906,14 +903,6 @@ def amd_client_steps(targets: tuple[str, ...], config: str | None) -> list[CiSte
     targets = targets or default_targets
     return [
         bazel_configure_step(extra_options=options),
-        *platform_coverage_build_steps(
-            bazel_build_step(
-                f"Build IREE / AMD RDNA+XDNA{config_name}",
-                targets,
-                config=config,
-                bazel_options=options + native_options,
-            )
-        ),
         bazel_test_step(
             f"Test IREE / AMD RDNA+XDNA{config_name}",
             targets,
@@ -922,6 +911,7 @@ def amd_client_steps(targets: tuple[str, ...], config: str | None) -> list[CiSte
             available_resources=resources,
             test_env=amd_test_env() + amd_gpu_cts_test_env("rdna"),
             bazel_options=options + native_options,
+            build_all_requested_targets=platform_coverage_enabled(),
         ),
         *additional_steps,
     ]
@@ -950,6 +940,8 @@ def amdgpu_test_steps(
         (f"-{ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL}",) if config == "tsan" else ()
     )
     return [
+        # Keep XFAILed tests in compile coverage even though their negative
+        # target patterns remove them from the execution graph.
         *platform_coverage_build_steps(
             bazel_build_step(
                 f"Build IREE / AMDGPU{config_name}",
@@ -1135,11 +1127,23 @@ def amdgpu_config_steps(
 
 def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
     scoped_targets = targets + ci_config.VULKAN_BAZEL_TARGET_EXCLUDES
+    compile_xfails_separately = bool(ci_config.VULKAN_XFAIL_TARGETS)
     # A container that cannot create namespaces must fail instead of silently
     # downgrading to processwrapper-sandbox and hiding source-access problems.
     api_options = ("--//build_tools/vulkan/config:enabled=true",)
     bazel_options = api_options + (
         ("--spawn_strategy=linux-sandbox",) if sys.platform == "linux" else ()
+    )
+    compile_steps = (
+        platform_coverage_build_steps(
+            bazel_build_step(
+                "Build IREE / Vulkan",
+                scoped_targets,
+                bazel_options=bazel_options,
+            )
+        )
+        if compile_xfails_separately
+        else []
     )
     return [
         bazel_configure_step(
@@ -1149,13 +1153,7 @@ def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
             enabled_loom_execution_substrates=("iree_hal", "iree_vm"),
             extra_options=api_options,
         ),
-        *platform_coverage_build_steps(
-            bazel_build_step(
-                "Build IREE / Vulkan",
-                scoped_targets,
-                bazel_options=bazel_options,
-            )
-        ),
+        *compile_steps,
         bazel_test_step(
             "Test IREE / Vulkan",
             scoped_targets + ci_config.VULKAN_XFAIL_TARGETS,
@@ -1163,6 +1161,9 @@ def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
             available_resources=ci_config.VULKAN_RESOURCES,
             test_env=vulkan_device_test_env(),
             bazel_options=bazel_options,
+            build_all_requested_targets=(
+                platform_coverage_enabled() and not compile_xfails_separately
+            ),
         ),
     ]
 
