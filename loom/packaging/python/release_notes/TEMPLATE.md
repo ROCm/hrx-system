@@ -1,5 +1,6 @@
-Prepares Loom SDK {{VERSION}} from one reviewed source revision and catalog
-association. The marked section below becomes the public GitHub release notes.
+Prepares the stable Loom SDK {{VERSION}} release from one reviewed source
+revision and catalog association. Copy the completed release-line Gist into the
+marked section below; it becomes the public GitHub release notes.
 
 ## Release notes
 
@@ -28,10 +29,6 @@ association. The marked section below becomes the public GitHub release notes.
 | Affected surface | Previous contract | Current contract | Migration |
 | --- | --- | --- | --- |
 | {{CLI_API_IR_CONFIGURATION_OR_DEFAULT}} | {{PREVIOUS_BEHAVIOR}} | {{CURRENT_BEHAVIOR}} | {{REQUIRED_USER_ACTION}} |
-
-## Release-candidate feedback
-
-{{INTENDED_EVALUATORS_FEEDBACK_CHANNEL_AND_ACTIONABLE_REPORT_CONTENTS}}
 
 ## Notable pull requests
 
