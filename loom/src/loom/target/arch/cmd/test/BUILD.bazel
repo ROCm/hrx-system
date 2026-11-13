@@ -17,6 +17,7 @@ loom_check_test_suite(
     srcs = [
         "bytecode.loom-test",
         "diagnostics.loom-test",
+        "launch_counts.loom-test",
         "low.loom-test",
         "planning.loom-test",
         "roundtrip.loom-test",
