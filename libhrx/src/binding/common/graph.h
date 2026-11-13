@@ -372,7 +372,8 @@ typedef struct iree_hal_streaming_graph_dependency_index_t {
 // Graph node structure.
 // Memory layout:
 // [iree_hal_streaming_graph_node_t]
-// [dependencies array (dependency_count * sizeof(node*))]
+// [node-kind payload]
+// [dependencies array (initial dependency_count * sizeof(node*))]
 // [padding to iree_max_align_t]
 // [extra_data (e.g., packed kernel arguments)]
 typedef struct iree_hal_streaming_graph_node_t {
@@ -383,7 +384,10 @@ typedef struct iree_hal_streaming_graph_node_t {
   iree_hal_streaming_graph_node_type_t type;
   // Flags controlling graph node visibility and behavior.
   uint8_t flags;
-  // Number of embedded dependency pointers in |dependencies|.
+  // Immutable byte offset from this header to its dependency storage. Removing
+  // edges changes the count but never moves the payload or the array.
+  uint16_t dependency_offset;
+  // Number of live embedded predecessors beginning at |dependency_offset|.
   uint32_t dependency_count;
   // INDEXED_DEPENDENCIES selects the index without enlarging the node header.
   union {
@@ -399,24 +403,104 @@ typedef struct iree_hal_streaming_graph_node_t {
   // Process-unique identifier used for graph debug output.
   uint64_t debug_id;
 
-  // Node-specific data.
-  union {
-    iree_hal_streaming_graph_kernel_node_attrs_t kernel;
-    iree_hal_streaming_graph_memcpy_node_attrs_t memcpy;
-    iree_hal_streaming_graph_memset_node_attrs_t memset;
-    iree_hal_streaming_graph_host_call_node_attrs_t host;
-    iree_hal_streaming_graph_child_graph_node_attrs_t child_graph;
-    iree_hal_streaming_graph_event_node_attrs_t event;
-    iree_hal_streaming_graph_mem_alloc_node_attrs_t mem_alloc;
-    iree_hal_streaming_graph_mem_free_node_attrs_t mem_free;
-    iree_hal_streaming_graph_batch_mem_op_node_attrs_t batch_mem_op;
-  } attrs;
-
-  // Variable-length array of dependency node pointers follows the struct.
-  // Pointer storage keeps dependency traversal independent of the graph's
-  // backing node blocks.
-  iree_hal_streaming_graph_node_t* dependencies[];
+  // Kind-specific attributes, embedded dependencies, and aligned argument data.
+  // Each constructor reserves only its own payload and fixed update capacity.
+  uint8_t data[];
 } iree_hal_streaming_graph_node_t;
+
+// Each kind reserves a fixed payload. These offsets fit in the header's two
+// otherwise unused bytes and never change when embedded edges are removed.
+static inline uint16_t iree_hal_streaming_graph_node_storage_size(
+    iree_hal_streaming_graph_node_type_t type) {
+  static const uint16_t sizes[] = {
+      sizeof(iree_hal_streaming_graph_node_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_kernel_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_memcpy_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_memset_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_host_call_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_child_graph_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_event_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_event_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_mem_alloc_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_mem_free_node_attrs_t),
+      sizeof(iree_hal_streaming_graph_node_t) +
+          sizeof(iree_hal_streaming_graph_batch_mem_op_node_attrs_t),
+  };
+  return sizes[type & ~IREE_HAL_STREAMING_GRAPH_NODE_TYPE_RECORDABLE];
+}
+
+// Payload and dependency addresses remain stable through parameter and edge
+// updates. A const header can still name mutable graph-owned storage; callers
+// serialize graph mutation according to the graph's public access contract.
+static inline iree_hal_streaming_graph_kernel_node_attrs_t*
+iree_hal_streaming_graph_node_kernel(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_kernel_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_memcpy_node_attrs_t*
+iree_hal_streaming_graph_node_memcpy(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_memcpy_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_memset_node_attrs_t*
+iree_hal_streaming_graph_node_memset(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_memset_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_host_call_node_attrs_t*
+iree_hal_streaming_graph_node_host(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_host_call_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_child_graph_node_attrs_t*
+iree_hal_streaming_graph_node_child_graph(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_child_graph_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_event_node_attrs_t*
+iree_hal_streaming_graph_node_event(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_event_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_mem_alloc_node_attrs_t*
+iree_hal_streaming_graph_node_mem_alloc(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_mem_alloc_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_mem_free_node_attrs_t*
+iree_hal_streaming_graph_node_mem_free(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_mem_free_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_batch_mem_op_node_attrs_t*
+iree_hal_streaming_graph_node_batch_mem_op(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_batch_mem_op_node_attrs_t*)node->data;
+}
+
+static inline iree_hal_streaming_graph_node_t**
+iree_hal_streaming_graph_node_dependencies(
+    const iree_hal_streaming_graph_node_t* node) {
+  return (iree_hal_streaming_graph_node_t**)((uint8_t*)node +
+                                             node->dependency_offset);
+}
 
 // Publication assigns the owner; removal and rollback clear it while leaving
 // the handle's arena storage alive until graph destruction.
@@ -541,6 +625,24 @@ iree_status_t iree_hal_streaming_graph_add_empty_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count,
+    iree_hal_streaming_graph_node_t** out_node);
+
+// Transfers the prepared allocation reference on success; failure leaves it
+// with the caller. Parameter bytes already belong to the graph arena.
+iree_status_t iree_hal_streaming_graph_add_mem_alloc_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    const iree_hal_streaming_graph_mem_alloc_node_attrs_t* attrs,
+    iree_hal_streaming_graph_node_t** out_node);
+
+// Transfers the prepared allocation reference on success; failure leaves it
+// with the caller. Parameter bytes already belong to the graph arena.
+iree_status_t iree_hal_streaming_graph_add_mem_free_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    const iree_hal_streaming_graph_mem_free_node_attrs_t* attrs,
     iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_add_kernel_node(

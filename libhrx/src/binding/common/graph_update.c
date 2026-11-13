@@ -45,7 +45,8 @@ iree_hal_streaming_graph_update_next_dependency(
   while (cursor->position < cursor->node->dependency_count || cursor->edge) {
     const iree_hal_streaming_graph_node_t* predecessor;
     if (cursor->position < cursor->node->dependency_count) {
-      predecessor = cursor->node->dependencies[cursor->position++];
+      predecessor = iree_hal_streaming_graph_node_dependencies(
+          cursor->node)[cursor->position++];
     } else {
       predecessor = cursor->edge->from;
       cursor->edge = cursor->edge->next;
@@ -249,23 +250,25 @@ static iree_status_t iree_hal_streaming_graph_check_update_pair(
         switch (old_node->type) {
           case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY:
             if (!iree_hal_streaming_graph_memcpy_update_is_compatible(
-                    &old_node->attrs.memcpy, &new_node->attrs.memcpy)) {
+                    iree_hal_streaming_graph_node_memcpy(old_node),
+                    iree_hal_streaming_graph_node_memcpy(new_node))) {
               *out_result =
                   IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_PARAMETERS_CHANGED;
             }
             break;
           case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET:
             if (!iree_hal_streaming_graph_memset_update_is_compatible(
-                    &old_node->attrs.memset, &new_node->attrs.memset)) {
+                    iree_hal_streaming_graph_node_memset(old_node),
+                    iree_hal_streaming_graph_node_memset(new_node))) {
               *out_result =
                   IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_PARAMETERS_CHANGED;
             }
             break;
           case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH:
             status = iree_hal_streaming_graph_check_update(
-                old_node->attrs.child_graph.graph,
-                new_node->attrs.child_graph.graph, arena, out_error_node,
-                out_result);
+                iree_hal_streaming_graph_node_child_graph(old_node)->graph,
+                iree_hal_streaming_graph_node_child_graph(new_node)->graph,
+                arena, out_error_node, out_result);
             break;
           default:
             break;

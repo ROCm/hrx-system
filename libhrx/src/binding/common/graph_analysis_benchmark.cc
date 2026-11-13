@@ -71,6 +71,12 @@ struct NativeGraph {
   static constexpr auto kNodeType = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET;
   static constexpr auto kHostType = HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL;
 
+  static size_t NodeSize(uint8_t) { return sizeof(Node); }
+
+  static void Initialize(Node* node, uint8_t type) { node->type = type; }
+
+  static Node** Dependencies(Node* node) { return node->dependencies; }
+
   static void Link(Edge* edge, Node* from, Node* to, Edge** head) {
     *edge = {.next = *head, .from = from, .to = to};
     *head = edge;
@@ -92,6 +98,19 @@ struct BindingGraph {
   static constexpr auto kNodeType = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET;
   static constexpr auto kHostType =
       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL;
+
+  static size_t NodeSize(uint8_t type) {
+    return iree_hal_streaming_graph_node_storage_size(type);
+  }
+
+  static void Initialize(Node* node, uint8_t type) {
+    node->type = type;
+    node->dependency_offset = NodeSize(type);
+  }
+
+  static Node** Dependencies(Node* node) {
+    return iree_hal_streaming_graph_node_dependencies(node);
+  }
 
   static void Link(Edge* edge, Node* from, Node* to, Edge**) {
     *edge = {.next = to->additional_dependencies, .from = from};
@@ -128,13 +147,15 @@ class GraphInput {
     }
     for (uint32_t i = 0; i < count; ++i) {
       Node* node = nullptr;
+      const uint8_t type = topology == Topology::kHostBoundaries && i % 32 == 31
+                               ? Graph::kHostType
+                               : Graph::kNodeType;
+      const size_t node_size = Graph::NodeSize(type);
       IREE_CHECK_OK(iree_arena_allocate(
-          &arena_, sizeof(Node) + dependency_counts[i] * sizeof(Node*),
+          &arena_, node_size + dependency_counts[i] * sizeof(Node*),
           reinterpret_cast<void**>(&node)));
-      std::memset(node, 0, sizeof(*node));
-      node->type = topology == Topology::kHostBoundaries && i % 32 == 31
-                       ? Graph::kHostType
-                       : Graph::kNodeType;
+      std::memset(node, 0, node_size);
+      Graph::Initialize(node, type);
       node->node_index = i;
       block_->nodes[i] = node;
     }
@@ -142,7 +163,7 @@ class GraphInput {
       Node* from = block_->nodes[edge.first];
       Node* to = block_->nodes[edge.second];
       if (storage == EdgeStorage::kEmbedded) {
-        to->dependencies[to->dependency_count++] = from;
+        Graph::Dependencies(to)[to->dependency_count++] = from;
       } else {
         Edge* added = nullptr;
         IREE_CHECK_OK(iree_arena_allocate(&arena_, sizeof(*added),

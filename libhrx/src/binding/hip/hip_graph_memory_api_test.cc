@@ -378,6 +378,16 @@ class HipGraphMemoryApiTest : public ::testing::Test {
                                                      observed_.size(),
                                                      hipMemcpyDeviceToHost));
     }
+    // A rejected replacement must preserve both the accepted private recording
+    // and the older invocation still waiting at the stream gate.
+    hipMemcpy3DParms invalid_params = upload_params;
+    invalid_params.dstPtr.pitch = 1;
+    EXPECT_EQ(hipErrorInvalidValue, api_.set_executable_copy_3d(
+                                        executable_, upload, &invalid_params));
+    hipMemcpy3DParms queried_params = {};
+    ASSERT_EQ(hipSuccess, api_.get_copy(upload, &queried_params));
+    EXPECT_EQ(queried_params.srcPtr.ptr, source_.data());
+    EXPECT_EQ(queried_params.dstPtr.pitch, width);
     ReleaseStreamGate();
     ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
     EXPECT_EQ(destination_, source_);

@@ -226,7 +226,8 @@ static iree_status_t iree_hal_streaming_capture_build_host_to_device(
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_host_call_node(
       graph, dependencies, dependency_count,
       iree_hal_streaming_host_memcpy_callback, callback_data, &callback_node));
-  callback_node->attrs.host.user_data_size = sizeof(*callback_data);
+  iree_hal_streaming_graph_node_host(callback_node)->user_data_size =
+      sizeof(*callback_data);
 
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_staged_copy_node(
       graph, dependencies, dependency_count, callback_node,
@@ -305,7 +306,8 @@ static iree_status_t iree_hal_streaming_capture_build_device_to_host(
       graph, copy_dependencies, IREE_ARRAYSIZE(copy_dependencies),
       iree_hal_streaming_host_memcpy_callback, callback_data, &callback_node));
   iree_hal_streaming_graph_attach_copy_callback(copy_node, callback_node, true);
-  callback_node->attrs.host.user_data_size = sizeof(*callback_data);
+  iree_hal_streaming_graph_node_host(callback_node)->user_data_size =
+      sizeof(*callback_data);
   *out_terminal_node = copy_node;
   return iree_ok_status();
 }

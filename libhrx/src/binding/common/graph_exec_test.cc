@@ -652,7 +652,8 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
       iree_status_t status = iree_hal_streaming_graph_add_host_call_node(
           graph, nullptr, 0, prepare_copy, &parameters, &prepare);
       if (iree_status_is_ok(status)) {
-        prepare->attrs.host.user_data_size = sizeof(parameters);
+        iree_hal_streaming_graph_node_host(prepare)->user_data_size =
+            sizeof(parameters);
         status = iree_hal_streaming_graph_add_staged_copy_node(
             graph, nullptr, 0, prepare, IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD,
             destination->device_ptr, sizeof(value), sizeof(value),
@@ -756,6 +757,45 @@ TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
         }
       }
     }
+  }
+}
+
+TEST_F(GraphExecTest, RemovingEmbeddedDependenciesPreservesTheNodePayload) {
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  uint32_t result = 0;
+  ScopeExit release_handles([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(graph);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_graph_node_t* predecessors[2] = {};
+  for (auto& predecessor : predecessors) {
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(graph, nullptr, 0,
+                                                           &predecessor));
+  }
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, predecessors, IREE_ARRAYSIZE(predecessors),
+      +[](void* data) { *static_cast<uint32_t*>(data) = 37; }, &result, &node));
+  // Remove the first embedded predecessor, compacting the array, then the last
+  // one. Neither edit changes the callback payload copied by instantiation.
+  for (auto& predecessor : predecessors) {
+    IREE_ASSERT_OK(iree_hal_streaming_graph_remove_dependencies(
+        graph, &predecessor, &node, 1));
+    IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+        graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+    result = 0;
+    iree_hal_streaming_graph_exec_launch_result_t launch_result;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                        &launch_result));
+    IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    EXPECT_EQ(result, 37u);
+    iree_hal_streaming_graph_exec_release(executable);
+    executable = nullptr;
   }
 }
 
@@ -934,10 +974,15 @@ TEST_F(GraphExecTest, CopyHelpersShareEnableStateAndTemplateLifetime) {
       graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone));
   auto* cloned_copy = clone->node_blocks->nodes[1];
   EXPECT_EQ(clone->copy_helper_count, 2u);
-  EXPECT_EQ(cloned_copy->attrs.memcpy.pre_callback->attrs.host.copy_node,
+  EXPECT_EQ(iree_hal_streaming_graph_node_host(
+                iree_hal_streaming_graph_node_memcpy(cloned_copy)->pre_callback)
+                ->copy_node,
             cloned_copy);
-  EXPECT_EQ(cloned_copy->attrs.memcpy.post_callback->attrs.host.copy_node,
-            cloned_copy);
+  EXPECT_EQ(
+      iree_hal_streaming_graph_node_host(
+          iree_hal_streaming_graph_node_memcpy(cloned_copy)->post_callback)
+          ->copy_node,
+      cloned_copy);
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       clone, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
   IREE_ASSERT_OK(iree_hal_streaming_graph_exec_set_node_enabled(
@@ -996,7 +1041,7 @@ TEST_F(GraphExecTest, ClonedHostOperationOwnsItsPayloadAndExecutableSnapshot) {
         return iree_ok_status();
       },
       copy, &node));
-  node->attrs.host.user_data_size = sizeof(*copy);
+  iree_hal_streaming_graph_node_host(node)->user_data_size = sizeof(*copy);
   IREE_ASSERT_OK(iree_hal_streaming_graph_clone(
       graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone));
   copy->value = 23;
@@ -1005,7 +1050,8 @@ TEST_F(GraphExecTest, ClonedHostOperationOwnsItsPayloadAndExecutableSnapshot) {
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       clone, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
   iree_hal_streaming_graph_node_t* cloned_node = clone->node_blocks->nodes[0];
-  auto* cloned_copy = static_cast<Copy*>(cloned_node->attrs.host.user_data);
+  auto* cloned_copy = static_cast<Copy*>(
+      iree_hal_streaming_graph_node_host(cloned_node)->user_data);
   EXPECT_EQ(cloned_copy->value, 17);
   cloned_copy->value = 31;
   iree_hal_streaming_graph_exec_launch_result_t launch_result;
@@ -1087,8 +1133,8 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
         return iree_ok_status();
       },
       copy, &node));
-  node->attrs.host.user_data_size = sizeof(*copy);
-  node->attrs.host.resource = &initial_value->resource;
+  iree_hal_streaming_graph_node_host(node)->user_data_size = sizeof(*copy);
+  iree_hal_streaming_graph_node_host(node)->resource = &initial_value->resource;
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
   iree_hal_streaming_graph_exec_launch_result_t launch_result;
@@ -1100,8 +1146,8 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
   // pending operation. Its captured parameters must survive that release.
   auto* updated_value = new Value{{}, 31, &destroyed};
   iree_hal_resource_initialize(&value_vtable, &updated_value->resource);
-  iree_hal_resource_release(node->attrs.host.resource);
-  node->attrs.host.resource = &updated_value->resource;
+  iree_hal_resource_release(iree_hal_streaming_graph_node_host(node)->resource);
+  iree_hal_streaming_graph_node_host(node)->resource = &updated_value->resource;
   copy->value = updated_value;
   iree_hal_streaming_graph_node_t* error_node = nullptr;
   iree_hal_streaming_graph_exec_update_result_t update_result;
@@ -1306,7 +1352,7 @@ TEST_F(GraphExecTest, FailedUpdatePreservesThePreviousExecutable) {
       executable, replacement, &error_node, &update_result));
   const size_t allocation_count = allocation_control.allocation_count;
   ASSERT_GT(allocation_count, 0u);
-  replacement_node->attrs.host.user_data = &calls[2];
+  iree_hal_streaming_graph_node_host(replacement_node)->user_data = &calls[2];
   for (size_t failure_index = 0; failure_index < allocation_count;
        ++failure_index) {
     SCOPED_TRACE(failure_index);
@@ -1402,17 +1448,23 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
       sizeof(public_params), &public_operation, sizeof(public_operation),
       &operation, &owner, /*operation_count=*/1, &node));
   ASSERT_NE(node, nullptr);
-  ASSERT_EQ(1u, node->attrs.batch_mem_op.operation_count);
-  EXPECT_EQ(store_params.flags,
-            node->attrs.batch_mem_op.operations[0].params.store.flags);
-  EXPECT_EQ(store_params.width,
-            node->attrs.batch_mem_op.operations[0].params.store.width);
-  EXPECT_EQ(store_params.value,
-            node->attrs.batch_mem_op.operations[0].params.store.value);
-  EXPECT_EQ(target.buffer,
-            node->attrs.batch_mem_op.operations[0].target_buffer);
-  EXPECT_EQ(target.offset,
-            node->attrs.batch_mem_op.operations[0].target_offset);
+  ASSERT_EQ(1u,
+            iree_hal_streaming_graph_node_batch_mem_op(node)->operation_count);
+  EXPECT_EQ(store_params.flags, iree_hal_streaming_graph_node_batch_mem_op(node)
+                                    ->operations[0]
+                                    .params.store.flags);
+  EXPECT_EQ(store_params.width, iree_hal_streaming_graph_node_batch_mem_op(node)
+                                    ->operations[0]
+                                    .params.store.width);
+  EXPECT_EQ(store_params.value, iree_hal_streaming_graph_node_batch_mem_op(node)
+                                    ->operations[0]
+                                    .params.store.value);
+  EXPECT_EQ(target.buffer, iree_hal_streaming_graph_node_batch_mem_op(node)
+                               ->operations[0]
+                               .target_buffer);
+  EXPECT_EQ(target.offset, iree_hal_streaming_graph_node_batch_mem_op(node)
+                               ->operations[0]
+                               .target_offset);
 
   IREE_ASSERT_OK(iree_hal_streaming_graph_clone(
       graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone_graph));
@@ -1464,10 +1516,11 @@ TEST_F(GraphExecTest,
   auto* second_node = graph->node_blocks->nodes[1];
   ASSERT_EQ(IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, first_node->type);
   ASSERT_EQ(IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, second_node->type);
-  EXPECT_EQ(first, first_node->attrs.event.event);
-  EXPECT_EQ(second, second_node->attrs.event.event);
+  EXPECT_EQ(first, iree_hal_streaming_graph_node_event(first_node)->event);
+  EXPECT_EQ(second, iree_hal_streaming_graph_node_event(second_node)->event);
   ASSERT_EQ(1u, second_node->dependency_count);
-  EXPECT_EQ(first_node, second_node->dependencies[0]);
+  EXPECT_EQ(first_node,
+            iree_hal_streaming_graph_node_dependencies(second_node)[0]);
   EXPECT_EQ(0u, first->capture_dependency_count);
   ASSERT_EQ(1u, second->capture_dependency_count);
   EXPECT_EQ(first_node, second->capture_dependencies[0]);
@@ -1687,7 +1740,8 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
   // A later parameter update recompiles the graph and must preserve both
   // event replacements while leaving their template nodes untouched.
   auto* private_node = iree_hal_streaming_graph_exec_lock_node(exec, host_node);
-  private_node->attrs.host.user_data = &replacement_called;
+  iree_hal_streaming_graph_node_host(private_node)->user_data =
+      &replacement_called;
   status = iree_hal_streaming_graph_exec_rebuild_locked(exec);
   iree_hal_streaming_graph_exec_unlock(exec);
   IREE_ASSERT_OK(status);
@@ -1697,8 +1751,8 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
   EXPECT_FALSE(original_called.load());
   EXPECT_TRUE(replacement_called.load());
-  EXPECT_EQ(record_node->attrs.event.event, event);
-  EXPECT_EQ(wait_node->attrs.event.event, event);
+  EXPECT_EQ(iree_hal_streaming_graph_node_event(record_node)->event, event);
+  EXPECT_EQ(iree_hal_streaming_graph_node_event(wait_node)->event, event);
   iree_hal_streaming_recorded_point_t point;
   iree_hal_streaming_event_acquire_recorded_point(event, &point);
   EXPECT_EQ(point.semaphore, nullptr);

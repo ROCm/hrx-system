@@ -30,9 +30,13 @@ using ::iree::testing::status::StatusIs;
 class GraphNodeStorage {
  public:
   GraphNodeStorage() {
-    IREE_CHECK_OK(iree_allocator_malloc(iree_allocator_system(), sizeof(*node_),
+    const size_t node_size =
+        sizeof(*node_) + sizeof(iree_hal_streaming_graph_kernel_node_attrs_t);
+    IREE_CHECK_OK(iree_allocator_malloc(iree_allocator_system(), node_size,
                                         (void**)&node_));
-    memset(node_, 0, sizeof(*node_));
+    memset(node_, 0, node_size);
+    node_->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
+    node_->dependency_offset = node_size;
   }
 
   ~GraphNodeStorage() { iree_allocator_free(iree_allocator_system(), node_); }
@@ -198,26 +202,28 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
     iree_hal_streaming_graph_node_t& node = *node_storage.get();
     node.graph = &graph;
     node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
-    node.attrs.kernel.symbol = &previous_symbol;
-    node.attrs.kernel.grid_dim[0] = 7;
-    node.attrs.kernel.grid_dim[1] = 5;
-    node.attrs.kernel.grid_dim[2] = 3;
-    node.attrs.kernel.block_dim[0] = 11;
-    node.attrs.kernel.block_dim[1] = 13;
-    node.attrs.kernel.block_dim[2] = 17;
-    node.attrs.kernel.shared_memory_bytes = 19;
-    node.attrs.kernel.constants =
+    iree_hal_streaming_graph_node_kernel(&node)->symbol = &previous_symbol;
+    iree_hal_streaming_graph_node_kernel(&node)->grid_dim[0] = 7;
+    iree_hal_streaming_graph_node_kernel(&node)->grid_dim[1] = 5;
+    iree_hal_streaming_graph_node_kernel(&node)->grid_dim[2] = 3;
+    iree_hal_streaming_graph_node_kernel(&node)->block_dim[0] = 11;
+    iree_hal_streaming_graph_node_kernel(&node)->block_dim[1] = 13;
+    iree_hal_streaming_graph_node_kernel(&node)->block_dim[2] = 17;
+    iree_hal_streaming_graph_node_kernel(&node)->shared_memory_bytes = 19;
+    iree_hal_streaming_graph_node_kernel(&node)->constants =
         iree_make_const_byte_span(constants.data(), constants.size());
-    node.attrs.kernel.constants_capacity = constants.size();
+    iree_hal_streaming_graph_node_kernel(&node)->constants_capacity =
+        constants.size();
     std::array<iree_hal_buffer_ref_t, 1> binding_storage = {
         iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/23, /*offset=*/29,
                                           /*length=*/31),
     };
-    node.attrs.kernel.bindings = {
+    iree_hal_streaming_graph_node_kernel(&node)->bindings = {
         .count = binding_storage.size(),
         .values = binding_storage.data(),
     };
-    node.attrs.kernel.binding_capacity = binding_storage.size();
+    iree_hal_streaming_graph_node_kernel(&node)->binding_capacity =
+        binding_storage.size();
 
     std::array<uint32_t, kArgumentCount> values = {1, 2, 3};
     std::array<void*, kArgumentCount> arguments = {
@@ -239,17 +245,23 @@ TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
                     &node, &symbol, &params)),
                 StatusIs(StatusCode::kInvalidArgument));
     EXPECT_EQ(original_constants, constants);
-    EXPECT_EQ(&previous_symbol, node.attrs.kernel.symbol);
-    EXPECT_EQ(7u, node.attrs.kernel.grid_dim[0]);
-    EXPECT_EQ(5u, node.attrs.kernel.grid_dim[1]);
-    EXPECT_EQ(3u, node.attrs.kernel.grid_dim[2]);
-    EXPECT_EQ(11u, node.attrs.kernel.block_dim[0]);
-    EXPECT_EQ(13u, node.attrs.kernel.block_dim[1]);
-    EXPECT_EQ(17u, node.attrs.kernel.block_dim[2]);
-    EXPECT_EQ(19u, node.attrs.kernel.shared_memory_bytes);
-    EXPECT_EQ(constants.size(), node.attrs.kernel.constants.data_length);
-    EXPECT_EQ(binding_storage.size(), node.attrs.kernel.bindings.count);
-    EXPECT_EQ(binding_storage.data(), node.attrs.kernel.bindings.values);
+    EXPECT_EQ(&previous_symbol,
+              iree_hal_streaming_graph_node_kernel(&node)->symbol);
+    EXPECT_EQ(7u, iree_hal_streaming_graph_node_kernel(&node)->grid_dim[0]);
+    EXPECT_EQ(5u, iree_hal_streaming_graph_node_kernel(&node)->grid_dim[1]);
+    EXPECT_EQ(3u, iree_hal_streaming_graph_node_kernel(&node)->grid_dim[2]);
+    EXPECT_EQ(11u, iree_hal_streaming_graph_node_kernel(&node)->block_dim[0]);
+    EXPECT_EQ(13u, iree_hal_streaming_graph_node_kernel(&node)->block_dim[1]);
+    EXPECT_EQ(17u, iree_hal_streaming_graph_node_kernel(&node)->block_dim[2]);
+    EXPECT_EQ(19u,
+              iree_hal_streaming_graph_node_kernel(&node)->shared_memory_bytes);
+    EXPECT_EQ(
+        constants.size(),
+        iree_hal_streaming_graph_node_kernel(&node)->constants.data_length);
+    EXPECT_EQ(binding_storage.size(),
+              iree_hal_streaming_graph_node_kernel(&node)->bindings.count);
+    EXPECT_EQ(binding_storage.data(),
+              iree_hal_streaming_graph_node_kernel(&node)->bindings.values);
     EXPECT_EQ(23u, binding_storage[0].buffer_slot);
     EXPECT_EQ(29u, binding_storage[0].offset);
     EXPECT_EQ(31u, binding_storage[0].length);
@@ -269,19 +281,21 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
   node.graph = &graph;
   node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
   iree_hal_streaming_symbol_t previous_symbol = {};
-  node.attrs.kernel.symbol = &previous_symbol;
-  node.attrs.kernel.grid_dim[0] = 7;
-  node.attrs.kernel.block_dim[0] = 11;
-  node.attrs.kernel.shared_memory_bytes = 19;
-  node.attrs.kernel.constants =
+  iree_hal_streaming_graph_node_kernel(&node)->symbol = &previous_symbol;
+  iree_hal_streaming_graph_node_kernel(&node)->grid_dim[0] = 7;
+  iree_hal_streaming_graph_node_kernel(&node)->block_dim[0] = 11;
+  iree_hal_streaming_graph_node_kernel(&node)->shared_memory_bytes = 19;
+  iree_hal_streaming_graph_node_kernel(&node)->constants =
       iree_make_const_byte_span(constants.data(), constants.size());
-  node.attrs.kernel.constants_capacity = constants.size();
+  iree_hal_streaming_graph_node_kernel(&node)->constants_capacity =
+      constants.size();
   std::array<iree_hal_buffer_ref_t, 1> binding_storage = {};
-  node.attrs.kernel.bindings = {
+  iree_hal_streaming_graph_node_kernel(&node)->bindings = {
       .count = binding_storage.size(),
       .values = binding_storage.data(),
   };
-  node.attrs.kernel.binding_capacity = binding_storage.size();
+  iree_hal_streaming_graph_node_kernel(&node)->binding_capacity =
+      binding_storage.size();
 
   iree_hal_streaming_symbol_t symbol = {
       .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
@@ -301,13 +315,18 @@ TEST(GraphTest, KernelParameterUpdateRejectsShortPrepackedSpan) {
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_streaming_graph_set_kernel_node_params(&node, &symbol, &params));
   EXPECT_EQ(original_constants, constants);
-  EXPECT_EQ(&previous_symbol, node.attrs.kernel.symbol);
-  EXPECT_EQ(7u, node.attrs.kernel.grid_dim[0]);
-  EXPECT_EQ(11u, node.attrs.kernel.block_dim[0]);
-  EXPECT_EQ(19u, node.attrs.kernel.shared_memory_bytes);
-  EXPECT_EQ(constants.size(), node.attrs.kernel.constants.data_length);
-  EXPECT_EQ(binding_storage.size(), node.attrs.kernel.bindings.count);
-  EXPECT_EQ(binding_storage.data(), node.attrs.kernel.bindings.values);
+  EXPECT_EQ(&previous_symbol,
+            iree_hal_streaming_graph_node_kernel(&node)->symbol);
+  EXPECT_EQ(7u, iree_hal_streaming_graph_node_kernel(&node)->grid_dim[0]);
+  EXPECT_EQ(11u, iree_hal_streaming_graph_node_kernel(&node)->block_dim[0]);
+  EXPECT_EQ(19u,
+            iree_hal_streaming_graph_node_kernel(&node)->shared_memory_bytes);
+  EXPECT_EQ(constants.size(),
+            iree_hal_streaming_graph_node_kernel(&node)->constants.data_length);
+  EXPECT_EQ(binding_storage.size(),
+            iree_hal_streaming_graph_node_kernel(&node)->bindings.count);
+  EXPECT_EQ(binding_storage.data(),
+            iree_hal_streaming_graph_node_kernel(&node)->bindings.values);
 }
 
 TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
@@ -321,9 +340,10 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
   iree_hal_streaming_graph_node_t& node = *node_storage.get();
   node.graph = &graph;
   node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
-  node.attrs.kernel.constants =
+  iree_hal_streaming_graph_node_kernel(&node)->constants =
       iree_make_const_byte_span(constants.data(), constants.size());
-  node.attrs.kernel.constants_capacity = constants.size();
+  iree_hal_streaming_graph_node_kernel(&node)->constants_capacity =
+      constants.size();
 
   iree_hal_streaming_symbol_t symbol = {
       .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
@@ -347,8 +367,10 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &symbol, &exact_params));
-  EXPECT_EQ(exact_arguments.size(), node.attrs.kernel.constants.data_length);
-  EXPECT_EQ(exact_params.binding_function, node.attrs.kernel.hip_function);
+  EXPECT_EQ(exact_arguments.size(),
+            iree_hal_streaming_graph_node_kernel(&node)->constants.data_length);
+  EXPECT_EQ(exact_params.binding_function,
+            iree_hal_streaming_graph_node_kernel(&node)->hip_function);
   EXPECT_EQ(0, memcmp(exact_arguments.data(), constants.data(),
                       exact_arguments.size()));
   for (size_t i = exact_arguments.size(); i < constants.size(); ++i) {
@@ -372,7 +394,8 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &symbol, &padded_params));
-  EXPECT_EQ(padded_arguments.size(), node.attrs.kernel.constants.data_length);
+  EXPECT_EQ(padded_arguments.size(),
+            iree_hal_streaming_graph_node_kernel(&node)->constants.data_length);
   EXPECT_EQ(0, memcmp(padded_arguments.data(), constants.data(),
                       padded_arguments.size()));
   padded_arguments.fill(0xFF);
@@ -392,7 +415,8 @@ TEST(GraphTest, KernelParameterUpdateCapturesPrepackedArgumentSpans) {
   };
   IREE_EXPECT_OK(iree_hal_streaming_graph_set_kernel_node_params(
       &node, &empty_symbol, &empty_params));
-  EXPECT_EQ(0u, node.attrs.kernel.constants.data_length);
+  EXPECT_EQ(0u,
+            iree_hal_streaming_graph_node_kernel(&node)->constants.data_length);
 }
 
 TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
@@ -408,14 +432,16 @@ TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
   iree_hal_streaming_graph_node_t& node = *node_storage.get();
   node.graph = &graph;
   node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
-  node.attrs.kernel.constants =
+  iree_hal_streaming_graph_node_kernel(&node)->constants =
       iree_make_const_byte_span(constants.data(), constants.size());
-  node.attrs.kernel.constants_capacity = constants.size();
-  node.attrs.kernel.bindings = {
+  iree_hal_streaming_graph_node_kernel(&node)->constants_capacity =
+      constants.size();
+  iree_hal_streaming_graph_node_kernel(&node)->bindings = {
       .count = binding_storage.size(),
       .values = binding_storage.data(),
   };
-  node.attrs.kernel.binding_capacity = binding_storage.size();
+  iree_hal_streaming_graph_node_kernel(&node)->binding_capacity =
+      binding_storage.size();
 
   std::array<iree_hal_streaming_parameter_op_t, 4> operations = {};
   operations[0].copy = {
@@ -489,9 +515,10 @@ TEST(GraphTest, ArgsArrayPackingProducesCompleteNativeAbiImage) {
           reinterpret_cast<uintptr_t>(pointer3));
   memcpy(expected.data() + 40, &device_pointer3, sizeof(device_pointer3));
 
-  EXPECT_EQ(expected.size(), node.attrs.kernel.constants.data_length);
+  EXPECT_EQ(expected.size(),
+            iree_hal_streaming_graph_node_kernel(&node)->constants.data_length);
   EXPECT_EQ(expected, constants);
-  EXPECT_EQ(0u, node.attrs.kernel.bindings.count);
+  EXPECT_EQ(0u, iree_hal_streaming_graph_node_kernel(&node)->bindings.count);
 }
 
 TEST(GraphTest, ArgsArrayPackingRejectsDuplicateSourceWithoutMutation) {
@@ -511,15 +538,17 @@ TEST(GraphTest, ArgsArrayPackingRejectsDuplicateSourceWithoutMutation) {
   node.graph = &graph;
   node.type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
   iree_hal_streaming_symbol_t previous_symbol = {};
-  node.attrs.kernel.symbol = &previous_symbol;
-  node.attrs.kernel.constants =
+  iree_hal_streaming_graph_node_kernel(&node)->symbol = &previous_symbol;
+  iree_hal_streaming_graph_node_kernel(&node)->constants =
       iree_make_const_byte_span(constants.data(), constants.size());
-  node.attrs.kernel.constants_capacity = constants.size();
-  node.attrs.kernel.bindings = {
+  iree_hal_streaming_graph_node_kernel(&node)->constants_capacity =
+      constants.size();
+  iree_hal_streaming_graph_node_kernel(&node)->bindings = {
       .count = binding_storage.size(),
       .values = binding_storage.data(),
   };
-  node.attrs.kernel.binding_capacity = binding_storage.size();
+  iree_hal_streaming_graph_node_kernel(&node)->binding_capacity =
+      binding_storage.size();
 
   std::array<iree_hal_streaming_parameter_op_t, 2> operations = {};
   operations[0].copy = {
@@ -561,8 +590,9 @@ TEST(GraphTest, ArgsArrayPackingRejectsDuplicateSourceWithoutMutation) {
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_streaming_graph_set_kernel_node_params(&node, &symbol, &params));
   EXPECT_EQ(original_constants, constants);
-  EXPECT_EQ(&previous_symbol, node.attrs.kernel.symbol);
-  EXPECT_EQ(1u, node.attrs.kernel.bindings.count);
+  EXPECT_EQ(&previous_symbol,
+            iree_hal_streaming_graph_node_kernel(&node)->symbol);
+  EXPECT_EQ(1u, iree_hal_streaming_graph_node_kernel(&node)->bindings.count);
   EXPECT_EQ(23u, binding_storage[0].buffer_slot);
   EXPECT_EQ(29u, binding_storage[0].offset);
   EXPECT_EQ(31u, binding_storage[0].length);
@@ -976,7 +1006,8 @@ TEST(GraphTest, DependencyValidationRestoresPredecessorsBeforeRetry) {
         state.graph(), predecessors.data(), predecessors.size(), &join));
     ASSERT_EQ(predecessors.size(), join->dependency_count);
     for (size_t i = 0; i < predecessors.size(); ++i) {
-      EXPECT_EQ(predecessors[i], join->dependencies[i]);
+      EXPECT_EQ(predecessors[i],
+                iree_hal_streaming_graph_node_dependencies(join)[i]);
       EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED,
                 predecessors[i]->flags);
     }
@@ -1152,7 +1183,7 @@ TEST(GraphTest, CloneFailureAndBackingReusePreserveResourceOwnership) {
     IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
         graph, nullptr, 0, +[](void*) {}, nullptr, &nodes[1]));
     iree_hal_resource_initialize(&vtable, &payload.resource);
-    nodes[1]->attrs.host.resource = &payload.resource;
+    iree_hal_streaming_graph_node_host(nodes[1])->resource = &payload.resource;
     for (size_t i = 2; i < nodes.size(); ++i) {
       IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(graph, nullptr, 0,
                                                              &nodes[i]));

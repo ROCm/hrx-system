@@ -17,13 +17,13 @@ static iree_status_t iree_hal_streaming_graph_extend_copy_dependency(
   }
   iree_hal_streaming_graph_node_t* completion =
       from->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY &&
-              from->attrs.memcpy.post_callback
-          ? from->attrs.memcpy.post_callback
+              iree_hal_streaming_graph_node_memcpy(from)->post_callback
+          ? iree_hal_streaming_graph_node_memcpy(from)->post_callback
           : from;
   iree_hal_streaming_graph_node_t* preparation =
       to->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY &&
-              to->attrs.memcpy.pre_callback
-          ? to->attrs.memcpy.pre_callback
+              iree_hal_streaming_graph_node_memcpy(to)->pre_callback
+          ? iree_hal_streaming_graph_node_memcpy(to)->pre_callback
           : to;
   if (completion == from && preparation == to) {
     return iree_ok_status();
@@ -56,7 +56,8 @@ iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
       for (uint32_t j = 0;
            j < node->dependency_count && iree_status_is_ok(status); ++j) {
         status = iree_hal_streaming_graph_extend_copy_dependency(
-            node->dependencies[j], node, arena, out_edges);
+            iree_hal_streaming_graph_node_dependencies(node)[j], node, arena,
+            out_edges);
       }
       for (const iree_hal_streaming_graph_dependency_t* dependency =
                iree_hal_streaming_graph_additional_dependencies(node);
@@ -95,8 +96,8 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
       }
       const iree_hal_streaming_graph_node_t* operation =
           node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
-                  node->attrs.host.copy_node
-              ? node->attrs.host.copy_node
+                  iree_hal_streaming_graph_node_host(node)->copy_node
+              ? iree_hal_streaming_graph_node_host(node)->copy_node
               : node;
       const bool disabled =
           ((node->flags | operation->flags) &
@@ -107,7 +108,7 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
         analysis.flags[index] = HRX_GRAPH_ANALYSIS_NODE_EMPTY;
       } else if (iree_hal_streaming_graph_node_is_recordable(node->type) &&
                  !(node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL &&
-                   node->attrs.kernel.cooperative)) {
+                   iree_hal_streaming_graph_node_kernel(node)->cooperative)) {
         analysis.flags[index] = HRX_GRAPH_ANALYSIS_NODE_RECORDABLE;
       } else {
         analysis.flags[index] = HRX_GRAPH_ANALYSIS_NODE_ISOLATED;
@@ -130,8 +131,9 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
     const iree_hal_streaming_graph_node_t* node = analysis.sources[i];
     for (uint32_t j = 0; j < node->dependency_count; ++j) {
       analysis.dependencies[analysis.order[i]++] =
-          node->dependencies[j]->node_index;
-      is_topologically_ordered &= node->dependencies[j]->node_index < i;
+          iree_hal_streaming_graph_node_dependencies(node)[j]->node_index;
+      is_topologically_ordered &=
+          iree_hal_streaming_graph_node_dependencies(node)[j]->node_index < i;
     }
     for (const iree_hal_streaming_graph_dependency_t* dependency =
              iree_hal_streaming_graph_additional_dependencies(node);

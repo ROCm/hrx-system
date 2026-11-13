@@ -1321,16 +1321,25 @@ TEST_F(CpuStreamingMemoryTest, ExecutableCopiesOwnDistinctStaging) {
         continue;
       }
       ++staged_copies;
-      const bool upload = node->attrs.memcpy.staging.direction ==
-                          IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD;
-      EXPECT_EQ(nullptr, upload ? node->attrs.memcpy.src_ref.buffer
-                                : node->attrs.memcpy.dst_ref.buffer);
+      const bool upload =
+          iree_hal_streaming_graph_node_memcpy(node)->staging.direction ==
+          IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD;
+      EXPECT_EQ(
+          nullptr,
+          upload ? iree_hal_streaming_graph_node_memcpy(node)->src_ref.buffer
+                 : iree_hal_streaming_graph_node_memcpy(node)->dst_ref.buffer);
       auto* first_node = iree_hal_streaming_graph_exec_lock_node(first, node);
       auto* second_node = iree_hal_streaming_graph_exec_lock_node(second, node);
-      auto* first_buffer = upload ? first_node->attrs.memcpy.src_ref.buffer
-                                  : first_node->attrs.memcpy.dst_ref.buffer;
-      auto* second_buffer = upload ? second_node->attrs.memcpy.src_ref.buffer
-                                   : second_node->attrs.memcpy.dst_ref.buffer;
+      auto* first_buffer =
+          upload
+              ? iree_hal_streaming_graph_node_memcpy(first_node)->src_ref.buffer
+              : iree_hal_streaming_graph_node_memcpy(first_node)
+                    ->dst_ref.buffer;
+      auto* second_buffer =
+          upload ? iree_hal_streaming_graph_node_memcpy(second_node)
+                       ->src_ref.buffer
+                 : iree_hal_streaming_graph_node_memcpy(second_node)
+                       ->dst_ref.buffer;
       EXPECT_NE(nullptr, first_buffer);
       EXPECT_NE(nullptr, second_buffer);
       EXPECT_NE(first_buffer, second_buffer);
