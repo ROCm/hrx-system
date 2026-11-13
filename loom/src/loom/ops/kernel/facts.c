@@ -460,7 +460,7 @@ static bool loom_kernel_context_has_dense_subgroup_partition(
   if (!bundle) {
     return false;
   }
-  if (bundle->snapshot->subgroup_partition ==
+  if (bundle->snapshot->subgroup_partition >=
       LOOM_TARGET_SUBGROUP_PARTITION_DENSE) {
     return true;
   }

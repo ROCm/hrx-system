@@ -1,13 +1,21 @@
-// The irregular 80-workitem launch crosses physical subgroup boundaries and
-// leaves a partial final subgroup on current GPU execution profiles without
-// encoding any target's subgroup size in the source.
+// The irregular 5x4x4 launch crosses subgroup and row boundaries. The oracle
+// scans flattened logical workitem order, independently of physical lane IDs.
 kernel.def @workgroup_scan_i32() {
   %unit = index.constant 1 : index
-  %items = index.constant 80 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+  %x = index.constant 5 : index
+  %other = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%x, %other, %other) : index
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %item = kernel.workitem.id<x> : index
+  %x = kernel.workitem.id<x> : index
+  %y = kernel.workitem.id<y> : index
+  %z = kernel.workitem.id<z> : index
+  %size_x = index.constant 5 : index
+  %size_y = index.constant 4 : index
+  %plane = index.mul %z, %size_y : index
+  %row = index.add %plane, %y : index
+  %row_start = index.mul %row, %size_x : index
+  %item = index.add %row_start, %x : index
   %input_view = buffer.view %input[%base] : buffer -> view<80xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<80x4xi32>
   %value = view.load %input_view[%item] : view<80xi32> -> i32
@@ -521,6 +529,376 @@ check.scenario @workgroup_scan_integer_family_values {
     check.compare<@workgroup_scan_integer_family, @workgroup_scan_integer_family_oracle>(%input, %output) : (tensor<83x3xi32>, tensor<83x4x9x3xi32>) -> () {
       check.expect.bitwise actual(%input) expected(%input) : tensor<83x3xi32>
       check.expect.bitwise actual(%output) expected(%output) : tensor<83x4x9x3xi32>
+    }
+  }
+  check.return
+}
+
+// Floating extrema use infinity only for an empty exclusive result. In
+// particular, combining that seed with a nonempty all-NaN minnum/maxnum prefix
+// would turn NaN into infinity. The scalar f64 and vector bf16 paths exercise
+// shared composition beyond native single-precision workgroup scans.
+kernel.def @workgroup_scan_extrema_f64() {
+  %unit = index.constant 1 : index
+  %items = index.constant 83 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<83xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<83x16xf64>
+  %value = view.load %source[%item] : view<83xf64> -> f64
+  %forward_minimum = kernel.workgroup.scan<minimumf> %value {direction = forward, mode = inclusive} : f64
+  %forward_maximum = kernel.workgroup.scan<maximumf> %value {direction = forward, mode = inclusive} : f64
+  %forward_minnum = kernel.workgroup.scan<minnumf> %value {direction = forward, mode = inclusive} : f64
+  %forward_maxnum = kernel.workgroup.scan<maxnumf> %value {direction = forward, mode = inclusive} : f64
+  %before_minimum = kernel.workgroup.scan<minimumf> %value {direction = forward, mode = exclusive} : f64
+  %before_maximum = kernel.workgroup.scan<maximumf> %value {direction = forward, mode = exclusive} : f64
+  %before_minnum = kernel.workgroup.scan<minnumf> %value {direction = forward, mode = exclusive} : f64
+  %before_maxnum = kernel.workgroup.scan<maxnumf> %value {direction = forward, mode = exclusive} : f64
+  %reverse_minimum = kernel.workgroup.scan<minimumf> %value {direction = reverse, mode = inclusive} : f64
+  %reverse_maximum = kernel.workgroup.scan<maximumf> %value {direction = reverse, mode = inclusive} : f64
+  %reverse_minnum = kernel.workgroup.scan<minnumf> %value {direction = reverse, mode = inclusive} : f64
+  %reverse_maxnum = kernel.workgroup.scan<maxnumf> %value {direction = reverse, mode = inclusive} : f64
+  %after_minimum = kernel.workgroup.scan<minimumf> %value {direction = reverse, mode = exclusive} : f64
+  %after_maximum = kernel.workgroup.scan<maximumf> %value {direction = reverse, mode = exclusive} : f64
+  %after_minnum = kernel.workgroup.scan<minnumf> %value {direction = reverse, mode = exclusive} : f64
+  %after_maxnum = kernel.workgroup.scan<maxnumf> %value {direction = reverse, mode = exclusive} : f64
+  view.store %forward_minimum, %destination[%item, 0] : f64, view<83x16xf64>
+  view.store %forward_maximum, %destination[%item, 1] : f64, view<83x16xf64>
+  view.store %forward_minnum, %destination[%item, 2] : f64, view<83x16xf64>
+  view.store %forward_maxnum, %destination[%item, 3] : f64, view<83x16xf64>
+  view.store %before_minimum, %destination[%item, 4] : f64, view<83x16xf64>
+  view.store %before_maximum, %destination[%item, 5] : f64, view<83x16xf64>
+  view.store %before_minnum, %destination[%item, 6] : f64, view<83x16xf64>
+  view.store %before_maxnum, %destination[%item, 7] : f64, view<83x16xf64>
+  view.store %reverse_minimum, %destination[%item, 8] : f64, view<83x16xf64>
+  view.store %reverse_maximum, %destination[%item, 9] : f64, view<83x16xf64>
+  view.store %reverse_minnum, %destination[%item, 10] : f64, view<83x16xf64>
+  view.store %reverse_maxnum, %destination[%item, 11] : f64, view<83x16xf64>
+  view.store %after_minimum, %destination[%item, 12] : f64, view<83x16xf64>
+  view.store %after_maximum, %destination[%item, 13] : f64, view<83x16xf64>
+  view.store %after_minnum, %destination[%item, 14] : f64, view<83x16xf64>
+  view.store %after_maxnum, %destination[%item, 15] : f64, view<83x16xf64>
+  kernel.return
+}
+
+kernel.def @workgroup_scan_extrema_bf16() {
+  %unit = index.constant 1 : index
+  %items = index.constant 83 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<83x2xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<83x16x2xf64>
+  %wide = vector.load %source[%item, 0] : view<83x2xf64> -> vector<2xf64>
+  %value = vector.fptrunc %wide : vector<2xf64> to vector<2xbf16>
+  %forward_minimum = kernel.workgroup.scan<minimumf> %value {direction = forward, mode = inclusive} : vector<2xbf16>
+  %forward_maximum = kernel.workgroup.scan<maximumf> %value {direction = forward, mode = inclusive} : vector<2xbf16>
+  %forward_minnum = kernel.workgroup.scan<minnumf> %value {direction = forward, mode = inclusive} : vector<2xbf16>
+  %forward_maxnum = kernel.workgroup.scan<maxnumf> %value {direction = forward, mode = inclusive} : vector<2xbf16>
+  %before_minimum = kernel.workgroup.scan<minimumf> %value {direction = forward, mode = exclusive} : vector<2xbf16>
+  %before_maximum = kernel.workgroup.scan<maximumf> %value {direction = forward, mode = exclusive} : vector<2xbf16>
+  %before_minnum = kernel.workgroup.scan<minnumf> %value {direction = forward, mode = exclusive} : vector<2xbf16>
+  %before_maxnum = kernel.workgroup.scan<maxnumf> %value {direction = forward, mode = exclusive} : vector<2xbf16>
+  %reverse_minimum = kernel.workgroup.scan<minimumf> %value {direction = reverse, mode = inclusive} : vector<2xbf16>
+  %reverse_maximum = kernel.workgroup.scan<maximumf> %value {direction = reverse, mode = inclusive} : vector<2xbf16>
+  %reverse_minnum = kernel.workgroup.scan<minnumf> %value {direction = reverse, mode = inclusive} : vector<2xbf16>
+  %reverse_maxnum = kernel.workgroup.scan<maxnumf> %value {direction = reverse, mode = inclusive} : vector<2xbf16>
+  %after_minimum = kernel.workgroup.scan<minimumf> %value {direction = reverse, mode = exclusive} : vector<2xbf16>
+  %after_maximum = kernel.workgroup.scan<maximumf> %value {direction = reverse, mode = exclusive} : vector<2xbf16>
+  %after_minnum = kernel.workgroup.scan<minnumf> %value {direction = reverse, mode = exclusive} : vector<2xbf16>
+  %after_maxnum = kernel.workgroup.scan<maxnumf> %value {direction = reverse, mode = exclusive} : vector<2xbf16>
+  %wide_forward_minimum = vector.extf %forward_minimum : vector<2xbf16> to vector<2xf64>
+  %wide_forward_maximum = vector.extf %forward_maximum : vector<2xbf16> to vector<2xf64>
+  %wide_forward_minnum = vector.extf %forward_minnum : vector<2xbf16> to vector<2xf64>
+  %wide_forward_maxnum = vector.extf %forward_maxnum : vector<2xbf16> to vector<2xf64>
+  %wide_before_minimum = vector.extf %before_minimum : vector<2xbf16> to vector<2xf64>
+  %wide_before_maximum = vector.extf %before_maximum : vector<2xbf16> to vector<2xf64>
+  %wide_before_minnum = vector.extf %before_minnum : vector<2xbf16> to vector<2xf64>
+  %wide_before_maxnum = vector.extf %before_maxnum : vector<2xbf16> to vector<2xf64>
+  %wide_reverse_minimum = vector.extf %reverse_minimum : vector<2xbf16> to vector<2xf64>
+  %wide_reverse_maximum = vector.extf %reverse_maximum : vector<2xbf16> to vector<2xf64>
+  %wide_reverse_minnum = vector.extf %reverse_minnum : vector<2xbf16> to vector<2xf64>
+  %wide_reverse_maxnum = vector.extf %reverse_maxnum : vector<2xbf16> to vector<2xf64>
+  %wide_after_minimum = vector.extf %after_minimum : vector<2xbf16> to vector<2xf64>
+  %wide_after_maximum = vector.extf %after_maximum : vector<2xbf16> to vector<2xf64>
+  %wide_after_minnum = vector.extf %after_minnum : vector<2xbf16> to vector<2xf64>
+  %wide_after_maxnum = vector.extf %after_maxnum : vector<2xbf16> to vector<2xf64>
+  vector.store %wide_forward_minimum, %destination[%item, 0, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_forward_maximum, %destination[%item, 1, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_forward_minnum, %destination[%item, 2, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_forward_maxnum, %destination[%item, 3, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_before_minimum, %destination[%item, 4, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_before_maximum, %destination[%item, 5, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_before_minnum, %destination[%item, 6, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_before_maxnum, %destination[%item, 7, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_reverse_minimum, %destination[%item, 8, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_reverse_maximum, %destination[%item, 9, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_reverse_minnum, %destination[%item, 10, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_reverse_maxnum, %destination[%item, 11, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_after_minimum, %destination[%item, 12, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_after_maximum, %destination[%item, 13, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_after_minnum, %destination[%item, 14, 0] : vector<2xf64>, view<83x16x2xf64>
+  vector.store %wide_after_maxnum, %destination[%item, 15, 0] : vector<2xf64>, view<83x16x2xf64>
+  kernel.return
+}
+
+// Both subjects consume exactly representable inputs. The oracle evaluates
+// each scalar component serially in f64, without subgroup or workgroup scans.
+func.def inline @workgroup_scan_extrema_oracle_impl(%input: buffer, %output: buffer, %components: index) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<83x[%components]xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<83x16x[%components]xf64>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %items = index.constant 83 : index
+  %last = index.constant 82 : index
+  %directions = index.constant 2 : index
+  %planes = index.constant 8 : index
+  %exclusive = index.constant 4 : index
+  %number_minimum = index.constant 2 : index
+  %number_maximum = index.constant 3 : index
+  %empty_minimum = scalar.constant inf : f64
+  %empty_maximum = scalar.constant -inf : f64
+  scf.for %component = [%begin to %components step %step] {
+    scf.for %direction = [%begin to %directions step %step] {
+      %reverse = index.cmp ne, %direction, %begin : index
+      %minimum_plane = index.mul %direction, %planes : index
+      %maximum_plane = index.add %minimum_plane, %step : index
+      %minnum_plane = index.add %minimum_plane, %number_minimum : index
+      %maxnum_plane = index.add %minimum_plane, %number_maximum : index
+      %exclusive_minimum_plane = index.add %minimum_plane, %exclusive : index
+      %exclusive_maximum_plane = index.add %maximum_plane, %exclusive : index
+      %exclusive_minnum_plane = index.add %minnum_plane, %exclusive : index
+      %exclusive_maxnum_plane = index.add %maxnum_plane, %exclusive : index
+      %total_minimum, %total_maximum, %total_minnum, %total_maxnum = scf.for %position = [%begin to %items step %step](%minimum = %empty_minimum : f64, %maximum = %empty_maximum : f64, %minnum = %empty_minimum : f64, %maxnum = %empty_maximum : f64) -> (f64, f64, f64, f64) {
+        %reverse_item = index.sub %last, %position : index
+        %item = scf.select %reverse, %reverse_item, %position : index
+        %value = view.load %source[%item, %component] : view<83x[%components]xf64> -> f64
+        %first = index.cmp eq, %position, %begin : index
+        %combined_minimum = scalar.minimumf %minimum, %value : f64
+        %combined_maximum = scalar.maximumf %maximum, %value : f64
+        %combined_minnum = scalar.minnumf %minnum, %value : f64
+        %combined_maxnum = scalar.maxnumf %maxnum, %value : f64
+        %next_minimum = scf.select %first, %value, %combined_minimum : f64
+        %next_maximum = scf.select %first, %value, %combined_maximum : f64
+        %next_minnum = scf.select %first, %value, %combined_minnum : f64
+        %next_maxnum = scf.select %first, %value, %combined_maxnum : f64
+        view.store %next_minimum, %destination[%item, %minimum_plane, %component] : f64, view<83x16x[%components]xf64>
+        view.store %next_maximum, %destination[%item, %maximum_plane, %component] : f64, view<83x16x[%components]xf64>
+        view.store %next_minnum, %destination[%item, %minnum_plane, %component] : f64, view<83x16x[%components]xf64>
+        view.store %next_maxnum, %destination[%item, %maxnum_plane, %component] : f64, view<83x16x[%components]xf64>
+        view.store %minimum, %destination[%item, %exclusive_minimum_plane, %component] : f64, view<83x16x[%components]xf64>
+        view.store %maximum, %destination[%item, %exclusive_maximum_plane, %component] : f64, view<83x16x[%components]xf64>
+        view.store %minnum, %destination[%item, %exclusive_minnum_plane, %component] : f64, view<83x16x[%components]xf64>
+        view.store %maxnum, %destination[%item, %exclusive_maxnum_plane, %component] : f64, view<83x16x[%components]xf64>
+        scf.yield %next_minimum, %next_maximum, %next_minnum, %next_maxnum : f64, f64, f64, f64
+      }
+    }
+  }
+  func.return
+}
+
+func.def @workgroup_scan_extrema_f64_oracle(%input: buffer, %output: buffer) {
+  %components = index.constant 1 : index
+  func.call @workgroup_scan_extrema_oracle_impl(%input, %output, %components) : (buffer, buffer, index)
+  func.return
+}
+
+func.def @workgroup_scan_extrema_bf16_oracle(%input: buffer, %output: buffer) {
+  %components = index.constant 2 : index
+  func.call @workgroup_scan_extrema_oracle_impl(%input, %output, %components) : (buffer, buffer, index)
+  func.return
+}
+
+// The second trial inserts one finite contribution between all-NaN prefixes
+// and suffixes, crossing both a subgroup boundary and an exclusive endpoint.
+func.def @workgroup_scan_extrema_interior(%input: buffer, %components: index, %trial: index) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %view = buffer.view %input[%base] : buffer -> view<83x[%components]xf64>
+  %all_nan = index.cmp eq, %trial, %begin : index
+  %nan = scalar.constant nan : f64
+  %finite = scalar.constant 3.0 : f64
+  %value = scf.select %all_nan, %nan, %finite : f64
+  scf.for %component = [%begin to %components step %step] {
+    view.store %value, %view[41, %component] : f64, view<83x[%components]xf64>
+  }
+  func.return
+}
+
+check.scenario @workgroup_scan_extrema_f64_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(nan) : tensor<83xf64>
+    %components = check.literal value(1) : index
+    check.generate<@workgroup_scan_extrema_interior>(%input, %components, %trial) : (tensor<83xf64>, index, index) -> ()
+    %output = check.generate.fill value(2.0) : tensor<83x16xf64>
+    check.compare<@workgroup_scan_extrema_f64, @workgroup_scan_extrema_f64_oracle>(%input, %output) : (tensor<83xf64>, tensor<83x16xf64>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<83x16xf64>, tensor<83x16xf64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(-0.0) : tensor<83xf64>
+    %output = check.generate.fill value(2.0) : tensor<83x16xf64>
+    check.compare<@workgroup_scan_extrema_f64, @workgroup_scan_extrema_f64_oracle>(%input, %output) : (tensor<83xf64>, tensor<83x16xf64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<83x16xf64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-16.0) step(1.0) period(31) : tensor<83xf64>
+    %output = check.generate.fill value(2.0) : tensor<83x16xf64>
+    check.compare<@workgroup_scan_extrema_f64, @workgroup_scan_extrema_f64_oracle>(%input, %output) : (tensor<83xf64>, tensor<83x16xf64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<83x16xf64>
+    }
+  }
+  check.return
+}
+
+check.scenario @workgroup_scan_extrema_bf16_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(nan) : tensor<83x2xf64>
+    %components = check.literal value(2) : index
+    check.generate<@workgroup_scan_extrema_interior>(%input, %components, %trial) : (tensor<83x2xf64>, index, index) -> ()
+    %output = check.generate.fill value(2.0) : tensor<83x16x2xf64>
+    check.compare<@workgroup_scan_extrema_bf16, @workgroup_scan_extrema_bf16_oracle>(%input, %output) : (tensor<83x2xf64>, tensor<83x16x2xf64>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<83x16x2xf64>, tensor<83x16x2xf64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(-0.0) : tensor<83x2xf64>
+    %output = check.generate.fill value(2.0) : tensor<83x16x2xf64>
+    check.compare<@workgroup_scan_extrema_bf16, @workgroup_scan_extrema_bf16_oracle>(%input, %output) : (tensor<83x2xf64>, tensor<83x16x2xf64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<83x16x2xf64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-16.0) step(1.0) period(31) : tensor<83x2xf64>
+    %output = check.generate.fill value(2.0) : tensor<83x16x2xf64>
+    check.compare<@workgroup_scan_extrema_bf16, @workgroup_scan_extrema_bf16_oracle>(%input, %output) : (tensor<83x2xf64>, tensor<83x16x2xf64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<83x16x2xf64>
+    }
+  }
+  check.return
+}
+
+// Independent components span multiple shared-memory batches on portable
+// targets. The tail is partial in both the logical relay and physical subgroup
+// partitions. All four scans reuse their scratch without caller barriers.
+kernel.def @workgroup_scan_wide() {
+  %unit = index.constant 1 : index
+  %items = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<67x8xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<67x4x8xi32>
+  %value = vector.load %source[%item, 0] : view<67x8xi32> -> vector<8xi32>
+  %forward = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : vector<8xi32>
+  %before = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : vector<8xi32>
+  %reverse = kernel.workgroup.scan<addi> %value {direction = reverse, mode = inclusive} : vector<8xi32>
+  %after = kernel.workgroup.scan<addi> %value {direction = reverse, mode = exclusive} : vector<8xi32>
+  vector.store %forward, %destination[%item, 0, 0] : vector<8xi32>, view<67x4x8xi32>
+  vector.store %before, %destination[%item, 1, 0] : vector<8xi32>, view<67x4x8xi32>
+  vector.store %reverse, %destination[%item, 2, 0] : vector<8xi32>, view<67x4x8xi32>
+  vector.store %after, %destination[%item, 3, 0] : vector<8xi32>, view<67x4x8xi32>
+  kernel.return
+}
+
+func.def @workgroup_scan_wide_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %items = index.constant 67 : index
+  %last = index.constant 66 : index
+  %components = index.constant 8 : index
+  %identity = scalar.constant 0 : i32
+  %source = buffer.view %input[%base] : buffer -> view<67x8xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<67x4x8xi32>
+  scf.for %component = [%begin to %components step %unit] {
+    %forward_total, %reverse_total = scf.for %item = [%begin to %items step %unit](%forward = %identity : i32, %reverse = %identity : i32) -> (i32, i32) {
+      %reverse_item = index.sub %last, %item : index
+      %forward_value = view.load %source[%item, %component] : view<67x8xi32> -> i32
+      %reverse_value = view.load %source[%reverse_item, %component] : view<67x8xi32> -> i32
+      %next_forward = scalar.addi %forward, %forward_value : i32
+      %next_reverse = scalar.addi %reverse, %reverse_value : i32
+      view.store %next_forward, %destination[%item, 0, %component] : i32, view<67x4x8xi32>
+      view.store %forward, %destination[%item, 1, %component] : i32, view<67x4x8xi32>
+      view.store %next_reverse, %destination[%reverse_item, 2, %component] : i32, view<67x4x8xi32>
+      view.store %reverse, %destination[%reverse_item, 3, %component] : i32, view<67x4x8xi32>
+      scf.yield %next_forward, %next_reverse : i32, i32
+    }
+  }
+  func.return
+}
+
+check.scenario @workgroup_scan_wide_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-255 to 255) : tensor<67x8xi32>
+    %output = check.generate.fill value(-559038737) : tensor<67x4x8xi32>
+    check.compare<@workgroup_scan_wide, @workgroup_scan_wide_oracle>(%input, %output) : (tensor<67x8xi32>, tensor<67x4x8xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<67x8xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67x4x8xi32>
+    }
+  }
+  check.return
+}
+
+// Predicate addition is parity. The logical fallback stores predicates in
+// bytes; its exclusive endpoints and all published results stay normalized.
+kernel.def @workgroup_scan_predicate() {
+  %unit = index.constant 1 : index
+  %items = index.constant 80 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<80xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<80x4xi32>
+  %word = view.load %source[%item] : view<80xi32> -> i32
+  %value = scalar.trunci %word : i32 to i1
+  %forward = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : i1
+  %before = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : i1
+  %reverse = kernel.workgroup.scan<addi> %value {direction = reverse, mode = inclusive} : i1
+  %after = kernel.workgroup.scan<addi> %value {direction = reverse, mode = exclusive} : i1
+  %forward_word = scalar.extui %forward : i1 to i32
+  %before_word = scalar.extui %before : i1 to i32
+  %reverse_word = scalar.extui %reverse : i1 to i32
+  %after_word = scalar.extui %after : i1 to i32
+  view.store %forward_word, %destination[%item, 0] : i32, view<80x4xi32>
+  view.store %before_word, %destination[%item, 1] : i32, view<80x4xi32>
+  view.store %reverse_word, %destination[%item, 2] : i32, view<80x4xi32>
+  view.store %after_word, %destination[%item, 3] : i32, view<80x4xi32>
+  kernel.return
+}
+
+func.def @workgroup_scan_predicate_oracle(%input: buffer, %output: buffer) {
+  func.call @workgroup_scan_i32_oracle(%input, %output) : (buffer, buffer)
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 320 : index
+  %unit = index.constant 1 : index
+  %mask = scalar.constant 1 : i32
+  %destination = buffer.view %output[%base] : buffer -> view<320xi32>
+  scf.for %position = [%begin to %end step %unit] {
+    %sum = view.load %destination[%position] : view<320xi32> -> i32
+    %parity = scalar.andi %sum, %mask : i32
+    view.store %parity, %destination[%position] : i32, view<320xi32>
+  }
+  func.return
+}
+
+check.scenario @workgroup_scan_predicate_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-255 to 255) : tensor<80xi32>
+    %output = check.generate.fill value(-1) : tensor<80x4xi32>
+    check.compare<@workgroup_scan_predicate, @workgroup_scan_predicate_oracle>(%input, %output) : (tensor<80xi32>, tensor<80x4xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<80x4xi32>
     }
   }
   check.return

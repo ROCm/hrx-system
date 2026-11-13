@@ -234,12 +234,12 @@ KernelWorkgroupScanDirection = EnumDef(
         EnumCase(
             "forward",
             0,
-            doc="Scan from lower workitem ids toward higher workitem ids.",
+            doc="Scan from lower flattened workitem ids toward higher flattened workitem ids.",
         ),
         EnumCase(
             "reverse",
             1,
-            doc="Scan from higher workitem ids toward lower workitem ids.",
+            doc="Scan from higher flattened workitem ids toward lower flattened workitem ids.",
         ),
     ],
     doc="Workgroup scan workitem order.",
@@ -1248,7 +1248,16 @@ kernel_workgroup_scan = Op(
     group=kernel_ops,
     contracts=[ContractFamily.KERNEL_SYNCHRONIZATION],
     phase=OpPhase.EXECUTABLE,
-    doc="Prefix-scan a scalar or rank-1 vector value across the current workgroup." + _COLLECTIVE_MATH_DOC,
+    doc=(
+        "Prefix-scan a scalar or rank-1 vector value across the current workgroup. "
+        "Workitems are ordered by x + size_x * (y + size_y * z), independently of "
+        "their physical subgroup or lane assignment. Forward scans use increasing "
+        "order; reverse scans use decreasing order. Vector components scan "
+        "independently. An exclusive scan's empty prefix has the combining kind's "
+        "empty value, such as zero for addition or one for multiplication; that "
+        "value is not an additional contribution to nonempty prefixes."
+    )
+    + _COLLECTIVE_MATH_DOC,
     operands=[Operand("value", ANY, doc="Per-invocation value to scan.")],
     results=[Result("result", ANY, doc="Scanned value.")],
     attrs=[
@@ -1267,7 +1276,10 @@ kernel_workgroup_scan = Op(
         COLON,
         TypeOf("value"),
     ],
-    examples=["%prefix = kernel.workgroup.scan<addf> %v {mode = inclusive, direction = forward} : f32"],
+    examples=[
+        "%prefix = kernel.workgroup.scan<addf> %v {direction = forward, mode = inclusive} : f32",
+        "%offset = kernel.workgroup.scan<addi> %count {direction = forward, mode = exclusive} : i32",
+    ],
 )
 
 kernel_workgroup_vote_any = Op(

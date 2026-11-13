@@ -54,6 +54,48 @@ static const loom_target_snapshot_t kTestQuirkySnapshot = {
         },
 };
 
+static const loom_target_snapshot_t kTestLinearSubgroupSnapshot = {
+    .name = IREE_SVL("test-linear-subgroups"),
+    .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+    .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    .subgroup_partition = LOOM_TARGET_SUBGROUP_PARTITION_LINEAR,
+    .default_pointer_bitwidth = 64,
+    .index_bitwidth = 64,
+    .maximum_index_bitwidth = 64,
+    .offset_bitwidth = 64,
+    .memory_spaces =
+        {
+            .generic = 0,
+            .global = 0,
+            .workgroup = UINT32_MAX,
+            .constant = 0,
+            .private_memory = 0,
+            .host = UINT32_MAX,
+            .descriptor = UINT32_MAX,
+        },
+};
+
+static const loom_target_snapshot_t kTestDenseSubgroupSnapshot = {
+    .name = IREE_SVL("test-dense-subgroups"),
+    .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+    .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    .subgroup_partition = LOOM_TARGET_SUBGROUP_PARTITION_DENSE,
+    .default_pointer_bitwidth = 64,
+    .index_bitwidth = 64,
+    .maximum_index_bitwidth = 64,
+    .offset_bitwidth = 64,
+    .memory_spaces =
+        {
+            .generic = 0,
+            .global = 0,
+            .workgroup = UINT32_MAX,
+            .constant = 0,
+            .private_memory = 0,
+            .host = UINT32_MAX,
+            .descriptor = UINT32_MAX,
+        },
+};
+
 static const loom_target_export_plan_t kTestLowExportPlan = {
     .name = IREE_SVL("test-low-function"),
     .abi_kind = LOOM_TARGET_ABI_OBJECT_FUNCTION,
@@ -80,6 +122,20 @@ static const loom_target_bundle_t kTestLowTargetBundleCore = {
 static const loom_target_bundle_t kTestLowTargetBundleQuirky = {
     .name = IREE_SVL("test-quirky"),
     .snapshot = &kTestQuirkySnapshot,
+    .export_plan = &kTestLowExportPlan,
+    .config = &kTestLowConfig,
+};
+
+static const loom_target_bundle_t kTestLinearSubgroupTargetBundle = {
+    .name = IREE_SVL("test-linear-subgroups"),
+    .snapshot = &kTestLinearSubgroupSnapshot,
+    .export_plan = &kTestLowExportPlan,
+    .config = &kTestLowConfig,
+};
+
+static const loom_target_bundle_t kTestDenseSubgroupTargetBundle = {
+    .name = IREE_SVL("test-dense-subgroups"),
+    .snapshot = &kTestDenseSubgroupSnapshot,
     .export_plan = &kTestLowExportPlan,
     .config = &kTestLowConfig,
 };
@@ -138,6 +194,8 @@ static const loom_target_bundle_t* const kTestTargetBundleValues[] = {
     &kTestLowTargetBundleQuirky,
     &kTestDeviceTargetBundle,
     &kTestLowTargetBundleCore,
+    &kTestLinearSubgroupTargetBundle,
+    &kTestDenseSubgroupTargetBundle,
 };
 
 const loom_target_bundle_table_t loom_test_target_bundles = {
