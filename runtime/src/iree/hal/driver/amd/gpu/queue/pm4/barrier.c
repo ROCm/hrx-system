@@ -143,10 +143,10 @@ iree_hal_amd_gpu_pm4_barrier_t iree_hal_amd_gpu_pm4_barrier_prepare(
     const iree_hal_access_scope_t external =
         IREE_HAL_ACCESS_SCOPE_HOST_READ | IREE_HAL_ACCESS_SCOPE_HOST_WRITE |
         IREE_HAL_ACCESS_SCOPE_MEMORY_READ | IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE;
-    if (source && target && (source & shader)) {
+    if (source & shader) {
       result.release_cache_control |= profile->shader;
     }
-    if (source && target && (target & shader)) {
+    if (target & shader) {
       result.acquire_cache_control |= profile->shader;
     }
     if ((source & external) ||

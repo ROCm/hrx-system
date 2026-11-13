@@ -249,7 +249,7 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   // Indexed native record geometry shared by publisher and observer.
   iree_hal_amd_gpu_pm4_retirement_ring_t retirement;
   // Fixed host actions and inline captures parallel to native slots.
-  // GPU-carried pointers name these actions directly on normal retirement.
+  // The producer count publishes actions before either native witness is ready.
   iree_hal_amd_gpu_pm4_retirement_slot_t* issued;
   // GPU fixup values with initial capacity acquired during queue construction.
   iree_hal_amd_gpu_byte_storage_pool_t values;

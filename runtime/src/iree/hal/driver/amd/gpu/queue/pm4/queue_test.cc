@@ -307,7 +307,24 @@ class KernelQueueTest : public MemoryBackendTest {
   void TearDown() override {
     for (auto& queue : queues_) {
       if (queue) {
-        EXPECT_TRUE(iree_hal_amd_gpu_pm4_queue_is_idle(queue));
+        const bool idle = iree_hal_amd_gpu_pm4_queue_is_idle(queue);
+        EXPECT_TRUE(idle);
+        if (!idle) {
+          // A fatal assertion can leave accepted mock commands unexecuted.
+          // Native inactivation joins them before failed retirement, just as
+          // device teardown does after a real execution failure.
+          iree_hal_amd_gpu_pm4_queue_close(queue);
+          const auto source =
+              iree_hal_amd_gpu_pm4_queue_publication_source(queue);
+          while (source.publish(source.user_data)) {
+          }
+          amdf_status_t status = AMDF_STATUS_OK;
+          ASSERT_TRUE(
+              iree_hal_amd_gpu_pm4_queue_try_inactivate(queue, &status));
+          ASSERT_EQ(status, AMDF_STATUS_OK);
+          ASSERT_TRUE(iree_hal_amd_gpu_pm4_queue_retire_failed(
+              queue, IREE_STATUS_ABORTED));
+        }
         IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_queue_set_profile(queue, nullptr));
         EXPECT_EQ(iree_hal_amd_gpu_pm4_queue_shutdown(queue), AMDF_STATUS_OK);
         queue.reset();
@@ -417,9 +434,13 @@ class KernelQueueTest : public MemoryBackendTest {
     }
   }
 
-  void Execute(uint32_t index) {
+  void Execute(uint32_t index, uint64_t command_count = UINT64_MAX) {
     auto& native = native_queues_[index];
-    while (native.retired < native.commands.size()) {
+    const uint64_t end =
+        native.retired +
+        std::min<uint64_t>(command_count,
+                           native.commands.size() - native.retired);
+    while (native.retired < end) {
       const auto& command = native.commands[native.retired];
       const auto* words = Words(command);
       for (size_t cursor = 0; cursor < command.byte_length / 4;) {
@@ -889,12 +910,10 @@ TEST_F(KernelQueueTest, ReleaseOnlyCompletionPreservesEachObserver) {
   const auto expect_packets =
       [&](const amdf_gpu_kernel_command_t& command,
           const std::vector<uint32_t>& expected_opcodes,
-          const std::vector<uint32_t>& expected_releases, bool expect_wait) {
+          const std::vector<uint32_t>& expected_releases) {
         const uint32_t* words = Words(command);
         std::vector<uint32_t> opcodes;
         std::vector<uint32_t> release_cache_controls;
-        uint64_t signal_address = 0;
-        uint64_t wait_address = 0;
         for (size_t cursor = 0; cursor < command.byte_length / 4;) {
           const uint32_t length = ((words[cursor] >> 16) & 0x3fff) + 2;
           ASSERT_LE(cursor + length, command.byte_length / 4);
@@ -904,21 +923,11 @@ TEST_F(KernelQueueTest, ReleaseOnlyCompletionPreservesEachObserver) {
           }
           if (opcode == 0x49) {
             release_cache_controls.push_back(words[cursor + 1] >> 12);
-            if (!signal_address) {
-              signal_address = uint64_t(words[cursor + 3]) |
-                               (uint64_t(words[cursor + 4]) << 32);
-            }
-          } else if (opcode == 0x3c) {
-            wait_address = uint64_t(words[cursor + 2]) |
-                           (uint64_t(words[cursor + 3]) << 32);
-            EXPECT_EQ(words[cursor + 4], 1u);
-            EXPECT_EQ(words[cursor + 5], UINT32_MAX);
           }
           cursor += length;
         }
         EXPECT_EQ(opcodes, expected_opcodes);
         EXPECT_EQ(release_cache_controls, expected_releases);
-        EXPECT_EQ(wait_address, expect_wait ? signal_address : 0u);
       };
 
   auto completion = Semaphore();
@@ -929,22 +938,155 @@ TEST_F(KernelQueueTest, ReleaseOnlyCompletionPreservesEachObserver) {
   Publish(0);
 
   ASSERT_EQ(native_queues_[0].commands.size(), 1u);
-  expect_packets(native_queues_[0].commands.back(), {0x49, 0x3c, 0x37, 0x49},
-                 {0x1600, 0}, true);
+  expect_packets(native_queues_[0].commands.back(), {0x49}, {0x1600});
 
+  Poll(0);
+  EXPECT_FALSE(iree_hal_amd_gpu_pm4_queue_is_idle(queues_[0]));
   ASSERT_NO_FATAL_FAILURE(Execute(0));
+  // Native status must join the entire command extent even when its signal
+  // is already visible. KERNEL backing cannot be reused at the earlier EOP.
+  --native_queues_[0].retired;
   Poll(0);
   uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(completion, &value));
+  EXPECT_EQ(value, 0u);
+  ++native_queues_[0].retired;
+  Poll(0);
   IREE_ASSERT_OK(iree_hal_semaphore_query(completion, &value));
   EXPECT_EQ(value, one);
 
   IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {}, {}, &barriers, 0));
   Publish(0);
   ASSERT_EQ(native_queues_[0].commands.size(), 2u);
-  expect_packets(native_queues_[0].commands.back(), {0x37, 0x49}, {0x1600},
-                 false);
+  expect_packets(native_queues_[0].commands.back(), {0x37, 0x49}, {0x1600});
   ASSERT_NO_FATAL_FAILURE(Execute(0));
   Poll(0);
+}
+
+TEST_F(KernelQueueTest, RetiredProducerSignalSurvivesDependentExecution) {
+  auto producer = Semaphore(), consumer = Semaphore();
+  auto* producer_handle = producer.get();
+  auto* consumer_handle = consumer.get();
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[0], {}, {1, &producer_handle, &one}, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1], {1, &producer_handle, &one},
+                                        {1, &consumer_handle, &one}, nullptr,
+                                        0));
+  Publish(0);
+  Publish(1);
+  ASSERT_EQ(native_queues_[1].commands.size(), 1u);
+  iree_hal_amd_gpu_semaphore_wait_t wait = {};
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_semaphore_acquire_wait(producer, one, &context_, &wait));
+  ASSERT_EQ(wait.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  auto* signal = wait.signal;
+  // The submitted consumer owns this borrow throughout its native execution.
+  // The test must not retain an extra reference that hides premature reuse.
+  iree_hal_amd_gpu_signal_release(signal);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  producer.reset();
+  iree_status_code_t code = IREE_STATUS_UNKNOWN;
+  EXPECT_TRUE(iree_hal_amd_gpu_signal_query_retirement(signal, &code));
+  EXPECT_EQ(code, IREE_STATUS_OK);
+  auto* storage = signals_[0].storage;
+  iree_hal_amd_gpu_signal_cache_trim(&context_, 0, &signals_[0]);
+  EXPECT_EQ(signals_[0].storage, storage);
+
+  // Repeated publication wraps both the four-slot CPU action ring and the
+  // native command ring while the dependent queue has not read its predicate.
+  for (uint32_t iteration = 0; iteration < 32; ++iteration) {
+    auto completion = Semaphore();
+    auto* handle = completion.get();
+    IREE_ASSERT_OK(
+        iree_hal_queue_barrier(queues_[0], {}, {1, &handle, &one}, nullptr, 0));
+    Publish(0);
+    ASSERT_NO_FATAL_FAILURE(Execute(0));
+    Poll(0);
+    EXPECT_EQ(iree_atomic_load(
+                  reinterpret_cast<iree_atomic_int32_t*>(signal->host_value),
+                  iree_memory_order_acquire),
+              1);
+  }
+  ASSERT_NO_FATAL_FAILURE(Execute(1));
+  Poll(1);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(consumer, &value));
+  EXPECT_EQ(value, one);
+  iree_hal_amd_gpu_signal_cache_trim(&context_, 0, &signals_[0]);
+  EXPECT_EQ(signals_[0].storage, nullptr);
+}
+
+TEST_F(KernelQueueTest, NativeCompletionWaitsForProducerHostRetirement) {
+  auto producer = Semaphore(), consumer = Semaphore();
+  auto* producer_handle = producer.get();
+  auto* consumer_handle = consumer.get();
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[0], {}, {1, &producer_handle, &one}, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1], {1, &producer_handle, &one},
+                                        {1, &consumer_handle, &one}, nullptr,
+                                        0));
+  Publish(0);
+  Publish(1);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  ASSERT_NO_FATAL_FAILURE(Execute(1));
+  Poll(1);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(consumer, &value));
+  EXPECT_EQ(value, 0u);
+  Poll(0);
+  Poll(1);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(consumer, &value));
+  EXPECT_EQ(value, one);
+}
+
+TEST_F(KernelQueueTest, TransferPrefixRetiresBeforeItsTerminalSignal) {
+  std::array<iree_hal_transfer_operation_t, 80> operations = {};
+  auto buffer = Buffer(operations.size() * sizeof(uint32_t));
+  const uint32_t pattern = 0x71717171u;
+  for (size_t i = 0; i < operations.size(); ++i) {
+    operations[i] = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+        .fill =
+            {
+                .target_buffer = buffer,
+                .target_offset = i * sizeof(uint32_t),
+                .length = sizeof(uint32_t),
+                .pattern = &pattern,
+                .pattern_length = sizeof(uint32_t),
+            },
+    };
+  }
+  auto completion = Semaphore();
+  auto* handle = completion.get();
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {}, {1, &handle, &one},
+                                         operations.size(), operations.data(),
+                                         nullptr));
+  Publish(0);
+  ASSERT_EQ(native_queues_[0].commands.size(), 3u);
+  auto* queue =
+      reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+  auto* submission =
+      iree_hal_amd_gpu_pm4_retirement_submission(&queue->issued[0].action);
+  ASSERT_NE(submission->signal, nullptr);
+  ASSERT_FALSE(
+      iree_hal_amd_gpu_pm4_retirement_is_terminal(&queue->issued[0].action));
+  ASSERT_NO_FATAL_FAILURE(Execute(0, 1));
+  Poll(0);
+  EXPECT_EQ(
+      iree_atomic_load(&queue->completed.count, iree_memory_order_acquire), 1);
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(completion, &value));
+  EXPECT_EQ(value, 0u);
+  ASSERT_NO_FATAL_FAILURE(Execute(0));
+  Poll(0);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(completion, &value));
+  EXPECT_EQ(value, one);
+  EXPECT_EQ(Read(buffer, operations.size() * sizeof(uint32_t)),
+            std::vector<uint8_t>(operations.size() * sizeof(uint32_t), 0x71));
 }
 
 TEST_F(KernelQueueTest, FailureReleasesCapacityWaitersBeforeNativeRetirement) {

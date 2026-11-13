@@ -223,6 +223,25 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_visibility_test",
+    srcs = ["visibility_test.cpp"],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV,
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_LOOM_CTS_COMPATIBILITY,
+    deps = [
+        ":event_queue_testdata",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ] + _HIP_TEST_DEPS,
+)
+
+hrx_cc_test(
     name = "hip_profile_test",
     srcs = [
         "profile_test.cpp",

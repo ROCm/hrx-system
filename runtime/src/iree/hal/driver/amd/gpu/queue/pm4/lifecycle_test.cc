@@ -239,10 +239,18 @@ class Pm4LifecycleTest : public ::testing::Test {
     EXPECT_EQ(satisfied, expected);
   }
   void CompletePiece(uint32_t index) {
-    records_[index].action =
-        reinterpret_cast<uintptr_t>(&issued_[index].action);
-    iree_atomic_store(&records_[index].generation, 1,
-                      iree_memory_order_release);
+    auto* action = &issued_[index].action;
+    auto* submission = iree_hal_amd_gpu_pm4_retirement_submission(action);
+    if (iree_hal_amd_gpu_pm4_retirement_is_terminal(action) &&
+        submission->signal) {
+      iree_atomic_store(reinterpret_cast<iree_atomic_int32_t*>(
+                            submission->signal->host_value),
+                        1, iree_memory_order_release);
+    } else {
+      records_[index].action = reinterpret_cast<uintptr_t>(action);
+      iree_atomic_store(&records_[index].generation, 1,
+                        iree_memory_order_release);
+    }
   }
   void ExpectPending() {
     uint64_t value = UINT64_MAX;
@@ -328,7 +336,7 @@ class Pm4LifecycleTest : public ::testing::Test {
   iree_hal_amd_gpu_context_t context_ = {};
   // Immutable dispatch metadata, unused by this ownership-only path.
   iree_hal_amd_gpu_pm4_function_t function_ = {};
-  // Native dependency cells retain their original uncompleted values.
+  // Native dependency cells written by simulated GPU completion.
   std::array<uint64_t, 4> native_values_ = {};
   // Real independent dependency metadata, not borrowed capture pointers.
   std::array<iree_hal_amd_gpu_signal_t, 4> native_signals_ = {};
@@ -534,7 +542,9 @@ TEST_F(Pm4LifecycleTest, ShaderFailureWaitsForIssuedCompletion) {
   FailFeedback();
   iree_hal_amd_gpu_completion_wait_t pending = {};
   EXPECT_FALSE(Poll(&pending));
-  ASSERT_NE(pending.address, nullptr);
+  EXPECT_EQ(pending.address, readers_[0]->host_value);
+  EXPECT_EQ(pending.signal, readers_[0]);
+  EXPECT_EQ(pending.value, 0u);
   EXPECT_TRUE(pending.pending);
   EXPECT_EQ(pending.is_64_bit, false);
   EXPECT_GT(diagnostics_, 0u);
