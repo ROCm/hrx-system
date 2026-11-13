@@ -1578,7 +1578,8 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
     }
     const loom_amdgpu_data_symbol_fixup_t fixup = {
         .kind = rel32_fixup.kind,
-        .target_symbol = rel32_target_symbol,
+        .target_symbol_id = rel32_target_symbol.symbol_id,
+        .node_index = packet->node_index,
         .literal_byte_offset = literal_byte_offset,
         .base_pc_byte_offset = rel32_base_pc_byte_offset,
         .target_symbol_byte_offset = rel32_target_symbol_byte_offset,
@@ -1684,7 +1685,8 @@ static iree_status_t loom_amdgpu_encode_symbol_address(
   loom_amdgpu_append_encoding_packet(state, &encoded);
   const loom_amdgpu_data_symbol_fixup_t low_fixup = {
       .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
-      .target_symbol = symbol,
+      .target_symbol_id = symbol.symbol_id,
+      .node_index = packet->node_index,
       .literal_byte_offset = low_literal_byte_offset,
       .base_pc_byte_offset = pc_byte_offset,
       .target_symbol_byte_offset = symbol_byte_offset,
@@ -1692,7 +1694,8 @@ static iree_status_t loom_amdgpu_encode_symbol_address(
   loom_amdgpu_append_text_fixup(state, &low_fixup);
   const loom_amdgpu_data_symbol_fixup_t high_fixup = {
       .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_HI,
-      .target_symbol = symbol,
+      .target_symbol_id = symbol.symbol_id,
+      .node_index = packet->node_index,
       .literal_byte_offset = high_literal_byte_offset,
       .base_pc_byte_offset = pc_byte_offset,
       .target_symbol_byte_offset = symbol_byte_offset,

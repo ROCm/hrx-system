@@ -23,8 +23,6 @@ extern "C" {
 #endif
 
 typedef struct loom_amdgpu_kernel_plan_options_t {
-  // ABI layout captured before target resource materialization.
-  const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout;
   // Verified ABI facts captured before allocation.
   const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify;
   // Optional complete helper-closure resource facts. Null for a call-free

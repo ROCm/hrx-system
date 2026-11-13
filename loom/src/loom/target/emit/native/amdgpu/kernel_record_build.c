@@ -13,6 +13,7 @@
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
@@ -33,7 +34,7 @@ static iree_status_t loom_amdgpu_kernel_record_concat3(
   iree_host_size_t length = 0;
   if (!iree_host_size_checked_add(a.size, b.size, &prefix_length) ||
       !iree_host_size_checked_add(prefix_length, c.size, &length)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "AMDGPU kernel record string length overflows");
   }
   char* data = NULL;
@@ -54,95 +55,23 @@ static iree_status_t loom_amdgpu_kernel_record_concat3(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_kernel_record_symbol_name(
-    const loom_module_t* module, const loom_op_t* function_op,
-    iree_string_view_t* out_symbol) {
-  *out_symbol = iree_string_view_empty();
-  loom_symbol_ref_t symbol_ref = loom_low_function_callee(function_op);
-  if (!loom_symbol_ref_is_valid(symbol_ref) || symbol_ref.module_id != 0 ||
-      symbol_ref.symbol_id >= module->symbols.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU kernel emission function symbol is invalid");
-  }
-  const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
-  if (symbol->name_id == LOOM_STRING_ID_INVALID ||
-      symbol->name_id >= module->strings.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel emission function symbol has no "
-                            "module string");
-  }
-  *out_symbol = loom_string_table_get(&module->strings, symbol->name_id);
-  return loom_amdgpu_symbol_name_validate(*out_symbol);
-}
-
-static iree_status_t loom_amdgpu_kernel_record_export_symbol(
+static iree_string_view_t loom_amdgpu_kernel_record_export_symbol(
     const loom_low_resolved_target_t* target, const loom_module_t* module,
-    const loom_op_t* function_op, iree_string_view_t* out_symbol) {
+    const loom_op_t* function_op) {
   const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
   if (!iree_string_view_is_empty(bundle->export_plan->export_symbol)) {
-    *out_symbol = bundle->export_plan->export_symbol;
-    return loom_amdgpu_symbol_name_validate(*out_symbol);
+    return bundle->export_plan->export_symbol;
   }
-  return loom_amdgpu_kernel_record_symbol_name(module, function_op, out_symbol);
+  const loom_symbol_ref_t symbol_ref = loom_low_function_callee(function_op);
+  const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
+  return loom_string_table_get(&module->strings, symbol->name_id);
 }
 
-static iree_status_t loom_amdgpu_kernel_record_validate_target(
-    const loom_low_resolved_target_t* target) {
-  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
-  const loom_target_snapshot_t* snapshot = bundle->snapshot;
-  const loom_target_export_plan_t* export_plan = bundle->export_plan;
-  if (target->descriptor_set == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel emission target bundle is required");
-  }
-  if (snapshot->codegen_format != LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU kernel emission requires low_native codegen snapshots");
-  }
-  if (snapshot->artifact_format != LOOM_TARGET_ARTIFACT_FORMAT_ELF) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU kernel emission requires ELF artifacts");
-  }
-  if (export_plan->abi_kind != LOOM_TARGET_ABI_HAL_KERNEL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU kernel emission requires a HAL kernel ABI");
-  }
-  if (export_plan->linkage != LOOM_TARGET_LINKAGE_DEFAULT) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU kernel emission requires default linkage");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_kernel_record_validate_function_shape(
-    const loom_op_t* function_op) {
-  if (!loom_low_function_def_isa(function_op)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU kernel emission requires low.func.def or low.kernel.def");
-  }
-  const loom_region_t* body = loom_low_function_const_body(function_op);
-  if (body == NULL || body->block_count == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel emission function body is required");
-  }
-  const loom_block_t* entry_block = loom_region_const_entry_block(body);
-  if (entry_block->arg_count != 0 || function_op->result_count != 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU kernel emission requires ABI-lowered kernels with no low "
-        "function arguments or results");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
+static loom_amdgpu_kernel_descriptor_flags_t
+loom_amdgpu_kernel_record_collect_descriptor_flags(
     const loom_low_schedule_table_t* schedule,
     const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify,
-    bool target_has_packed_workitem_id, bool target_has_cluster_launch_state,
-    loom_amdgpu_kernel_descriptor_flags_t* out_flags) {
+    bool target_has_cluster_launch_state) {
   loom_amdgpu_kernel_descriptor_flags_t flags = 0;
   if (loom_amdgpu_kernel_record_has_abi_source(
           abi_verify, LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_PTR)) {
@@ -194,18 +123,6 @@ static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
   const bool has_packed_xyz = loom_amdgpu_kernel_record_has_abi_source(
       abi_verify, LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XYZ);
   if (has_packed_xy || has_packed_xyz) {
-    if (!target_has_packed_workitem_id) {
-      const loom_amdgpu_hal_kernel_abi_source_kind_t source_kind =
-          has_packed_xyz
-              ? LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XYZ
-              : LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XY;
-      const iree_string_view_t source_name =
-          loom_amdgpu_hal_kernel_abi_source_name(source_kind);
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU kernel emission target does not support %.*s live-ins",
-          (int)source_name.size, source_name.data);
-    }
     flags |= LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X |
              LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y;
     if (has_packed_xyz) {
@@ -218,12 +135,6 @@ static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
         abi_verify, LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_Y);
     const bool has_workitem_z = loom_amdgpu_kernel_record_has_abi_source(
         abi_verify, LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_Z);
-    if (target_has_packed_workitem_id && (has_workitem_y || has_workitem_z)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU kernel emission requires packed workitem-id live-ins when "
-          "workitem_id.y/z are used on this target");
-    }
     if (has_workitem_x) {
       flags |= LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X;
     }
@@ -243,17 +154,18 @@ static iree_status_t loom_amdgpu_kernel_record_collect_descriptor_flags(
                  LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_Y)) {
     flags |= LOOM_AMDGPU_KERNEL_DESCRIPTOR_SYSTEM_VGPR_WORKITEM_ID_X;
   }
-  *out_flags = flags;
-  return iree_ok_status();
+  return flags;
 }
 
 static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
-    iree_arena_allocator_t* arena,
-    const loom_amdgpu_metadata_argument_t** out_arguments) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, const loom_amdgpu_metadata_argument_t** out_arguments) {
+  *out_accepted = false;
   *out_arguments = NULL;
   const iree_host_size_t argument_count = abi_layout->parameter_count;
   if (argument_count == 0) {
+    *out_accepted = true;
     return iree_ok_status();
   }
   loom_amdgpu_metadata_argument_t* arguments = NULL;
@@ -275,6 +187,12 @@ static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
   for (iree_host_size_t i = 0; i < abi_layout->direct_arg_count; ++i) {
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =
         &abi_layout->direct_args[i];
+    if (direct_arg->name.size > UINT32_MAX) {
+      return loom_target_artifact_emit_limit(
+          emitter, abi_layout->function_op, IREE_SV("AMDGPU metadata"),
+          IREE_SV("argument name byte length"), direct_arg->name.size,
+          UINT32_MAX);
+    }
     IREE_ASSERT_LT(direct_arg->parameter_index, argument_count);
     arguments[direct_arg->parameter_index] = (loom_amdgpu_metadata_argument_t){
         .name = direct_arg->name,
@@ -285,28 +203,28 @@ static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
     };
   }
   *out_arguments = arguments;
+  *out_accepted = true;
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_kernel_record_max_flat_workgroup_size(
+static uint32_t loom_amdgpu_kernel_record_max_flat_workgroup_size(
     const loom_target_snapshot_t* snapshot,
-    const loom_target_hal_kernel_abi_t* hal_kernel,
-    uint32_t* out_max_flat_workgroup_size) {
+    const loom_target_hal_kernel_abi_t* hal_kernel) {
   const loom_target_workgroup_size_t* required =
       &hal_kernel->required_workgroup_size;
   if (loom_target_workgroup_size_is_concrete(required)) {
+    uint32_t flat_workgroup_size = 0;
     const bool has_flat_workgroup_size =
-        loom_target_workgroup_size_flat_product_u32(
-            required, out_max_flat_workgroup_size);
+        loom_target_workgroup_size_flat_product_u32(required,
+                                                    &flat_workgroup_size);
     IREE_ASSERT(has_flat_workgroup_size,
                 "validated HAL kernel workgroup size fits uint32_t");
     (void)has_flat_workgroup_size;
-    return iree_ok_status();
+    return flat_workgroup_size;
   }
-  *out_max_flat_workgroup_size = hal_kernel->flat_workgroup_size_max != 0
-                                     ? hal_kernel->flat_workgroup_size_max
-                                     : snapshot->max_flat_workgroup_size;
-  return iree_ok_status();
+  return hal_kernel->flat_workgroup_size_max != 0
+             ? hal_kernel->flat_workgroup_size_max
+             : snapshot->max_flat_workgroup_size;
 }
 
 iree_status_t loom_amdgpu_kernel_record_build(
@@ -314,63 +232,44 @@ iree_status_t loom_amdgpu_kernel_record_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_storage_layout_t* storage_layout,
     const loom_amdgpu_kernel_record_options_t* options,
-    iree_arena_allocator_t* scratch_arena,
-    loom_amdgpu_kernel_record_t* out_record) {
+    iree_arena_allocator_t* scratch_arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_kernel_record_t* out_record) {
+  *out_accepted = false;
   *out_record = (loom_amdgpu_kernel_record_t){0};
-  loom_amdgpu_native_preflight_t derived_preflight = {0};
   const loom_amdgpu_native_preflight_t* preflight = options->preflight;
-  if (preflight != NULL) {
-    if (preflight->schedule != schedule ||
-        preflight->allocation != allocation) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU kernel record preflight does not match the scheduled "
-          "function");
-    }
-  } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_native_preflight_analyze(
-        schedule, allocation, /*options=*/NULL, &derived_preflight));
-    preflight = &derived_preflight;
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(&schedule->target);
+  if (bundle->export_plan->linkage != LOOM_TARGET_LINKAGE_DEFAULT) {
+    return loom_target_artifact_emit_requirement(
+        emitter, schedule->function_op, IREE_SV("AMDGPU HSACO"),
+        IREE_SV("default kernel linkage"));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_kernel_record_validate_target(&schedule->target));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_kernel_record_validate_function_shape(schedule->function_op));
 
   const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify =
       options->abi_verify;
 
-  iree_string_view_t symbol = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_export_symbol(
-      &schedule->target, schedule->module, schedule->function_op, &symbol));
-
-  loom_amdgpu_hal_kernel_abi_layout_t derived_abi_layout = {0};
-  const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout = options->abi_layout;
-  if (abi_layout != NULL) {
-    if (abi_layout->function_op != schedule->function_op) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU kernel record ABI layout does not belong to the scheduled "
-          "function");
-    }
-  } else {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
-        schedule->module, schedule->function_op, scratch_arena,
-        &derived_abi_layout));
-    abi_layout = &derived_abi_layout;
+  const iree_string_view_t symbol = loom_amdgpu_kernel_record_export_symbol(
+      &schedule->target, schedule->module, schedule->function_op);
+  // The descriptor appends ".kd" and the ELF string table appends a NUL.
+  // Both ELF name offsets and MessagePack string lengths are unsigned u32.
+  if (symbol.size > UINT32_MAX - 4u) {
+    return loom_target_artifact_emit_limit(
+        emitter, schedule->function_op, IREE_SV("AMDGPU HSACO"),
+        IREE_SV("kernel name byte length"), symbol.size, UINT32_MAX - 4u);
+  }
+  if (!loom_amdgpu_symbol_name_is_valid(symbol)) {
+    return loom_target_artifact_emit_symbol_requirement(
+        emitter, schedule->function_op, IREE_SV("AMDGPU HSACO"), symbol,
+        IREE_SV("a symbol beginning with a letter, '_' or '$' and containing "
+                "only letters, digits, '_', '$' or '.'"));
   }
 
-  const loom_target_bundle_t* bundle =
-      loom_low_resolved_target_bundle(&schedule->target);
+  const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout = &abi_verify->layout;
+
   const loom_target_hal_kernel_abi_t* hal_kernel =
       &bundle->export_plan->hal_kernel;
   const loom_amdgpu_target_facts_t* target_facts =
       loom_amdgpu_target_facts_cast(schedule->target.target_facts);
-  if (target_facts == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU kernel emission requires an AMDGPU "
-                            "processor target record");
-  }
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_info_target_processor(target_facts->identity.target);
   IREE_ASSERT(processor != NULL);
@@ -379,20 +278,15 @@ iree_status_t loom_amdgpu_kernel_record_build(
       &processor->properties, wavefront_size));
 
   const uint32_t user_sgpr_count = abi_verify->user_sgpr_count;
-  loom_amdgpu_kernel_descriptor_flags_t descriptor_flags = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_collect_descriptor_flags(
-      schedule, abi_verify,
-      loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
-          &processor->properties,
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID),
-      loom_amdgpu_processor_properties_have_flags(
-          &processor->properties,
-          LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE),
-      &descriptor_flags));
-  uint32_t system_vgpr_workitem_id = 0;
-  IREE_RETURN_IF_ERROR(
+  loom_amdgpu_kernel_descriptor_flags_t descriptor_flags =
+      loom_amdgpu_kernel_record_collect_descriptor_flags(
+          schedule, abi_verify,
+          loom_amdgpu_processor_properties_have_flags(
+              &processor->properties,
+              LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE));
+  const uint32_t system_vgpr_workitem_id =
       loom_amdgpu_kernel_descriptor_workitem_id_mode_from_flags(
-          descriptor_flags, &system_vgpr_workitem_id));
+          descriptor_flags);
 
   const uint32_t private_segment_size =
       (uint32_t)storage_layout->segment_sizes.private_segment_fixed_size;
@@ -450,8 +344,12 @@ iree_status_t loom_amdgpu_kernel_record_build(
       &descriptor_symbol));
 
   const loom_amdgpu_metadata_argument_t* arguments = NULL;
+  bool arguments_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build_metadata_arguments(
-      abi_layout, scratch_arena, &arguments));
+      abi_layout, scratch_arena, emitter, &arguments_accepted, &arguments));
+  if (!arguments_accepted) {
+    return iree_ok_status();
+  }
   const bool has_required_workgroup_size =
       loom_target_workgroup_size_is_concrete(
           &hal_kernel->required_workgroup_size);
@@ -459,9 +357,9 @@ iree_status_t loom_amdgpu_kernel_record_build(
   const bool has_workgroup_cluster_size =
       loom_low_kernel_def_static_workgroup_cluster_size(
           schedule->function_op, &workgroup_cluster_size);
-  uint32_t max_flat_workgroup_size = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_max_flat_workgroup_size(
-      bundle->snapshot, hal_kernel, &max_flat_workgroup_size));
+  const uint32_t max_flat_workgroup_size =
+      loom_amdgpu_kernel_record_max_flat_workgroup_size(bundle->snapshot,
+                                                        hal_kernel);
 
   *out_record = (loom_amdgpu_kernel_record_t){
       .symbol = symbol,
@@ -504,5 +402,6 @@ iree_status_t loom_amdgpu_kernel_record_build(
       .architectural_vgpr_count = next_free_vgpr,
       .accum_offset = accum_offset,
   };
+  *out_accepted = true;
   return iree_ok_status();
 }

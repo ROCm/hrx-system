@@ -71,3 +71,18 @@ iree_status_t loom_target_artifact_emit_limit(iree_diagnostic_emitter_t emitter,
                                     .params = params,
                                     .param_count = IREE_ARRAYSIZE(params)});
 }
+
+iree_status_t loom_target_artifact_emit_symbol_offset(
+    iree_diagnostic_emitter_t emitter, const loom_op_t* op,
+    iree_string_view_t format, iree_string_view_t name, uint64_t offset,
+    uint64_t length) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(format), loom_param_string(name),
+      loom_param_u64(offset), loom_param_u64(length)};
+  return iree_diagnostic_emit(
+      emitter,
+      &(loom_diagnostic_emission_t){.op = op,
+                                    .error = LOOM_ERR_BACKEND_061,
+                                    .params = params,
+                                    .param_count = IREE_ARRAYSIZE(params)});
+}

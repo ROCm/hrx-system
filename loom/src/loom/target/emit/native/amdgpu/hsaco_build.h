@@ -16,6 +16,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/target/arch/amdgpu/target_identity.h"
 #include "loom/target/emit/native/amdgpu/descriptor.h"
 #include "loom/target/emit/native/amdgpu/hsaco.h"
@@ -132,10 +133,18 @@ typedef struct loom_amdgpu_hsaco_input_t {
 
 // Builds a trusted final code-object |out_plan| from |input|.
 //
-// All payload storage referenced by the plan is allocated from |arena|. The
-// input and arena must remain live until the plan has been written.
+// Input rows come from admitted module symbols and generated runtime globals;
+// their counts fit the module's local symbol capacity. Names are admitted to
+// u32 string extents, and text producers own valid fragment-local patch
+// offsets. This owner admits aggregate section extents and final address
+// displacements. All payload storage referenced by the plan is allocated from
+// |arena|. The input and arena must remain live until the plan has been
+// written. Only an accepted plan can be serialized. Artifact-format rejection
+// emits diagnostics and leaves |out_accepted| false even without an emitter
+// callback.
 iree_status_t loom_amdgpu_hsaco_plan_build(
     const loom_amdgpu_hsaco_input_t* input, iree_arena_allocator_t* arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted,
     loom_amdgpu_hsaco_plan_t* out_plan);
 
 #ifdef __cplusplus

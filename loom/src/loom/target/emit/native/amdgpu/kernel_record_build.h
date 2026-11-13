@@ -23,11 +23,9 @@ extern "C" {
 typedef struct loom_amdgpu_native_preflight_t loom_amdgpu_native_preflight_t;
 
 typedef struct loom_amdgpu_kernel_record_options_t {
-  // Optional ABI layout captured before target resource materialization.
-  const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout;
   // Verified ABI facts captured before allocation.
   const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify;
-  // Optional preflight result captured before kernel record construction.
+  // Preflight result retained by the admitted native function plan.
   const loom_amdgpu_native_preflight_t* preflight;
   // Transitive scalar-register floor required by the complete native program.
   uint32_t minimum_sgpr_count;
@@ -42,14 +40,15 @@ typedef struct loom_amdgpu_kernel_record_options_t {
 // successful ABI verification that preceded allocation. The returned record
 // points into input IR and |scratch_arena|. The compiler validates target
 // storage limits before passing |storage_layout| and validates remaining
-// resource feasibility before passing the record to emission.
+// resource feasibility before passing the record to emission. User-dependent
+// artifact rejection emits diagnostics and leaves |out_accepted| false.
 iree_status_t loom_amdgpu_kernel_record_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_storage_layout_t* storage_layout,
     const loom_amdgpu_kernel_record_options_t* options,
-    iree_arena_allocator_t* scratch_arena,
-    loom_amdgpu_kernel_record_t* out_record);
+    iree_arena_allocator_t* scratch_arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_kernel_record_t* out_record);
 
 #ifdef __cplusplus
 }  // extern "C"

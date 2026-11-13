@@ -9,33 +9,40 @@
 #include <string.h>
 
 #include "iree/base/bitmap.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/native/amdgpu/symbol_name.h"
 
 static iree_status_t loom_amdgpu_artifact_symbol_claim(
     const loom_module_t* module, iree_string_view_t symbol,
-    bool allow_synthesized_name, iree_bitmap_t claimed_names) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_symbol_name_validate(symbol));
+    const loom_op_t* source_op, iree_diagnostic_emitter_t emitter,
+    iree_bitmap_t claimed_names, bool* accepted) {
+  if (symbol.size > UINT32_MAX - 1u) {
+    *accepted = false;
+    return loom_target_artifact_emit_limit(
+        emitter, source_op, IREE_SV("AMDGPU HSACO"),
+        IREE_SV("symbol name byte length"), symbol.size, UINT32_MAX - 1u);
+  }
+  if (!loom_amdgpu_symbol_name_is_valid(symbol)) {
+    *accepted = false;
+    return loom_target_artifact_emit_symbol_requirement(
+        emitter, source_op, IREE_SV("AMDGPU HSACO"), symbol,
+        IREE_SV("a symbol beginning with a letter, '_' or '$' and containing "
+                "only letters, digits, '_', '$' or '.'"));
+  }
   const loom_string_id_t name_id = loom_module_lookup_string(module, symbol);
   if (name_id == LOOM_STRING_ID_INVALID) {
-    // Every non-synthesized name is retained from a module symbol or target
-    // attribute. Descriptor and fixed runtime names need not already occur in
-    // the module; their producers own uniqueness within disjoint namespaces.
-    // A collision with any authored name makes the string interned and reaches
-    // the bitmap path below.
-    if (!allow_synthesized_name) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU artifact symbol '%.*s' is not retained by the module",
-          (int)symbol.size, symbol.data);
-    }
+    // Authored names are interned. Descriptor and runtime names need not be;
+    // their producers own uniqueness within disjoint generated namespaces.
+    // Any collision with authored input therefore has an interned name.
     return iree_ok_status();
   }
   IREE_ASSERT_LT(name_id, claimed_names.bit_count);
   if (iree_bitmap_test(claimed_names, name_id)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU artifact symbol '%.*s' is emitted more "
-                            "than once",
-                            (int)symbol.size, symbol.data);
+    *accepted = false;
+    return loom_target_artifact_emit_symbol_requirement(
+        emitter, source_op, IREE_SV("AMDGPU HSACO"), symbol,
+        IREE_SV(
+            "a name unique across kernels, descriptors, functions, and data"));
   }
   iree_bitmap_set(claimed_names, name_id);
   return iree_ok_status();
@@ -43,7 +50,12 @@ static iree_status_t loom_amdgpu_artifact_symbol_claim(
 
 iree_status_t loom_amdgpu_artifact_symbols_validate(
     const loom_module_t* module, const loom_amdgpu_hsaco_input_t* input,
-    iree_arena_allocator_t* arena) {
+    loom_target_entry_list_t entries,
+    const loom_amdgpu_program_artifact_t* artifact,
+    const loom_amdgpu_data_symbol_directory_t* data_symbols,
+    iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
+    bool* out_accepted) {
+  *out_accepted = false;
   const iree_host_size_t word_count =
       iree_bitmap_calculate_words(module->strings.count);
   uint64_t* claimed_words = NULL;
@@ -57,23 +69,49 @@ iree_status_t loom_amdgpu_artifact_symbols_validate(
       .words = claimed_words,
   };
 
-  for (iree_host_size_t i = 0; i < input->kernel_count; ++i) {
+  bool accepted = true;
+  // Claim runtime/data names first: a conflicting authored kernel or helper
+  // then owns the diagnostic even when the runtime name has no declaration.
+  for (iree_host_size_t i = 0; i < input->data_symbol_count && accepted; ++i) {
+    const loom_symbol_id_t source_symbol = data_symbols->source_symbols[i];
+    const loom_op_t* source_op =
+        source_symbol != LOOM_SYMBOL_ID_INVALID
+            ? module->symbols.entries[source_symbol].defining_op
+            : NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_symbol_claim(
+        module, input->data_symbols[i].name, source_op, emitter, claimed_names,
+        &accepted));
+  }
+  for (iree_host_size_t i = 0; i < input->kernel_count && accepted; ++i) {
     const loom_amdgpu_metadata_kernel_t* kernel = &input->kernels[i].metadata;
+    const loom_target_entry_t* entry = &entries.values[i];
+    loom_diagnostic_export_scope_t scope = {
+        .export_name = loom_target_facts_export_name(entry->target_facts),
+        .target = emitter,
+    };
+    const iree_diagnostic_emitter_t scoped_emitter =
+        loom_diagnostic_export_scope_emitter(&scope);
     IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_symbol_claim(
-        module, kernel->name, /*allow_synthesized_name=*/false, claimed_names));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_symbol_claim(
-        module, kernel->descriptor_symbol, /*allow_synthesized_name=*/true,
-        claimed_names));
+        module, kernel->name, entry->func.op, scoped_emitter, claimed_names,
+        &accepted));
+    if (accepted) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_symbol_claim(
+          module, kernel->descriptor_symbol, entry->func.op, scoped_emitter,
+          claimed_names, &accepted));
+    }
   }
-  for (iree_host_size_t i = 0; i < input->function_count; ++i) {
+  for (iree_host_size_t i = 0; i < input->function_count && accepted; ++i) {
+    const loom_amdgpu_program_callable_t* helper = &artifact->helpers[i];
+    loom_diagnostic_export_scope_t scope = {
+        .export_name =
+            loom_target_facts_export_name(helper->target.target_facts),
+        .target = emitter,
+    };
     IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_symbol_claim(
-        module, input->functions[i].name, /*allow_synthesized_name=*/false,
-        claimed_names));
+        module, input->functions[i].name, helper->compilation.frame.function_op,
+        loom_diagnostic_export_scope_emitter(&scope), claimed_names,
+        &accepted));
   }
-  for (iree_host_size_t i = 0; i < input->data_symbol_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_symbol_claim(
-        module, input->data_symbols[i].name, /*allow_synthesized_name=*/true,
-        claimed_names));
-  }
+  *out_accepted = accepted;
   return iree_ok_status();
 }

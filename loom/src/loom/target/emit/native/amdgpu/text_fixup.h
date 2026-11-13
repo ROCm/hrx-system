@@ -16,13 +16,14 @@ extern "C" {
 #endif
 
 // Kind of text literal patch applied after HSACO section layout is fixed.
-typedef enum loom_amdgpu_hsaco_text_fixup_kind_e {
+typedef uint8_t loom_amdgpu_hsaco_text_fixup_kind_t;
+enum loom_amdgpu_hsaco_text_fixup_kind_e {
   LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_NONE = 0,
   // Patches the low 32 bits of a data-symbol address relative to a text PC.
   LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO = 1,
   // Patches the high 32 bits of a data-symbol address relative to a text PC.
   LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_HI = 2,
-} loom_amdgpu_hsaco_text_fixup_kind_t;
+};
 
 // One final text literal patch against an AMDGPU code-object data symbol.
 typedef struct loom_amdgpu_hsaco_text_fixup_t {

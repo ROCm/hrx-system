@@ -28,8 +28,6 @@ extern "C" {
 #endif
 
 typedef struct loom_amdgpu_hal_binding_materialization_result_t {
-  // ABI layout captured before low.resource ops are rewritten.
-  loom_amdgpu_hal_kernel_abi_layout_t abi_layout;
   // True when materialization changed the function IR.
   bool changed;
   // Number of low.resource<hal_binding> ops expanded into pointer loads.
@@ -60,14 +58,15 @@ typedef struct loom_amdgpu_hal_binding_materialization_result_t {
 // Function predicates over materialized direct arguments become zero-cost
 // low.assume identities before the signature values are removed, preserving
 // their facts for target-low consumers without retaining stale ABI metadata.
-// |kernarg_ptr| is the live-in retained by ABI verification, or INVALID when
-// it must be materialized. Continuing passes reuse that verified value.
+// |verified_abi| retains the admitted parameter layout and kernarg live-in.
+// Materialization consumes that result without decoding the contract again.
 // Separate amdgpu.hal.buffer_descriptor pseudos materialize range, control, and
 // pointer-high descriptor bits only for selected descriptor-consuming packets.
 iree_status_t loom_amdgpu_hal_binding_materialize(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_value_id_t kernarg_ptr, iree_arena_allocator_t* scratch_arena,
+    const loom_amdgpu_hal_kernel_abi_verify_result_t* verified_abi,
+    iree_arena_allocator_t* scratch_arena,
     loom_amdgpu_hal_binding_materialization_result_t* out_result);
 
 // Expands only amdgpu.hal.buffer_descriptor pseudos in |function_op|.

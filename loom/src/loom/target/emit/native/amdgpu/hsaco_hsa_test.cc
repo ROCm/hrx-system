@@ -806,8 +806,8 @@ class LowKernelEmitter {
     }
     loom_amdgpu_hal_binding_materialization_result_t materialization = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize(
-        module_, low_function, descriptor_set, source_abi.kernarg_segment_ptr,
-        arena, &materialization));
+        module_, low_function, descriptor_set, &source_abi, arena,
+        &materialization));
 
     loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify_result = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
@@ -876,7 +876,6 @@ class LowKernelEmitter {
     StreamPtr stream = CreateStream();
     loom_amdgpu_kernel_plan_t plan = {};
     const loom_amdgpu_kernel_plan_options_t plan_options = {
-        .abi_layout = &materialization.abi_layout,
         .abi_verify = &abi_verify_result,
         .emitter = frame_options.emitter,
     };
@@ -890,9 +889,15 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_data_symbol_directory_build(module_, arena, &data_symbols));
     loom_amdgpu_kernel_emission_result_t emission_result = {};
+    bool emission_accepted = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_emission_build(
         &frame, &plan, &data_symbols, LOOM_AMDGPU_KERNEL_EMISSION_FLAG_NONE,
-        /*target_listing=*/nullptr, arena, &emission_result));
+        /*target_listing=*/nullptr, arena, frame_options.emitter,
+        &emission_accepted, &emission_result));
+    EXPECT_TRUE(emission_accepted);
+    if (!emission_accepted) {
+      return iree_ok_status();
+    }
     const loom_amdgpu_hsaco_input_t hsaco_input = {
         .target_identity = target_profile->identity,
         .kernels = &emission_result.kernel,
@@ -902,8 +907,13 @@ class LowKernelEmitter {
         .data_layout = data_symbols.layout,
     };
     loom_amdgpu_hsaco_plan_t hsaco_plan = {};
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_hsaco_plan_build(&hsaco_input, arena, &hsaco_plan));
+    bool accepted = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_plan_build(&hsaco_input, arena, {},
+                                                      &accepted, &hsaco_plan));
+    EXPECT_TRUE(accepted);
+    if (!accepted) {
+      return iree_ok_status();
+    }
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_hsaco_write_plan(&hsaco_plan, stream.get(), arena));
     *out_hsaco = StreamBytes(stream.get());
@@ -1127,8 +1137,13 @@ iree_status_t EmitRuntimeGlobalKernelForAmdgpu(const AmdgpuHsaTarget& target,
   StreamPtr stream = CreateStream();
   TestArena arena;
   loom_amdgpu_hsaco_plan_t plan = {};
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hsaco_plan_build(&input, arena.arena(), &plan));
+  bool accepted = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_plan_build(&input, arena.arena(), {},
+                                                    &accepted, &plan));
+  EXPECT_TRUE(accepted);
+  if (!accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hsaco_write_plan(&plan, stream.get(), arena.arena()));
   *out_hsaco = StreamBytes(stream.get());

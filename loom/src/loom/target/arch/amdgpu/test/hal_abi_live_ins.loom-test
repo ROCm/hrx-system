@@ -1,0 +1,99 @@
+// RUN: pass amdgpu-materialize-hal-kernel-abi
+
+amdgpu.target<gfx90a> @target
+
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.y", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.y> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx90a> @target
+
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.z", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.z> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.y", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.y> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.z", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.z> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.y", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.y> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.z", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.z> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1200> @target
+
+low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.y", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.y> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1200> @target
+
+low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.z", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.z> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.y", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.y> : reg<amdgpu.vgpr>
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) @unsupported_live_in() asm {
+  // ERROR@+1: AMDGPU/060 {source_name="amdgpu.workitem_id.z", workitem_layout="packed"}
+  %coordinate = live_in<amdgpu.workitem_id.z> : reg<amdgpu.vgpr>
+  return
+}

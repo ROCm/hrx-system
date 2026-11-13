@@ -45,12 +45,14 @@ static iree_status_t loom_amdgpu_program_emission_encode_function(
 iree_status_t loom_amdgpu_program_artifact_emission_build(
     const loom_amdgpu_program_artifact_t* artifact,
     const loom_amdgpu_data_symbol_directory_t* data_symbols,
-    iree_arena_allocator_t* table_arena,
-    loom_amdgpu_program_artifact_emission_t* out_emission) {
+    iree_arena_allocator_t* table_arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_program_artifact_emission_t* out_emission) {
+  *out_accepted = false;
   *out_emission = (loom_amdgpu_program_artifact_emission_t){
       .artifact = artifact,
   };
   if (artifact->helper_count == 0) {
+    *out_accepted = true;
     return iree_ok_status();
   }
 
@@ -80,9 +82,14 @@ iree_status_t loom_amdgpu_program_artifact_emission_build(
         table_arena, &helper_streams[i]));
     IREE_ASSERT_EQ(helper_streams[i].internal_call_fixup_count, 0);
     const loom_amdgpu_hsaco_text_fixup_t* text_fixups = NULL;
+    bool references_bound = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_data_symbol_directory_bind_fixups(
-        data_symbols, helper_streams[i].text_fixups,
-        helper_streams[i].text_fixup_count, table_arena, &text_fixups));
+        data_symbols, &callable->compilation.frame.schedule,
+        helper_streams[i].text_fixups, helper_streams[i].text_fixup_count,
+        table_arena, emitter, &references_bound, &text_fixups));
+    if (!references_bound) {
+      return iree_ok_status();
+    }
     functions[i] = (loom_amdgpu_hsaco_function_t){
         .name = loom_amdgpu_program_emission_symbol_name(artifact->module,
                                                          callable->function),
@@ -138,6 +145,7 @@ iree_status_t loom_amdgpu_program_artifact_emission_build(
   out_emission->instruction_count = instruction_count;
   out_emission->code_byte_count = code_byte_count;
   out_emission->coissued_instruction_count = coissued_instruction_count;
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -248,8 +256,8 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
     loom_amdgpu_kernel_emission_flags_t flags,
     bool include_artifact_functions_in_listing,
     iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
-    iree_arena_allocator_t* scratch_arena,
-    loom_amdgpu_kernel_emission_result_t* out_result) {
+    iree_arena_allocator_t* scratch_arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_kernel_emission_result_t* out_result) {
   IREE_ASSERT(compilation->has_retained_calls);
   const loom_amdgpu_program_artifact_root_t* root = compilation->artifact_root;
   IREE_ASSERT_NE(root, NULL);
@@ -273,9 +281,14 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
       record->entry_envelope;
   iree_const_byte_span_t kernel_text = iree_const_byte_span_empty();
   const loom_amdgpu_hsaco_text_fixup_t* body_text_fixups = NULL;
+  bool references_bound = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_data_symbol_directory_bind_fixups(
-      data_symbols, entry_stream.text_fixups, entry_stream.text_fixup_count,
-      table_arena, &body_text_fixups));
+      data_symbols, &compilation->entry.frame.schedule,
+      entry_stream.text_fixups, entry_stream.text_fixup_count, table_arena,
+      emitter, &references_bound, &body_text_fixups));
+  if (!references_bound) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_hsaco_text_fixup_t* kernel_text_fixups = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_entry_prepend_text(
       entry_envelope, entry_stream.text, body_text_fixups,
@@ -311,6 +324,7 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
       .coissued_instruction_count =
           entry_plan->function.packet_plan.vopd_plan.pair_count,
   };
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -322,14 +336,16 @@ iree_status_t loom_amdgpu_program_emission_build(
     loom_amdgpu_kernel_emission_flags_t flags,
     bool include_artifact_functions_in_listing,
     iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted,
     loom_amdgpu_kernel_emission_result_t* out_result) {
+  *out_accepted = false;
   *out_result = (loom_amdgpu_kernel_emission_result_t){0};
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(table_arena->block_pool, &scratch_arena);
   const iree_status_t status = loom_amdgpu_program_emission_build_internal(
       compilation, artifact_emission, data_symbols, entry_plan, flags,
       include_artifact_functions_in_listing, target_listing, table_arena,
-      &scratch_arena, out_result);
+      &scratch_arena, emitter, out_accepted, out_result);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }

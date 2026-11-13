@@ -16,7 +16,9 @@ iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_amdgpu_data_symbol_directory_t* data_symbols,
     loom_amdgpu_kernel_emission_flags_t flags,
     iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted,
     loom_amdgpu_kernel_emission_result_t* out_result) {
+  *out_accepted = false;
   *out_result = (loom_amdgpu_kernel_emission_result_t){0};
   const loom_amdgpu_kernel_record_t* record = &plan->record;
   const loom_amdgpu_packet_plan_t* packet_plan = &plan->function.packet_plan;
@@ -40,9 +42,14 @@ iree_status_t loom_amdgpu_kernel_emission_build(
       record->entry_envelope;
   iree_const_byte_span_t kernel_text = iree_const_byte_span_empty();
   const loom_amdgpu_hsaco_text_fixup_t* body_text_fixups = NULL;
+  bool references_bound = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_data_symbol_directory_bind_fixups(
-      data_symbols, stream.text_fixups, stream.text_fixup_count, table_arena,
+      data_symbols, &frame->schedule, stream.text_fixups,
+      stream.text_fixup_count, table_arena, emitter, &references_bound,
       &body_text_fixups));
+  if (!references_bound) {
+    return iree_ok_status();
+  }
   const loom_amdgpu_hsaco_text_fixup_t* kernel_text_fixups = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_entry_prepend_text(
       entry_envelope, stream.text, body_text_fixups, stream.text_fixup_count,
@@ -75,5 +82,6 @@ iree_status_t loom_amdgpu_kernel_emission_build(
       .entry_instruction_count = entry_envelope->instruction_count,
       .coissued_instruction_count = packet_plan->vopd_plan.pair_count,
   };
+  *out_accepted = true;
   return iree_ok_status();
 }

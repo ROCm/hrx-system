@@ -17,8 +17,14 @@ package(
 
 loom_cc_library(
     name = "kernel_abi",
-    srcs = ["kernel_abi.c"],
-    hdrs = ["kernel_abi.h"],
+    srcs = [
+        "kernel_abi.c",
+        "kernel_abi_layout.c",
+    ],
+    hdrs = [
+        "kernel_abi.h",
+        "kernel_abi_layout.h",
+    ],
     visibility = [
         "//loom/src/loom/target/arch/amdgpu:__pkg__",
         "//loom/src/loom/target/arch/amdgpu/lower:implementation",

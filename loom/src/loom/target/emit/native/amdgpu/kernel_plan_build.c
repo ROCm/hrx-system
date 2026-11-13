@@ -17,6 +17,7 @@
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/occupancy.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/native/amdgpu/function_plan_build.h"
 #include "loom/target/emit/native/amdgpu/function_report.h"
 #include "loom/target/emit/native/amdgpu/kernel_record_build.h"
@@ -276,13 +277,13 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
         private_byte_limit, options->emitter);
   }
   if (storage_layout->segment_sizes.group_segment_fixed_size > UINT32_MAX) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU kernel emission group segment size exceeds metadata limits");
+    return loom_target_artifact_emit_limit(
+        options->emitter, frame->schedule.function_op, IREE_SV("AMDGPU HSACO"),
+        IREE_SV("group segment bytes"),
+        storage_layout->segment_sizes.group_segment_fixed_size, UINT32_MAX);
   }
 
   const loom_amdgpu_kernel_record_options_t record_options = {
-      .abi_layout = options->abi_layout,
       .abi_verify = options->abi_verify,
       .preflight = &function_plan->preflight,
       .minimum_sgpr_count =
@@ -296,9 +297,13 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
       .minimum_agpr_count =
           program_resources != NULL ? program_resources->agpr_count : 0,
   };
+  bool record_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       &frame->schedule, &frame->allocation, storage_layout, &record_options,
-      arena, &out_plan->record));
+      arena, options->emitter, &record_accepted, &out_plan->record));
+  if (!record_accepted) {
+    return iree_ok_status();
+  }
 
   bool residency_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_plan_admit_residency(

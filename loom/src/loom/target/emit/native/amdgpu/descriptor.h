@@ -81,15 +81,17 @@ typedef struct loom_amdgpu_kernel_descriptor_options_t {
 } loom_amdgpu_kernel_descriptor_options_t;
 
 // Resolves descriptor workitem-id flags to the COMPUTE_PGM_RSRC2 field value.
-iree_status_t loom_amdgpu_kernel_descriptor_workitem_id_mode_from_flags(
-    loom_amdgpu_kernel_descriptor_flags_t flags, uint32_t* out_mode);
+uint32_t loom_amdgpu_kernel_descriptor_workitem_id_mode_from_flags(
+    loom_amdgpu_kernel_descriptor_flags_t flags);
 
 // Encodes one AMDHSA kernel descriptor into |target_bytes|.
 //
 // Metadata owns all fields shared with the AMDGPU metadata note. |options|
 // supplies only descriptor-specific ABI controls, preventing the two payloads
-// from representing different facts for the same kernel.
-iree_status_t loom_amdgpu_kernel_descriptor_encode(
+// from representing different facts for the same kernel. The kernel plan has
+// admitted target support and resource extents; |target_bytes| has at least
+// LOOM_AMDGPU_KERNEL_DESCRIPTOR_LENGTH bytes.
+void loom_amdgpu_kernel_descriptor_encode(
     const loom_amdgpu_processor_info_t* processor,
     const loom_amdgpu_metadata_kernel_t* metadata_kernel,
     loom_amdgpu_kernel_descriptor_options_t options,

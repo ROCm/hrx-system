@@ -14,12 +14,14 @@
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/error/error_catalog.h"
 #include "loom/target/arch/amdgpu/amdhsa_target_id.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/descriptor.h"
 #include "loom/target/emit/native/amdgpu/hsaco_build.h"
 #include "loom/target/emit/native/elf.h"
+#include "loom/testing/diagnostic_matchers.h"
 
 namespace loom {
 namespace {
@@ -102,7 +104,13 @@ iree_status_t WriteHsaco(const loom_amdgpu_hsaco_input_t* input,
                          iree_io_stream_t* stream,
                          iree_arena_allocator_t* arena) {
   loom_amdgpu_hsaco_plan_t plan = {};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_plan_build(input, arena, &plan));
+  bool accepted = false;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_hsaco_plan_build(input, arena, {}, &accepted, &plan));
+  EXPECT_TRUE(accepted);
+  if (!accepted) {
+    return iree_ok_status();
+  }
   return loom_amdgpu_hsaco_write_plan(&plan, stream, arena);
 }
 
@@ -904,41 +912,122 @@ TEST(AmdgpuHsacoTest, PatchesDataSymbolRel32TextFixups) {
   }
 }
 
-TEST(AmdgpuHsacoTest, RejectsOutOfRangeTextPatch) {
-  const uint8_t text_bytes[] = {0xcc, 0xcc, 0xcc, 0xcc};
-  const loom_amdgpu_hsaco_data_symbol_t data_symbol = {
-      .name = IREE_SV("loom_data"),
-      .initial_contents = {},
-      .byte_length = 8,
-      .alignment = 8,
-  };
-
-  const loom_amdgpu_hsaco_text_fixup_t text_fixup = {
-      .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
-      .target_data_symbol_ordinal = 0,
-      .literal_byte_offset = 1,
-      .base_pc_byte_offset = 0,
-  };
+TEST(AmdgpuHsacoTest, RejectsUnrepresentableImageBeforePayloadAllocation) {
+  if (sizeof(iree_host_size_t) < sizeof(uint64_t)) {
+    GTEST_SKIP() << "These symbolic layouts exceed 32-bit host capacity first";
+  }
+  const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
   const loom_amdgpu_hsaco_kernel_t kernel = {
-      .metadata =
-          MinimalKernel(IREE_SV("loom_kernel"), IREE_SV("loom_kernel.kd")),
-      .descriptor_options = {},
-      .text = iree_make_const_byte_span(text_bytes, sizeof(text_bytes)),
-      .text_fixups = &text_fixup,
-      .text_fixup_count = 1,
+      .metadata = MinimalKernel(IREE_SV("entry"), IREE_SV("entry.kd")),
+      .text = iree_make_const_byte_span(s_endpgm, sizeof(s_endpgm)),
   };
-  const loom_amdgpu_hsaco_input_t file = {
+  struct LayoutCase {
+    // Number of aligned one-byte data symbols to place.
+    size_t symbol_count;
+    // Placement and access flags for each data symbol.
+    loom_amdgpu_hsaco_data_symbol_flags_t flags;
+    // Aggregate constraint that rejects this layout.
+    const loom_error_def_t* error;
+    // Constraint or quantity parameter identifying the failed admission.
+    const char* quantity;
+  };
+  const LayoutCase cases[] = {
+      {4, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_NONE, LOOM_ERR_BACKEND_055,
+       "a read-only data layout representable in 64 bits"},
+      {5, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE, LOOM_ERR_BACKEND_055,
+       "a writable data layout representable in 64 bits"},
+      {3, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_NONE, LOOM_ERR_BACKEND_055,
+       "an executable image layout representable in 64 bits"},
+      {4, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE, LOOM_ERR_BACKEND_055,
+       "an executable image layout representable in 64 bits"},
+      {2, LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_NONE, LOOM_ERR_BACKEND_060,
+       "kernel entry displacement"},
+  };
+  const char* names[] = {"a", "b", "c", "d", "e"};
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.quantity);
+    std::vector<loom_amdgpu_hsaco_data_symbol_t> symbols(
+        test_case.symbol_count);
+    for (size_t i = 0; i < symbols.size(); ++i) {
+      symbols[i] = {
+          .name = iree_make_cstring_view(names[i]),
+          .byte_length = 1,
+          .alignment = UINT64_C(1) << 62,
+          .flags = test_case.flags,
+      };
+    }
+    const loom_amdgpu_hsaco_input_t input = {
+        .target_identity = TargetIdentity("gfx1100"),
+        .kernels = &kernel,
+        .kernel_count = 1,
+        .data_symbols = symbols.data(),
+        .data_symbol_count = symbols.size(),
+    };
+    for (bool install_callback : {false, true}) {
+      SCOPED_TRACE(install_callback);
+      TestArena arena;
+      testing::DiagnosticEmissionCapture capture;
+      bool accepted = true;
+      loom_amdgpu_hsaco_plan_t plan = {};
+      IREE_ASSERT_OK(loom_amdgpu_hsaco_plan_build(
+          &input, arena.arena(),
+          install_callback ? capture.emitter() : iree_diagnostic_emitter_t{},
+          &accepted, &plan));
+      EXPECT_FALSE(accepted);
+      if (install_callback) {
+        ASSERT_EQ(capture.emissions.size(), 1u);
+        EXPECT_EQ(capture.emissions[0].error, test_case.error);
+        EXPECT_EQ(capture.emissions[0].op, nullptr);
+        ASSERT_EQ(capture.emissions[0].string_params.size(), 2u);
+        EXPECT_EQ(capture.emissions[0].string_params[1], test_case.quantity);
+      }
+    }
+  }
+}
+
+TEST(AmdgpuHsacoTest, RejectsAggregateStringTableExtent) {
+  // Unique valid symbol names share their backing prefix. The measured ELF
+  // string table exceeds 4 GiB while the input occupies less than 2 MiB.
+  const std::string name_bytes((1u << 20) + 4096, 'a');
+  std::vector<loom_amdgpu_hsaco_data_symbol_t> symbols(4096);
+  uint64_t string_bytes = 1 + sizeof("entry") + sizeof("entry.kd");
+  for (size_t i = 0; i < symbols.size(); ++i) {
+    symbols[i].name = iree_make_string_view(name_bytes.data(), (1u << 20) + i);
+    string_bytes += symbols[i].name.size + 1;
+  }
+  ASSERT_GT(string_bytes, UINT32_MAX);
+  const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
+  const loom_amdgpu_hsaco_kernel_t kernel = {
+      .metadata = MinimalKernel(IREE_SV("entry"), IREE_SV("entry.kd")),
+      .text = iree_make_const_byte_span(s_endpgm, sizeof(s_endpgm)),
+  };
+  const loom_amdgpu_hsaco_input_t input = {
       .target_identity = TargetIdentity("gfx1100"),
       .kernels = &kernel,
       .kernel_count = 1,
-      .data_symbols = &data_symbol,
-      .data_symbol_count = 1,
+      .data_symbols = symbols.data(),
+      .data_symbol_count = symbols.size(),
   };
-
-  StreamPtr stream = CreateStream();
-  TestArena arena;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        WriteHsaco(&file, stream.get(), arena.arena()));
+  for (bool install_callback : {false, true}) {
+    TestArena arena;
+    testing::DiagnosticEmissionCapture capture;
+    bool accepted = true;
+    loom_amdgpu_hsaco_plan_t plan = {};
+    IREE_ASSERT_OK(loom_amdgpu_hsaco_plan_build(
+        &input, arena.arena(),
+        install_callback ? capture.emitter() : iree_diagnostic_emitter_t{},
+        &accepted, &plan));
+    EXPECT_FALSE(accepted);
+    if (install_callback) {
+      ASSERT_EQ(capture.emissions.size(), 1u);
+      EXPECT_EQ(capture.emissions[0].error, LOOM_ERR_BACKEND_060);
+      EXPECT_EQ(capture.emissions[0].string_params,
+                (std::vector<std::string>{"AMDGPU HSACO",
+                                          "ELF string table byte length"}));
+      EXPECT_EQ(capture.emissions[0].u64_params,
+                (std::vector<uint64_t>{string_bytes, UINT32_MAX}));
+    }
+  }
 }
 
 TEST(AmdgpuHsacoTest, WritesEveryTargetCodeObjectFlags) {

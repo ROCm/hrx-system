@@ -6,10 +6,10 @@
 
 #include "loom/target/emit/native/amdgpu/data_symbol_directory.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 #include "loom/ops/global/ops.h"
+#include "loom/target/artifact_diagnostics.h"
 
 static iree_string_view_t loom_amdgpu_data_symbol_directory_symbol_name(
     const loom_module_t* module, const loom_symbol_t* symbol) {
@@ -53,8 +53,8 @@ loom_amdgpu_data_symbol_directory_runtime_globals(const loom_module_t* module) {
 static void loom_amdgpu_data_symbol_directory_index_runtime_globals(
     const loom_module_t* module,
     const loom_amdgpu_hsaco_data_symbol_t* runtime_symbols,
-    iree_host_size_t runtime_symbol_count,
-    uint32_t* ordinals_by_module_symbol) {
+    iree_host_size_t runtime_symbol_count, uint32_t* ordinals_by_module_symbol,
+    loom_symbol_id_t* source_symbols) {
   for (iree_host_size_t i = 0; i < runtime_symbol_count; ++i) {
     const loom_string_id_t name_id =
         loom_module_lookup_string(module, runtime_symbols[i].name);
@@ -69,6 +69,7 @@ static void loom_amdgpu_data_symbol_directory_index_runtime_globals(
     IREE_ASSERT_EQ(ordinals_by_module_symbol[symbol_id],
                    LOOM_AMDGPU_DATA_SYMBOL_ORDINAL_INVALID);
     ordinals_by_module_symbol[symbol_id] = (uint32_t)i;
+    source_symbols[i] = symbol_id;
   }
 }
 
@@ -88,13 +89,8 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
   }
   const iree_host_size_t runtime_symbol_count =
       loom_amdgpu_runtime_global_count(runtime_globals);
-  iree_host_size_t symbol_count = 0;
-  if (!iree_host_size_checked_add(runtime_symbol_count, authored_symbol_count,
-                                  &symbol_count) ||
-      symbol_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AMDGPU artifact data-symbol count overflowed");
-  }
+  const iree_host_size_t symbol_count =
+      runtime_symbol_count + authored_symbol_count;
 
   uint32_t* ordinals_by_module_symbol = NULL;
   if (module->symbols.count != 0) {
@@ -106,15 +102,20 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
   }
 
   loom_amdgpu_hsaco_data_symbol_t* symbols = NULL;
+  loom_symbol_id_t* source_symbols = NULL;
   if (symbol_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, symbol_count, sizeof(*symbols), (void**)&symbols));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, symbol_count, sizeof(*source_symbols), (void**)&source_symbols));
+    memset(source_symbols, 0xFF, symbol_count * sizeof(*source_symbols));
   }
   iree_host_size_t next_ordinal = 0;
   loom_amdgpu_runtime_global_symbols(runtime_globals, symbols, &next_ordinal);
   IREE_ASSERT_EQ(next_ordinal, runtime_symbol_count);
   loom_amdgpu_data_symbol_directory_index_runtime_globals(
-      module, symbols, runtime_symbol_count, ordinals_by_module_symbol);
+      module, symbols, runtime_symbol_count, ordinals_by_module_symbol,
+      source_symbols);
 
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_symbol_t* symbol = &module->symbols.entries[i];
@@ -126,6 +127,7 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
                    LOOM_AMDGPU_DATA_SYMBOL_ORDINAL_INVALID);
     ordinals_by_module_symbol[i] = (uint32_t)next_ordinal;
     const iree_const_byte_span_t contents = loom_global_rodata_def_contents(op);
+    source_symbols[next_ordinal] = (loom_symbol_id_t)i;
     symbols[next_ordinal++] = (loom_amdgpu_hsaco_data_symbol_t){
         .name = loom_amdgpu_data_symbol_directory_symbol_name(module, symbol),
         .initial_contents = contents,
@@ -140,9 +142,9 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
   *out_directory = (loom_amdgpu_data_symbol_directory_t){
       .module = module,
       .symbols = symbols,
+      .source_symbols = source_symbols,
       .symbol_count = symbol_count,
       .ordinals_by_module_symbol = ordinals_by_module_symbol,
-      .module_symbol_count = module->symbols.count,
       .layout = iree_any_bit_set(runtime_globals,
                                  LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG)
                     ? LOOM_AMDGPU_HSACO_DATA_LAYOUT_ASAN_GLOBALS_V0
@@ -153,11 +155,14 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
 
 iree_status_t loom_amdgpu_data_symbol_directory_bind_fixups(
     const loom_amdgpu_data_symbol_directory_t* directory,
+    const loom_low_schedule_table_t* schedule,
     const loom_amdgpu_data_symbol_fixup_t* fixups, iree_host_size_t fixup_count,
-    iree_arena_allocator_t* arena,
-    const loom_amdgpu_hsaco_text_fixup_t** out_fixups) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, const loom_amdgpu_hsaco_text_fixup_t** out_fixups) {
+  *out_accepted = false;
   *out_fixups = NULL;
   if (fixup_count == 0) {
+    *out_accepted = true;
     return iree_ok_status();
   }
 
@@ -165,30 +170,26 @@ iree_status_t loom_amdgpu_data_symbol_directory_bind_fixups(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, fixup_count, sizeof(*bound_fixups), (void**)&bound_fixups));
   for (iree_host_size_t i = 0; i < fixup_count; ++i) {
-    const loom_symbol_ref_t symbol_ref = fixups[i].target_symbol;
-    IREE_ASSERT_EQ(symbol_ref.module_id, 0u);
-    IREE_ASSERT_LT(symbol_ref.symbol_id, directory->module_symbol_count);
+    const loom_symbol_id_t symbol_id = fixups[i].target_symbol_id;
     const uint32_t symbol_ordinal =
-        directory->ordinals_by_module_symbol[symbol_ref.symbol_id];
+        directory->ordinals_by_module_symbol[symbol_id];
     if (symbol_ordinal == LOOM_AMDGPU_DATA_SYMBOL_ORDINAL_INVALID) {
       const loom_symbol_t* symbol =
-          &directory->module->symbols.entries[symbol_ref.symbol_id];
+          &directory->module->symbols.entries[symbol_id];
       const iree_string_view_t symbol_name =
           loom_string_table_get(&directory->module->strings, symbol->name_id);
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU data symbol '%.*s' has no definition in this artifact",
-          (int)symbol_name.size, symbol_name.data);
+      return loom_target_artifact_emit_symbol_requirement(
+          emitter, schedule->nodes[fixups[i].node_index].op,
+          IREE_SV("AMDGPU HSACO"), symbol_name,
+          IREE_SV("a data definition in this artifact"));
     }
     const loom_amdgpu_hsaco_data_symbol_t* symbol =
         &directory->symbols[symbol_ordinal];
     if (fixups[i].target_symbol_byte_offset > symbol->byte_length) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AMDGPU data symbol '%.*s' byte offset %" PRIu64
-                              " exceeds its %" PRIu64 "-byte storage",
-                              (int)symbol->name.size, symbol->name.data,
-                              fixups[i].target_symbol_byte_offset,
-                              symbol->byte_length);
+      return loom_target_artifact_emit_symbol_offset(
+          emitter, schedule->nodes[fixups[i].node_index].op,
+          IREE_SV("AMDGPU HSACO"), symbol->name,
+          fixups[i].target_symbol_byte_offset, symbol->byte_length);
     }
     bound_fixups[i] = (loom_amdgpu_hsaco_text_fixup_t){
         .kind = fixups[i].kind,
@@ -199,5 +200,6 @@ iree_status_t loom_amdgpu_data_symbol_directory_bind_fixups(
     };
   }
   *out_fixups = bound_fixups;
+  *out_accepted = true;
   return iree_ok_status();
 }

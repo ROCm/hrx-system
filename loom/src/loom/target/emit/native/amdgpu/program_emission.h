@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
+#include "loom/error/emitter.h"
 #include "loom/target/emit/native/amdgpu/data_symbol_directory.h"
 #include "loom/target/emit/native/amdgpu/kernel_emission.h"
 #include "loom/target/emit/native/amdgpu/kernel_plan.h"
@@ -44,8 +45,8 @@ typedef struct loom_amdgpu_program_artifact_emission_t {
 iree_status_t loom_amdgpu_program_artifact_emission_build(
     const loom_amdgpu_program_artifact_t* artifact,
     const loom_amdgpu_data_symbol_directory_t* data_symbols,
-    iree_arena_allocator_t* table_arena,
-    loom_amdgpu_program_artifact_emission_t* out_emission);
+    iree_arena_allocator_t* table_arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_program_artifact_emission_t* out_emission);
 
 // Emits one loader-visible entry with artifact-relative direct call fixups.
 //
@@ -61,6 +62,7 @@ iree_status_t loom_amdgpu_program_emission_build(
     loom_amdgpu_kernel_emission_flags_t flags,
     bool include_artifact_functions_in_listing,
     iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted,
     loom_amdgpu_kernel_emission_result_t* out_result);
 
 #ifdef __cplusplus

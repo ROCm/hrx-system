@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/frame.h"
+#include "loom/error/emitter.h"
 #include "loom/target/emit/native/amdgpu/data_symbol_directory.h"
 #include "loom/target/emit/native/amdgpu/encoding.h"
 #include "loom/target/emit/native/amdgpu/hsaco_build.h"
@@ -45,15 +46,17 @@ typedef struct loom_amdgpu_kernel_emission_result_t {
 // Emits one final HSACO kernel row and optional assembly listing.
 //
 // |plan| is the accepted compiler-prepared native contract for |frame|.
-// Emission consumes it without resolving ABI facts, making semantic acceptance
-// decisions, or planning native packets. Assembly and machine-code emission
-// consume the same packet plan and exact branch layout.
+// Emission consumes admitted ABI facts and native packets, then binds data
+// references against the artifact directory. A rejected reference is diagnosed
+// at its retained source node and leaves |out_accepted| false. Assembly and
+// machine-code emission consume the same packet plan and exact branch layout.
 iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_kernel_plan_t* plan,
     const loom_amdgpu_data_symbol_directory_t* data_symbols,
     loom_amdgpu_kernel_emission_flags_t flags,
     iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted,
     loom_amdgpu_kernel_emission_result_t* out_result);
 
 #ifdef __cplusplus

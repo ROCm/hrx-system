@@ -1284,34 +1284,20 @@ iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
 iree_status_t loom_amdgpu_hal_binding_materialize(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_value_id_t kernarg_ptr, iree_arena_allocator_t* scratch_arena,
+    const loom_amdgpu_hal_kernel_abi_verify_result_t* verified_abi,
+    iree_arena_allocator_t* scratch_arena,
     loom_amdgpu_hal_binding_materialization_result_t* out_result) {
-  if (module == NULL || function_op == NULL || descriptor_set == NULL ||
-      out_result == NULL || scratch_arena == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU HAL binding materialization requires a module, function, "
-        "descriptor set, output result, and scratch arena");
-  }
   *out_result = (loom_amdgpu_hal_binding_materialization_result_t){0};
-  if (!loom_low_function_def_isa(function_op)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU HAL binding materialization requires low.func.def or "
-        "low.kernel.def");
-  }
+  loom_value_id_t kernarg_ptr = verified_abi->kernarg_segment_ptr;
   loom_region_t* body = loom_low_function_body(function_op);
   if (body == NULL || body->block_count == 0) {
     return iree_ok_status();
   }
 
-  loom_amdgpu_hal_kernel_abi_layout_t layout = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
-      module, function_op, scratch_arena, &layout));
+  loom_amdgpu_hal_kernel_abi_layout_t layout = verified_abi->layout;
   layout.uses_kernarg_segment_ptr =
       kernarg_ptr != LOOM_VALUE_ID_INVALID ||
       loom_amdgpu_hal_binding_layout_uses_kernarg_segment_ptr(module, &layout);
-  out_result->abi_layout = layout;
 
   loom_type_t sgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_make_sgpr_type(
