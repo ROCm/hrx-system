@@ -1,0 +1,87 @@
+// RUN: verify
+// Function definitions require complete object parameters before lifetime analysis.
+struct Incomplete;
+// ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+void consume(Incomplete value) {}
+
+// ====
+struct Incomplete;
+// ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+void consume(Incomplete) {}
+
+// ====
+struct Incomplete;
+using Alias = const Incomplete;
+// ERROR@+1: PARSE/036 "parameter has incomplete class type 'const ::Incomplete'"
+void consume(Alias value) {}
+
+// ====
+struct Incomplete;
+// ERROR@+1: PARSE/036 "return type is an incomplete class type '::Incomplete'"
+Incomplete produce() { for (;;) {} }
+
+// ====
+struct Incomplete;
+struct Receiver {
+  // ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+  void consume(Incomplete value) {}
+};
+
+// ====
+struct Incomplete;
+// ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+auto consume = [](Incomplete value) {};
+
+// ====
+struct Abstract { virtual void operation() = 0; };
+// ERROR@+1: PARSE/036 "parameter has abstract class type '::Abstract'"
+void consume(Abstract value) {}
+
+// ====
+struct Abstract { virtual void operation() = 0; };
+// ERROR@+1: PARSE/036 "return type is an abstract class type '::Abstract'"
+Abstract produce() { for (;;) {} }
+
+// ====
+// Dependent signatures are diagnosed where their definitions are instantiated.
+struct Incomplete;
+template<class T>
+// ERROR@+1: PARSE/036 "parameter has incomplete class type '::Incomplete'"
+void consume(T value) {}
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'consume <::Incomplete>' requested here"
+template void consume<Incomplete>(Incomplete);
+
+// ====
+// Explicit instantiation reports body errors, not only the instantiation note.
+template<class T> void instantiate() {
+  // ERROR@+1: PARSE/036 "object must contain at least two bytes"
+  static_assert(sizeof(T) >= 2, "object must contain at least two bytes");
+}
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'instantiate <char>' requested here"
+template void instantiate<char>();
+
+// ====
+// Declaration-only and indirect signatures may retain incomplete types.
+struct Incomplete;
+static Incomplete declaration(Incomplete);
+static void deleted(Incomplete) = delete;
+static void indirect(Incomplete*, Incomplete&) {}
+
+struct Complete;
+Complete forward(Complete);
+struct Complete { unsigned value; };
+Complete forward(Complete value) { return value; }
+unsigned entry(unsigned value) { return forward(Complete{value}).value; }
+
+// ====
+// In-class bodies are checked after the enclosing and nested types are complete.
+struct Receiver {
+  Receiver copy(Receiver value) { return value; }
+  struct Nested;
+  unsigned consume(Nested value) { return value.field; }
+  struct Nested { unsigned field; };
+};
+unsigned entry(unsigned value) {
+  Receiver receiver;
+  return receiver.consume({value});
+}
