@@ -87,7 +87,7 @@ _AMDGPU_ARTIFACT_CHECK_TESTS = [
     "low_wmma_schedule.loom-test",
     "low_workgroup_cmpxchg.loom-test",
     "low_xcnt_gfx1250.loom-test",
-    "source_low_control_flow.loom-test",
+    "control_flow.loom-test",
 ]
 
 loom_check_test(
