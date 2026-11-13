@@ -68,15 +68,6 @@ typedef struct iree_hal_streaming_memory_reuse_dependency_t {
   uint64_t source_timeline_value;
 } iree_hal_streaming_memory_reuse_dependency_t;
 
-// Visibility of native launches since the last stream observation. A singleton
-// carries its system release in its dispatch packet; further launches defer
-// that release until the burst is observed.
-typedef enum iree_hal_streaming_native_release_state_e {
-  IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY = 0,
-  IREE_HAL_STREAMING_NATIVE_RELEASE_SYSTEM,
-  IREE_HAL_STREAMING_NATIVE_RELEASE_DEVICE,
-} iree_hal_streaming_native_release_state_t;
-
 // Stream for asynchronous execution.
 typedef struct iree_hal_streaming_stream_t {
   // Reference counting.
@@ -106,9 +97,9 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_value_flush_timer_t* value_flush_timer;
   // Number of kernel launches recorded in |command_buffer|.
   uint32_t pending_launch_count;
-  // Visibility promised by the accepted native tail. Protected by |mutex|;
-  // DEVICE requires an accepted system release before external observation.
-  iree_hal_streaming_native_release_state_t native_release_state;
+  // Accepted native work requiring a queue flush before observation. Each
+  // dispatch carries its own system release. Protected by |mutex|.
+  bool pending_native_flush;
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;

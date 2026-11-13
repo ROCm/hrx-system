@@ -172,7 +172,7 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->command_buffer = NULL;
   stream->value_flush_timer = NULL;
   stream->pending_launch_count = 0;
-  stream->native_release_state = IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY;
+  stream->pending_native_flush = false;
   stream->timeline_semaphore = NULL;
   stream->pending_value = 0;
   stream->completed_value = 0;
@@ -422,16 +422,23 @@ iree_status_t iree_hal_streaming_stream_flush_locked(
     iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
   if (!stream->command_buffer) {
-    return iree_hal_streaming_submission_release_system_locked(stream);
+    if (stream->pending_native_flush) {
+      // The stream lock pins an active independent lane. A retired lane has
+      // already published its accepted native work.
+      iree_hal_queue_t* queue = stream->value_wait_lane
+                                    ? stream->value_wait_lane->queue
+                                    : stream->queue;
+      IREE_RETURN_IF_ERROR(iree_hal_queue_flush(queue));
+      stream->pending_native_flush = false;
+    }
+    return iree_ok_status();
   }
 
   iree_hal_command_buffer_t* command_buffer = stream->command_buffer;
   iree_status_t status = iree_ok_status();
-  if (stream->pending_launch_count ||
-      stream->native_release_state ==
-          IREE_HAL_STREAMING_NATIVE_RELEASE_DEVICE) {
-    // Publish both this recording's writes and earlier native writes before
-    // its completion can escape through an event, query, or host operation.
+  if (stream->pending_launch_count) {
+    // Publish this recording's writes before its completion can escape through
+    // an event, query, or host operation. Native dispatches release their own.
     // The next recording acquires at entry; there is no later consumer here.
     status = iree_hal_streaming_stream_record_dependency(
         command_buffer, iree_hal_streaming_device_access_scope, 0,
@@ -475,8 +482,11 @@ iree_status_t iree_hal_streaming_stream_flush_locked(
     if (iree_status_is_ok(status)) {
       // An accepted submission owns the value it signals, even if flushing the
       // hardware queue subsequently reports an error.
-      stream->native_release_state = IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY;
+      stream->pending_native_flush = true;
       status = iree_hal_queue_flush(submission.queue);
+      if (iree_status_is_ok(status)) {
+        stream->pending_native_flush = false;
+      }
     }
   }
 
@@ -1635,10 +1645,10 @@ iree_status_t iree_hal_streaming_launch_kernel(
     }
 
     // Native input publication acquires host-authored arguments before the
-    // dispatch can execute. The first launch after observation releases to the
-    // system in its own packet, so observing a singleton needs no extra fence.
-    // Further launches release device writes; stream observation publishes the
-    // burst to the system. Bound HAL operands retain default range maintenance.
+    // dispatch can execute. Each dispatch releases its writes to the system
+    // before signaling; observing a burst then needs only a queue flush, with
+    // no separate release submission. Bound HAL operands retain default range
+    // maintenance.
     static const iree_hal_memory_barrier_t native_acquire = {
         .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
                         IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
@@ -1650,13 +1660,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
         .memory_barrier_count = 1,
         .memory_barriers = &native_acquire,
     };
-    static const iree_hal_memory_barrier_t native_release = {
-        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
-    };
     static const iree_hal_barrier_t native_after = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
-        .memory_barrier_count = 1,
-        .memory_barriers = &native_release,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
     };
     static const iree_hal_barrier_list_t native_before_list = {
         .count = 1,
@@ -1666,17 +1672,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
         .count = 1,
         .values = &native_after,
     };
-    static const iree_hal_barrier_t native_system_after = {
-        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
-        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
-    };
-    static const iree_hal_barrier_list_t native_system_after_list = {
-        .count = 1,
-        .values = &native_system_after,
-    };
-    static const iree_hal_queue_barriers_t native_barriers[] = {
-        {.before = &native_before_list, .after = &native_after_list},
-        {.before = &native_before_list, .after = &native_system_after_list},
+    static const iree_hal_queue_barriers_t native_barriers = {
+        .before = &native_before_list,
+        .after = &native_after_list,
     };
 
     for (;;) {
@@ -1701,8 +1699,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
         status = iree_hal_streaming_stream_flush_locked(stream);
       }
       if (iree_status_is_ok(status)) {
-        const bool release_system = stream->native_release_state ==
-                                    IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY;
         iree_hal_queue_t* dispatch_queue = stream->queue;
         if (cooperative_dispatch) {
           status = iree_hal_streaming_stream_select_cooperative_queue_locked(
@@ -1735,18 +1731,14 @@ iree_status_t iree_hal_streaming_launch_kernel(
                                         arguments.constants_size),
               arguments.bindings,
               (flags & IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)
-                  ? &native_barriers[release_system]
+                  ? &native_barriers
                   : NULL,
               flags);
         }
         iree_hal_streaming_submission_finish_locked(stream, &submission,
                                                     iree_status_is_ok(status));
         if (iree_status_is_ok(status)) {
-          if (flags & IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS) {
-            stream->native_release_state =
-                release_system ? IREE_HAL_STREAMING_NATIVE_RELEASE_SYSTEM
-                               : IREE_HAL_STREAMING_NATIVE_RELEASE_DEVICE;
-          }
+          stream->pending_native_flush = true;
         }
       }
       iree_slim_mutex_unlock(&stream->mutex);

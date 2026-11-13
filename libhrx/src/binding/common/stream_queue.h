@@ -203,13 +203,6 @@ void iree_hal_streaming_submission_finish_locked(
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_submission_t* submission, bool accepted);
 
-// Appends a system release for outstanding native writes, if needed. The
-// accepted release owns a new stream timeline point even if queue flushing
-// subsequently fails. Rejection preserves the obligation and previous tail.
-// Requires the stream mutex and a live context.
-iree_status_t iree_hal_streaming_submission_release_system_locked(
-    iree_hal_streaming_stream_t* stream);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

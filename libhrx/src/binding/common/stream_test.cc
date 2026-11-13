@@ -32,24 +32,18 @@ struct LaunchBoundaryQueue {
   iree_hal_queue_t* target = nullptr;
   // Argument contract expected for the next launch.
   bool native = true;
-  // Required release scope for the next accepted native dispatch.
-  bool expect_system_release = true;
   // Rejects one dispatch before accepting arguments or timeline ownership.
   bool reject_dispatch = false;
   // Number of launches that reached the queue boundary.
   size_t launches = 0;
-  // Accepted system-release barriers, excluding simulated dispatch completion.
-  size_t releases = 0;
-  // Incoming private timeline value of the last accepted release.
-  uint64_t release_wait_value = 0;
-  // Outgoing private timeline value of the last accepted release.
-  uint64_t release_signal_value = 0;
+  // Explicit barriers, excluding simulated dispatch completion.
+  size_t barriers = 0;
+  // Queue flush attempts, including injected failures.
+  size_t flushes = 0;
   // Incoming private timeline value of the last host callback.
   uint64_t host_wait_value = 0;
-  // Optional owned gate holding system release after dispatch completion.
+  // Optional owned gate holding a dispatch's system release and completion.
   iree_hal_semaphore_t* release_gate = nullptr;
-  // Rejects one release before accepting any ownership.
-  bool reject_release = false;
   // Reports one flush error after the preceding operation was accepted.
   bool fail_flush = false;
 
@@ -61,6 +55,7 @@ struct LaunchBoundaryQueue {
   }
   static iree_status_t Flush(iree_hal_queue_t* base) {
     auto* self = reinterpret_cast<LaunchBoundaryQueue*>(base);
+    ++self->flushes;
     if (self->fail_flush) {
       self->fail_flush = false;
       return iree_make_status(IREE_STATUS_UNAVAILABLE);
@@ -73,34 +68,9 @@ struct LaunchBoundaryQueue {
                                const iree_hal_queue_barriers_t* barriers,
                                iree_hal_queue_barrier_flags_t flags) {
     auto* self = reinterpret_cast<LaunchBoundaryQueue*>(base);
-    EXPECT_NE(barriers, nullptr);
-    EXPECT_NE(barriers->before, nullptr);
-    EXPECT_NE(barriers->after, nullptr);
-    EXPECT_EQ(barriers->before->count, 1u);
-    EXPECT_EQ(barriers->after->count, 0u);
-    const auto& release = barriers->before->values[0];
-    EXPECT_EQ(release.source_stage_mask, IREE_HAL_EXECUTION_STAGE_DISPATCH);
-    EXPECT_EQ(release.target_stage_mask, 0u);
-    EXPECT_EQ(release.flags, IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE);
-    EXPECT_EQ(waits.count, 1u);
-    EXPECT_EQ(signals.count, 1u);
-    if (self->reject_release) {
-      self->reject_release = false;
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
-    }
-    iree_hal_semaphore_t* wait_semaphores[] = {waits.semaphores[0],
-                                               self->release_gate};
-    uint64_t wait_values[] = {waits.payload_values[0], 1};
-    const iree_hal_semaphore_list_t release_waits = {
-        self->release_gate ? 2u : 1u, wait_semaphores, wait_values};
-    iree_status_t status = iree_hal_queue_barrier(self->target, release_waits,
-                                                  signals, barriers, flags);
-    if (iree_status_is_ok(status)) {
-      ++self->releases;
-      self->release_wait_value = waits.payload_values[0];
-      self->release_signal_value = signals.payload_values[0];
-    }
-    return status;
+    ++self->barriers;
+    return iree_hal_queue_barrier(self->target, waits, signals, barriers,
+                                  flags);
   }
   static iree_status_t Execute(iree_hal_queue_t* base,
                                iree_hal_semaphore_list_t waits,
@@ -164,25 +134,29 @@ struct LaunchBoundaryQueue {
                           IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE);
           }
           EXPECT_EQ(after.source_stage_mask, IREE_HAL_EXECUTION_STAGE_DISPATCH);
-          if (self->expect_system_release) {
-            EXPECT_EQ(after.flags, IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE);
-          } else {
-            EXPECT_EQ(after.flags, 0u);
-            EXPECT_EQ(after.memory_barrier_count, 1u);
-            if (after.memory_barrier_count) {
-              EXPECT_EQ(after.memory_barriers[0].source_scope,
-                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE);
-              EXPECT_EQ(after.memory_barriers[0].target_scope, 0u);
-            }
-          }
-          self->expect_system_release = false;
+          EXPECT_EQ(after.flags, IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE);
         }
       }
     } else {
       EXPECT_EQ(bindings.count, 1u);
       EXPECT_EQ(barriers, nullptr);
     }
-    return iree_hal_queue_barrier(self->target, waits, signals, nullptr,
+    // The real stream supplies at most one predecessor. The gate holds the
+    // native dispatch's terminal release before its public point can complete.
+    iree_hal_semaphore_t* wait_semaphores[2];
+    uint64_t wait_values[2];
+    iree_host_size_t wait_count = waits.count;
+    for (iree_host_size_t i = 0; i < wait_count; ++i) {
+      wait_semaphores[i] = waits.semaphores[i];
+      wait_values[i] = waits.payload_values[i];
+    }
+    if (self->release_gate) {
+      wait_semaphores[wait_count] = self->release_gate;
+      wait_values[wait_count++] = 1;
+    }
+    const iree_hal_semaphore_list_t release_waits = {
+        wait_count, wait_semaphores, wait_values};
+    return iree_hal_queue_barrier(self->target, release_waits, signals, nullptr,
                                   IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
   }
 };
@@ -299,7 +273,6 @@ class NativeStreamTest : public StreamTest {
 
   void TearDown() override {
     OpenRelease();
-    queue_->reject_release = false;
     queue_->fail_flush = false;
     IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
     iree_hal_streaming_stream_release(stream_);
@@ -308,8 +281,7 @@ class NativeStreamTest : public StreamTest {
     StreamTest::TearDown();
   }
 
-  iree_status_t Launch(bool release_system = false) {
-    queue_->expect_system_release = release_system;
+  iree_status_t Launch() {
     iree_hal_streaming_symbol_t symbol = {
         .type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION,
         .executable = &executable_,
@@ -322,7 +294,7 @@ class NativeStreamTest : public StreamTest {
   }
 
   iree_status_t LaunchBurst() {
-    IREE_RETURN_IF_ERROR(Launch(true));
+    IREE_RETURN_IF_ERROR(Launch());
     return Launch();
   }
 
@@ -412,132 +384,116 @@ TEST_F(NativeStreamTest, NativeLaunchesAcquireAndReleaseDeviceWrites) {
   iree_hal_streaming_memory_release_wrapped_buffer(buffer);
 }
 
-TEST_F(NativeStreamTest, OneSystemReleasePublishesEachNativeBurst) {
+TEST_F(NativeStreamTest, NativeBurstObservationNeedsOnlyOneFlush) {
   for (int i = 0; i < 3; ++i) {
-    IREE_ASSERT_OK(Launch(i == 0));
+    IREE_ASSERT_OK(Launch());
   }
-  EXPECT_EQ(queue_->releases, 0u);
-  EXPECT_EQ(stream_->native_release_state,
-            IREE_HAL_STREAMING_NATIVE_RELEASE_DEVICE);
+  EXPECT_EQ(queue_->barriers, 0u);
+  EXPECT_EQ(queue_->flushes, 0u);
+  EXPECT_TRUE(stream_->pending_native_flush);
   IREE_ASSERT_OK(iree_hal_streaming_stream_flush(stream_));
-  EXPECT_EQ(queue_->releases, 1u);
-  EXPECT_EQ(queue_->release_wait_value, 3u);
-  EXPECT_EQ(queue_->release_signal_value, 4u);
-  EXPECT_EQ(stream_->native_release_state,
-            IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY);
+  EXPECT_EQ(queue_->flushes, 1u);
+  EXPECT_EQ(stream_->pending_value, 3u);
+  EXPECT_FALSE(stream_->pending_native_flush);
   IREE_ASSERT_OK(iree_hal_streaming_stream_flush(stream_));
-  EXPECT_EQ(queue_->releases, 1u);
+  EXPECT_EQ(queue_->flushes, 1u);
 
   IREE_ASSERT_OK(LaunchBurst());
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
-  EXPECT_EQ(queue_->releases, 2u);
-  EXPECT_EQ(queue_->release_wait_value, 6u);
-  EXPECT_EQ(stream_->completed_value, 7u);
+  EXPECT_EQ(queue_->barriers, 0u);
+  EXPECT_EQ(queue_->flushes, 2u);
+  EXPECT_EQ(stream_->completed_value, 5u);
 }
 
 TEST_F(NativeStreamTest, SingletonObservationUsesItsDispatchRelease) {
   for (uint64_t value = 1; value <= 3; ++value) {
-    IREE_ASSERT_OK(Launch(true));
-    EXPECT_EQ(stream_->native_release_state,
-              IREE_HAL_STREAMING_NATIVE_RELEASE_SYSTEM);
+    IREE_ASSERT_OK(Launch());
+    EXPECT_TRUE(stream_->pending_native_flush);
     IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
     EXPECT_EQ(stream_->completed_value, value);
-    EXPECT_EQ(queue_->releases, 0u);
+    EXPECT_EQ(queue_->barriers, 0u);
   }
 }
 
-TEST_F(NativeStreamTest, RejectedDispatchPreservesReleaseState) {
-  queue_->reject_dispatch = true;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Launch(true));
-  EXPECT_EQ(stream_->native_release_state,
-            IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY);
-  IREE_ASSERT_OK(Launch(true));
+TEST_F(NativeStreamTest, RejectedDispatchPreservesAcceptedNativeTail) {
   queue_->reject_dispatch = true;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Launch());
-  EXPECT_EQ(stream_->native_release_state,
-            IREE_HAL_STREAMING_NATIVE_RELEASE_SYSTEM);
+  EXPECT_FALSE(stream_->pending_native_flush);
+  IREE_ASSERT_OK(Launch());
+  queue_->reject_dispatch = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Launch());
+  EXPECT_TRUE(stream_->pending_native_flush);
   EXPECT_EQ(stream_->pending_value, 1u);
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
-  EXPECT_EQ(queue_->releases, 0u);
+  EXPECT_EQ(queue_->barriers, 0u);
 }
 
-TEST_F(NativeStreamTest, QueryWaitsForSystemReleaseAfterDispatchCompletion) {
+TEST_F(NativeStreamTest, QueryWaitsForDispatchSystemRelease) {
   HoldRelease();
   IREE_ASSERT_OK(LaunchBurst());
-  WaitFor(2);
   auto completion = IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
   IREE_ASSERT_OK(iree_hal_streaming_stream_query(stream_, &completion));
   EXPECT_EQ(completion, IREE_HAL_STREAMING_COMPLETION_STATE_PENDING);
-  EXPECT_EQ(stream_->pending_value, 3u);
-  EXPECT_EQ(queue_->releases, 1u);
+  EXPECT_EQ(stream_->pending_value, 2u);
+  EXPECT_EQ(queue_->barriers, 0u);
   OpenRelease();
-  WaitFor(3);
+  WaitFor(2);
   IREE_ASSERT_OK(iree_hal_streaming_stream_query(stream_, &completion));
   EXPECT_EQ(completion, IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE);
-  EXPECT_EQ(queue_->releases, 1u);
+  EXPECT_EQ(queue_->barriers, 0u);
 }
 
-TEST_F(NativeStreamTest, RejectedReleasePreservesUnpublishedTail) {
-  IREE_ASSERT_OK(LaunchBurst());
-  queue_->reject_release = true;
-  auto completion = IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        iree_hal_streaming_stream_query(stream_, &completion));
-  EXPECT_EQ(completion, IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE);
-  EXPECT_EQ(stream_->pending_value, 2u);
-  EXPECT_EQ(stream_->native_release_state,
-            IREE_HAL_STREAMING_NATIVE_RELEASE_DEVICE);
-  EXPECT_EQ(queue_->releases, 0u);
-  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
-  EXPECT_EQ(stream_->completed_value, 3u);
-  EXPECT_EQ(queue_->releases, 1u);
+TEST_F(NativeStreamTest, FlushFailurePreservesAcceptedNativeTail) {
+  for (uint64_t count : {1u, 2u}) {
+    for (uint64_t i = 0; i < count; ++i) {
+      IREE_ASSERT_OK(Launch());
+    }
+    const uint64_t target = stream_->pending_value;
+    queue_->fail_flush = true;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                          iree_hal_streaming_stream_flush(stream_));
+    EXPECT_EQ(stream_->pending_value, target);
+    EXPECT_TRUE(stream_->pending_native_flush);
+    EXPECT_EQ(queue_->barriers, 0u);
+    IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
+    EXPECT_EQ(stream_->completed_value, target);
+    EXPECT_FALSE(stream_->pending_native_flush);
+  }
 }
 
-TEST_F(NativeStreamTest, FlushFailurePreservesAcceptedReleaseOwnership) {
-  IREE_ASSERT_OK(LaunchBurst());
-  queue_->fail_flush = true;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
-                        iree_hal_streaming_stream_flush(stream_));
-  EXPECT_EQ(stream_->pending_value, 3u);
-  EXPECT_EQ(stream_->native_release_state,
-            IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY);
-  EXPECT_EQ(queue_->releases, 1u);
-  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
-  EXPECT_EQ(stream_->completed_value, 3u);
-  EXPECT_EQ(queue_->releases, 1u);
-}
-
-TEST_F(NativeStreamTest, SingletonFlushFailurePreservesNativeTail) {
-  IREE_ASSERT_OK(Launch(true));
-  queue_->fail_flush = true;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
-                        iree_hal_streaming_stream_flush(stream_));
-  EXPECT_EQ(stream_->pending_value, 1u);
-  EXPECT_EQ(stream_->native_release_state,
-            IREE_HAL_STREAMING_NATIVE_RELEASE_SYSTEM);
-  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
-  EXPECT_EQ(queue_->releases, 0u);
-  EXPECT_EQ(stream_->completed_value, 1u);
-}
-
-TEST_F(NativeStreamTest, RecordingPublishesPrecedingNativeWrites) {
+TEST_F(NativeStreamTest, RecordingRetainsPrecedingNativeCompletion) {
+  HoldRelease();
   IREE_ASSERT_OK(LaunchBurst());
   IREE_ASSERT_OK(iree_hal_streaming_stream_begin(stream_));
   IREE_ASSERT_OK(iree_hal_streaming_stream_flush(stream_));
-  EXPECT_EQ(stream_->native_release_state,
-            IREE_HAL_STREAMING_NATIVE_RELEASE_EMPTY);
+  EXPECT_FALSE(stream_->pending_native_flush);
   EXPECT_EQ(stream_->pending_value, 3u);
-  // The existing recording carries its terminal release, with no additional
-  // queue barrier or timeline point.
-  EXPECT_EQ(queue_->releases, 0u);
+  EXPECT_EQ(queue_->barriers, 0u);
+  auto completion = IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_query(stream_, &completion));
+  EXPECT_EQ(completion, IREE_HAL_STREAMING_COMPLETION_STATE_PENDING);
+  OpenRelease();
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
   EXPECT_EQ(stream_->completed_value, 3u);
+}
+
+TEST_F(NativeStreamTest, RecordingFlushFailurePreservesAcceptedTail) {
+  IREE_ASSERT_OK(LaunchBurst());
+  IREE_ASSERT_OK(iree_hal_streaming_stream_begin(stream_));
+  queue_->fail_flush = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_hal_streaming_stream_flush(stream_));
+  EXPECT_EQ(stream_->pending_value, 3u);
+  EXPECT_TRUE(stream_->pending_native_flush);
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
+  EXPECT_EQ(stream_->completed_value, 3u);
+  EXPECT_FALSE(stream_->pending_native_flush);
+  EXPECT_EQ(queue_->barriers, 0u);
 }
 
 TEST_F(NativeStreamTest, UntimedEventNamesTheSystemRelease) {
   HoldRelease();
   IREE_ASSERT_OK(LaunchBurst());
-  WaitFor(2);
   iree_hal_streaming_event_t* event = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_event_create(
       context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
@@ -549,7 +505,7 @@ TEST_F(NativeStreamTest, UntimedEventNamesTheSystemRelease) {
   iree_hal_streaming_recorded_point_t point;
   iree_hal_streaming_event_acquire_recorded_point(event, &point);
   EXPECT_EQ(point.semaphore, stream_->timeline_semaphore);
-  EXPECT_EQ(point.value, 3u);
+  EXPECT_EQ(point.value, 2u);
   iree_hal_streaming_event_release_recorded_point(&point);
   OpenRelease();
   IREE_EXPECT_OK(iree_hal_streaming_event_synchronize(event));
@@ -559,7 +515,6 @@ TEST_F(NativeStreamTest, UntimedEventNamesTheSystemRelease) {
 TEST_F(NativeStreamTest, HostCallbackWaitsForPublishedWrites) {
   HoldRelease();
   IREE_ASSERT_OK(LaunchBurst());
-  WaitFor(2);
   std::atomic<bool> called = false;
   iree_hal_host_call_t call = iree_hal_make_host_call(
       [](void* user_data, const uint64_t[4], iree_hal_host_call_context_t*) {
@@ -570,8 +525,8 @@ TEST_F(NativeStreamTest, HostCallbackWaitsForPublishedWrites) {
   const uint64_t args[4] = {};
   IREE_ASSERT_OK(iree_hal_streaming_queue_host_call(
       stream_, call, args, IREE_HAL_HOST_CALL_FLAG_NONE));
-  EXPECT_EQ(queue_->host_wait_value, 3u);
-  EXPECT_EQ(stream_->pending_value, 4u);
+  EXPECT_EQ(queue_->host_wait_value, 2u);
+  EXPECT_EQ(stream_->pending_value, 3u);
   EXPECT_FALSE(called.load());
   OpenRelease();
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
