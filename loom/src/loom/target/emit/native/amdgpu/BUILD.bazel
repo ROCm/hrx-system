@@ -178,11 +178,13 @@ loom_cc_library(
     srcs = ["metadata.c"],
     hdrs = ["metadata.h"],
     deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/target:artifact_diagnostics",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/arch/amdgpu:amdhsa_target_id",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
     ],
 )
 
@@ -843,6 +845,7 @@ loom_cc_library(
         ":hsaco",
         ":metadata",
         ":text_fixup",
+        "//loom/src/loom/error:emitter",
         "//loom/src/loom/target/arch/amdgpu:amdhsa_target_id",
         "//loom/src/loom/target/arch/amdgpu:target_identity",
         "//loom/src/loom/target/arch/amdgpu:target_info",
@@ -866,6 +869,9 @@ iree_assert_dependency_boundary(
 
 iree_assert_dependency_boundary(
     name = "hsaco_build_compiler_boundary",
+    # Structured diagnostics carry type values, without IR implementation or
+    # access to module storage, analysis, or compilation state.
+    allowed_dependencies = ["//loom/src/loom/ir:type_headers"],
     forbidden_subtrees = [
         "//loom/src/loom/codegen/...",
         "//loom/src/loom/ir/...",
@@ -1039,6 +1045,8 @@ loom_cc_test(
     srcs = ["metadata_test.cc"],
     deps = [
         ":metadata",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/target/emit/native:elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

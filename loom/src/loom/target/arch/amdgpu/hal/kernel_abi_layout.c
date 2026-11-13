@@ -691,7 +691,7 @@ static bool loom_amdgpu_hal_layout_array(
 
 static bool loom_amdgpu_hal_layout_parameter(
     loom_amdgpu_hal_layout_decoder_t* decoder, iree_string_view_t name,
-    int64_t value, bool* parameter_slots, uint32_t parameter_count,
+    int64_t value, const uint32_t* parameter_slots, uint32_t parameter_count,
     uint32_t* out_value) {
   if (value < 0 || (uint64_t)value >= parameter_count) {
     return loom_amdgpu_hal_layout_reject(
@@ -703,7 +703,6 @@ static bool loom_amdgpu_hal_layout_parameter(
         IREE_SV("distinct parameter indices across resources and direct "
                 "arguments"));
   }
-  parameter_slots[value] = true;
   *out_value = (uint32_t)value;
   return true;
 }
@@ -804,7 +803,9 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
                                     direct_arg_count, true, &payload_sizes)) {
     return decoder.status;
   }
-  bool* parameter_slots = NULL;
+  // One-based row ordinals, with direct arguments following resource rows.
+  // Zero marks an unclaimed slot until the complete parameter layout is read.
+  uint32_t* parameter_slots = NULL;
   if (parameter_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, parameter_count,
                                                    sizeof(*parameter_slots),
@@ -852,6 +853,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
         .source_type = loom_type_none(),
         .abi_type = loom_type_none(),
     };
+    parameter_slots[parameter_index] = i + 1;
     segment_end =
         iree_max(segment_end, (uint64_t)offset + resources[i].kernarg_size);
   }
@@ -919,6 +921,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
             LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT,
         .abi_type = loom_type_none(),
     };
+    parameter_slots[parameter_index] = resource_count + i + 1;
     segment_end = iree_max(segment_end, (uint64_t)offset + size);
     decoded_constant_count +=
         size / LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
@@ -928,6 +931,26 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
         &decoder, IREE_SV("constant_count"),
         IREE_SV("the total number of direct argument storage words"));
     return decoder.status;
+  }
+  uint64_t previous_end = 0;
+  for (uint32_t i = 0; i < parameter_count; ++i) {
+    const uint32_t row = parameter_slots[i] - 1;
+    const bool is_resource = row < resource_count;
+    const uint32_t offset =
+        is_resource ? resources[row].kernarg_offset
+                    : direct_args[row - resource_count].kernarg_offset;
+    const uint32_t size = is_resource
+                              ? resources[row].kernarg_size
+                              : direct_args[row - resource_count].kernarg_size;
+    if (offset < previous_end) {
+      loom_amdgpu_hal_layout_reject(
+          &decoder,
+          is_resource ? IREE_SV("resource_offsets")
+                      : IREE_SV("direct_arg_offsets"),
+          IREE_SV("disjoint argument storage in parameter order"));
+      return decoder.status;
+    }
+    previous_end = (uint64_t)offset + size;
   }
   const uint64_t segment_size = iree_align_uint64(
       segment_end, LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT);

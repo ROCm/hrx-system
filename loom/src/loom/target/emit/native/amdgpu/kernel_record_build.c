@@ -159,11 +159,13 @@ loom_amdgpu_kernel_record_collect_descriptor_flags(
 
 static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
     const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout,
-    iree_arena_allocator_t* arena,
-    const loom_amdgpu_metadata_argument_t** out_arguments) {
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, const loom_amdgpu_metadata_argument_t** out_arguments) {
+  *out_accepted = false;
   *out_arguments = NULL;
   const iree_host_size_t argument_count = abi_layout->parameter_count;
   if (argument_count == 0) {
+    *out_accepted = true;
     return iree_ok_status();
   }
   loom_amdgpu_metadata_argument_t* arguments = NULL;
@@ -185,6 +187,12 @@ static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
   for (iree_host_size_t i = 0; i < abi_layout->direct_arg_count; ++i) {
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =
         &abi_layout->direct_args[i];
+    if (direct_arg->name.size > UINT32_MAX) {
+      return loom_target_artifact_emit_limit(
+          emitter, abi_layout->function_op, IREE_SV("AMDGPU metadata"),
+          IREE_SV("argument name byte length"), direct_arg->name.size,
+          UINT32_MAX);
+    }
     IREE_ASSERT_LT(direct_arg->parameter_index, argument_count);
     arguments[direct_arg->parameter_index] = (loom_amdgpu_metadata_argument_t){
         .name = direct_arg->name,
@@ -195,6 +203,7 @@ static iree_status_t loom_amdgpu_kernel_record_build_metadata_arguments(
     };
   }
   *out_arguments = arguments;
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -241,6 +250,13 @@ iree_status_t loom_amdgpu_kernel_record_build(
 
   const iree_string_view_t symbol = loom_amdgpu_kernel_record_export_symbol(
       &schedule->target, schedule->module, schedule->function_op);
+  // The descriptor appends ".kd" to this name. Both names are MessagePack
+  // strings in the metadata note, whose encoded lengths are unsigned u32.
+  if (symbol.size > UINT32_MAX - 3u) {
+    return loom_target_artifact_emit_limit(
+        emitter, schedule->function_op, IREE_SV("AMDGPU metadata"),
+        IREE_SV("kernel name byte length"), symbol.size, UINT32_MAX - 3u);
+  }
   if (!loom_amdgpu_symbol_name_is_valid(symbol)) {
     return loom_target_artifact_emit_symbol_requirement(
         emitter, schedule->function_op, IREE_SV("AMDGPU HSACO"), symbol,
@@ -328,8 +344,12 @@ iree_status_t loom_amdgpu_kernel_record_build(
       &descriptor_symbol));
 
   const loom_amdgpu_metadata_argument_t* arguments = NULL;
+  bool arguments_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build_metadata_arguments(
-      abi_layout, scratch_arena, &arguments));
+      abi_layout, scratch_arena, emitter, &arguments_accepted, &arguments));
+  if (!arguments_accepted) {
+    return iree_ok_status();
+  }
   const bool has_required_workgroup_size =
       loom_target_workgroup_size_is_concrete(
           &hal_kernel->required_workgroup_size);

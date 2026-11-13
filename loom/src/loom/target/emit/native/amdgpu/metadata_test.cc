@@ -10,12 +10,15 @@
 #include <initializer_list>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco_metadata.h"
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/target/emit/native/elf.h"
 
 namespace loom {
@@ -272,34 +275,6 @@ TEST(AmdgpuMetadataTest, AppendsEveryGeneratedTargetMetadataProperty) {
   EXPECT_GT(property_count, 0u);
 }
 
-TEST(AmdgpuMetadataTest, RejectsInvalidWorkgroupClusterDimensions) {
-  struct ClusterDimensionsCase {
-    // Cluster dimensions supplied to the metadata writer.
-    loom_target_workgroup_cluster_size_t size;
-    // Presence marker supplied to the metadata writer.
-    bool is_present;
-  };
-  const ClusterDimensionsCase cases[] = {
-      {.size = {.x = 1, .y = 2, .z = 1}, .is_present = false},
-      {.size = {.x = 0, .y = 2, .z = 1}, .is_present = true},
-      {.size = {.x = 1, .y = 256, .z = 1}, .is_present = true},
-      {.size = {.x = 1, .y = 1, .z = 1}, .is_present = true},
-  };
-  for (const ClusterDimensionsCase& test_case : cases) {
-    loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
-    kernel.workgroup_cluster_size = test_case.size;
-    kernel.has_workgroup_cluster_size = test_case.is_present;
-    loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
-
-    iree_string_builder_t builder;
-    iree_string_builder_initialize(iree_allocator_system(), &builder);
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_INVALID_ARGUMENT,
-        loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
-    iree_string_builder_deinitialize(&builder);
-  }
-}
-
 TEST(AmdgpuMetadataTest, AppendsMsgpackMetadataForNoArgumentKernel) {
   loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
   loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
@@ -430,8 +405,10 @@ TEST(AmdgpuMetadataTest, BuildsElfNoteMetadata) {
 
   TestArena arena;
   iree_const_byte_span_t note_span = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_amdgpu_metadata_build_elf_note(&metadata, arena.arena(),
-                                                     &note_span));
+  bool accepted = false;
+  IREE_ASSERT_OK(loom_amdgpu_metadata_build_elf_note(
+      &metadata, arena.arena(), {}, &accepted, &note_span));
+  ASSERT_TRUE(accepted);
   std::string note((const char*)note_span.data, note_span.data_length);
 
   const char note_name[] = {'A', 'M', 'D', 'G', 'P', 'U', '\0'};
@@ -462,8 +439,10 @@ TEST(AmdgpuMetadataTest, WritesElfEnvelopeContainingMetadataNote) {
 
   TestArena note_arena;
   iree_const_byte_span_t note_span = iree_const_byte_span_empty();
+  bool accepted = false;
   IREE_ASSERT_OK(loom_amdgpu_metadata_build_elf_note(
-      &metadata, note_arena.arena(), &note_span));
+      &metadata, note_arena.arena(), {}, &accepted, &note_span));
+  ASSERT_TRUE(accepted);
   std::string note((const char*)note_span.data, note_span.data_length);
 
   const loom_native_elf_section_t sections[] = {{
@@ -613,35 +592,114 @@ TEST(AmdgpuMetadataTest, AppendsArgumentMetadata) {
   iree_hal_amd_gpu_metadata_deinitialize(&decoded);
 }
 
-TEST(AmdgpuMetadataTest, RejectsInvalidArgumentRange) {
-  const loom_amdgpu_metadata_argument_t arguments[] = {
-      {
-          .name = {},
-          .offset = 0,
-          .size = 8,
-          .alignment = 8,
-          .kind = LOOM_AMDGPU_METADATA_ARGUMENT_GLOBAL_BUFFER,
-      },
-      {
-          .name = {},
-          .offset = 4,
-          .size = 4,
-          .alignment = 4,
-          .kind = LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
-      },
+TEST(AmdgpuMetadataTest, QuotesArgumentNamesWithoutChangingMessagePack) {
+  struct NameCase {
+    // Valid UTF-8 metadata name, including embedded control characters.
+    iree_string_view_t name;
+    // Exact YAML scalar spelling, including its quotes.
+    const char* scalar;
   };
-  loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
-  kernel.kernarg_segment_size = 8;
-  kernel.arguments = arguments;
-  kernel.argument_count = IREE_ARRAYSIZE(arguments);
-  loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
+  const NameCase cases[] = {
+      {IREE_SV("two words"), "'two words'"},
+      {IREE_SV("a'b"), "\"a'b\""},
+      {IREE_SV("a\"b\\c"), "'a\"b\\c'"},
+      {iree_make_string_view("a\t\n\r\0b", 6),
+       "\"a\\u0009\\u000A\\u000D\\u0000b\""},
+      {IREE_SV("caf\xC3\xA9"), "\"caf\xC3\xA9\""},
+      {IREE_SV("a\xC2\x85\xE2\x80\xA8\xE2\x80\xA9z"),
+       "\"a\\u0085\\u2028\\u2029z\""},
+  };
+  for (const NameCase& test_case : cases) {
+    const loom_amdgpu_metadata_argument_t argument = {
+        .name = test_case.name,
+        .offset = 0,
+        .size = 4,
+        .alignment = 4,
+        .kind = LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
+    };
+    auto kernel = MinimalKernel();
+    kernel.kernarg_segment_size = 8;
+    kernel.arguments = &argument;
+    kernel.argument_count = 1;
+    auto metadata = MetadataForKernel(&kernel);
+    iree_string_builder_t builder;
+    iree_string_builder_initialize(iree_allocator_system(), &builder);
+    IREE_ASSERT_OK(loom_amdgpu_metadata_append_assembly(&metadata, &builder));
+    const std::string text = BuilderString(builder);
+    const size_t start = text.find("        - .name: ");
+    ASSERT_NE(start, std::string::npos);
+    EXPECT_EQ(text.substr(start, text.find('\n', start) - start),
+              std::string("        - .name: ") + test_case.scalar);
+    iree_string_builder_reset(&builder);
+    IREE_ASSERT_OK(loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
+    const std::string encoded =
+        std::string("\xA5.name", 6) + (char)(0xA0 | test_case.name.size) +
+        std::string(test_case.name.data, test_case.name.size);
+    EXPECT_NE(BuilderString(builder).find(encoded), std::string::npos);
+    iree_string_builder_deinitialize(&builder);
+  }
+}
 
-  iree_string_builder_t builder;
-  iree_string_builder_initialize(iree_allocator_system(), &builder);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
-  iree_string_builder_deinitialize(&builder);
+TEST(AmdgpuMetadataTest, RejectsAggregateNoteBeforeAllocatingItsPayload) {
+  if (sizeof(iree_host_size_t) < sizeof(uint64_t)) {
+    GTEST_SKIP() << "The host cannot measure a payload exceeding u32";
+  }
+  // Each string fits MessagePack; their repeated use in independent kernel
+  // records exceeds ELF's u32 note extent. Sizing borrows the shared bytes.
+  const std::string argument_name(1024 * 1024, 'x');
+  const loom_amdgpu_metadata_argument_t argument = {
+      .name = iree_make_string_view(argument_name.data(), argument_name.size()),
+      .offset = 0,
+      .size = 4,
+      .alignment = 4,
+      .kind = LOOM_AMDGPU_METADATA_ARGUMENT_BY_VALUE,
+  };
+  constexpr size_t kKernelCount = 4096;
+  std::vector<std::string> names;
+  std::vector<std::string> descriptor_names;
+  names.reserve(kKernelCount);
+  descriptor_names.reserve(kKernelCount);
+  std::vector<loom_amdgpu_metadata_kernel_t> kernels(kKernelCount);
+  for (size_t i = 0; i < kKernelCount; ++i) {
+    names.push_back("kernel_" + std::to_string(i));
+    descriptor_names.push_back(names.back() + ".kd");
+    kernels[i] = MinimalKernel();
+    kernels[i].name = iree_make_string_view(names[i].data(), names[i].size());
+    kernels[i].descriptor_symbol = iree_make_string_view(
+        descriptor_names[i].data(), descriptor_names[i].size());
+    kernels[i].kernarg_segment_size = 8;
+    kernels[i].arguments = &argument;
+    kernels[i].argument_count = 1;
+  }
+  auto metadata = MetadataForKernel(kernels.data());
+  metadata.kernel_count = kernels.size();
+  TestArena arena;
+  uint32_t emission_count = 0;
+  for (bool install_callback : {false, true}) {
+    iree_diagnostic_emitter_t emitter = {};
+    if (install_callback) {
+      emitter = {
+          .fn =
+              [](void* user_data, const loom_diagnostic_emission_t* emission) {
+                ++*static_cast<uint32_t*>(user_data);
+                EXPECT_EQ(emission->error, LOOM_ERR_BACKEND_060);
+                EXPECT_EQ(emission->op, nullptr);
+                EXPECT_GT(emission->params[2].u64, UINT32_MAX);
+                EXPECT_EQ(emission->params[3].u64, UINT32_MAX);
+                return iree_ok_status();
+              },
+          .user_data = &emission_count,
+      };
+    }
+    bool accepted = true;
+    iree_const_byte_span_t note = iree_const_byte_span_empty();
+    IREE_ASSERT_OK(loom_amdgpu_metadata_build_elf_note(
+        &metadata, arena.arena(), emitter, &accepted, &note));
+    EXPECT_FALSE(accepted);
+    EXPECT_EQ(note.data, nullptr);
+    EXPECT_EQ(note.data_length, 0u);
+  }
+  EXPECT_EQ(emission_count, 1u);
 }
 
 }  // namespace

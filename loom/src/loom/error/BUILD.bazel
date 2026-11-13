@@ -167,6 +167,7 @@ loom_cc_instance_library(
     hdrs = ["renderer.h"],
     deps = [
         ":parameter",
+        "//loom/src/loom/ir:types",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
     ],
@@ -190,7 +191,7 @@ loom_cc_library(
     deps = [
         ":emitter",
         ":error_defs",
-        "//loom/src/loom/ir:types",
+        "//loom/src/loom/ir:type_headers",
         "//runtime/src/iree/base",
     ],
 )

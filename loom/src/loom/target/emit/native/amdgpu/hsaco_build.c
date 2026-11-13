@@ -367,8 +367,8 @@ static iree_status_t loom_amdgpu_hsaco_copy_metadata_kernels(
 }
 
 static iree_status_t loom_amdgpu_hsaco_build_note(
-    const loom_amdgpu_hsaco_input_t* input,
     const loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted,
     iree_const_byte_span_t* out_note) {
   *out_note = iree_make_const_byte_span(NULL, 0);
 
@@ -377,7 +377,8 @@ static iree_status_t loom_amdgpu_hsaco_build_note(
       .kernels = payloads->metadata_kernels,
       .kernel_count = payloads->metadata_kernel_count,
   };
-  return loom_amdgpu_metadata_build_elf_note(&metadata, arena, out_note);
+  return loom_amdgpu_metadata_build_elf_note(&metadata, arena, emitter,
+                                             out_accepted, out_note);
 }
 
 static iree_status_t loom_amdgpu_hsaco_build_string_tables(
@@ -1061,10 +1062,16 @@ static iree_status_t loom_amdgpu_hsaco_assign_read_addresses(
 static iree_status_t loom_amdgpu_hsaco_build_sections(
     const loom_amdgpu_hsaco_input_t* input,
     const loom_amdgpu_processor_info_t* processor,
-    loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena) {
+    loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted) {
+  *out_accepted = false;
   iree_const_byte_span_t note = iree_make_const_byte_span(NULL, 0);
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hsaco_build_note(input, payloads, arena, &note));
+  bool note_accepted = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_build_note(payloads, arena, emitter,
+                                                    &note_accepted, &note));
+  if (!note_accepted) {
+    return iree_ok_status();
+  }
 
   iree_host_size_t dynamic_symbol_count = 0;
   if (!iree_host_size_checked_mul(input->kernel_count, 2u,
@@ -1323,6 +1330,7 @@ static iree_status_t loom_amdgpu_hsaco_build_sections(
       loom_amdgpu_hsaco_build_dynamic_table(payloads, arena, &dynamic_table));
   loom_amdgpu_hsaco_mutable_section(payloads, LOOM_AMDGPU_HSACO_SECTION_DYNAMIC)
       ->contents = dynamic_table;
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -1423,7 +1431,9 @@ static void loom_amdgpu_hsaco_build_segments(
 
 iree_status_t loom_amdgpu_hsaco_plan_build(
     const loom_amdgpu_hsaco_input_t* input, iree_arena_allocator_t* arena,
+    iree_diagnostic_emitter_t emitter, bool* out_accepted,
     loom_amdgpu_hsaco_plan_t* out_plan) {
+  *out_accepted = false;
   *out_plan = (loom_amdgpu_hsaco_plan_t){0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_validate_input(input));
   const loom_amdgpu_processor_info_t* processor =
@@ -1458,8 +1468,13 @@ iree_status_t loom_amdgpu_hsaco_plan_build(
   }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hsaco_copy_metadata_kernels(input, &payloads, arena));
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hsaco_build_sections(input, processor, &payloads, arena));
+  bool sections_accepted = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_build_sections(
+      input, processor, &payloads, arena, emitter, &sections_accepted));
+  if (!sections_accepted) {
+    return iree_ok_status();
+  }
   loom_amdgpu_hsaco_build_segments(&payloads);
+  *out_accepted = true;
   return iree_ok_status();
 }

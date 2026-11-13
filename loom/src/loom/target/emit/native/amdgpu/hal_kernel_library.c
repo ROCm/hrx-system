@@ -937,8 +937,12 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
           &symbols_accepted);
       diagnostics_failed |= !symbols_accepted;
       if (iree_status_is_ok(status) && !diagnostics_failed) {
-        status = loom_amdgpu_hsaco_plan_build(&hsaco_input, table_arena,
-                                              &hsaco_plan);
+        bool plan_accepted = false;
+        status = loom_amdgpu_hsaco_plan_build(
+            &hsaco_input, table_arena,
+            loom_target_entry_emitter(diagnostic_emitter), &plan_accepted,
+            &hsaco_plan);
+        diagnostics_failed |= !plan_accepted;
       }
     }
     if (iree_status_is_ok(status) && !diagnostics_failed && report != NULL) {

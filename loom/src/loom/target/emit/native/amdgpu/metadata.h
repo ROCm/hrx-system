@@ -9,8 +9,8 @@
 // The HSA loader consumes an AMDGPU ELF note whose descriptor is MessagePack
 // metadata. LLVM's assembler accepts the same information as a YAML-like
 // `.amdgpu_metadata` assembly block and lowers it to the note payload. Loom
-// owns both forms here so the temporary assembly path and future direct ELF
-// writer share one metadata contract.
+// owns both forms here so assembly and direct ELF emission share one
+// metadata contract. Both consume admitted target facts and kernarg layouts.
 
 #ifndef LOOM_TARGET_EMIT_NATIVE_AMDGPU_METADATA_H_
 #define LOOM_TARGET_EMIT_NATIVE_AMDGPU_METADATA_H_
@@ -18,6 +18,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
+#include "loom/error/emitter.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/types.h"
 
@@ -90,7 +91,7 @@ typedef struct loom_amdgpu_metadata_kernel_t {
   bool has_workgroup_cluster_size;
   // Target-required AMDHSA kernel metadata extensions.
   loom_amdgpu_metadata_string_property_set_t target_extensions;
-  // Argument records in kernarg offset order.
+  // Admitted disjoint argument records in kernarg offset order.
   const loom_amdgpu_metadata_argument_t* arguments;
   // Number of records in |arguments|.
   iree_host_size_t argument_count;
@@ -112,6 +113,8 @@ iree_status_t loom_amdgpu_metadata_append_assembly(
     iree_string_builder_t* builder);
 
 // Appends the MessagePack payload for the AMDGPU ELF metadata note.
+// String lengths fit u32; row counts are bounded by the module symbol and
+// parameter capacities admitted by the artifact and ABI producers.
 //
 // Map keys use the same lexicographic order produced by the ROCr loader. This
 // preserves string virtual addresses when ROCr canonicalizes the metadata into
@@ -129,10 +132,13 @@ iree_status_t loom_amdgpu_metadata_append_msgpack(
 // The returned bytes are not a complete ELF file, section, or program segment.
 // Direct object emitters can place the record in a SHT_NOTE section and expose
 // the same bytes through a PT_NOTE segment. The note name is `AMDGPU` and the
-// note type is NT_AMDGPU_METADATA.
+// note type is NT_AMDGPU_METADATA. Aggregate payload rejection emits a module
+// diagnostic and leaves |out_accepted| false and |out_note| empty,
+// independently of whether |emitter| has a callback.
 iree_status_t loom_amdgpu_metadata_build_elf_note(
     const loom_amdgpu_code_object_metadata_t* metadata,
-    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_note);
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, iree_const_byte_span_t* out_note);
 
 #ifdef __cplusplus
 }  // extern "C"
