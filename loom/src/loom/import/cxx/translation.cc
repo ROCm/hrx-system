@@ -6099,9 +6099,11 @@ class Translator final : private Initialization::Evaluation {
           if (null_pointer_expression(unit_, binary->leftExpression)) {
             return storage_.compare_null(right.pointer().root, equal, ast);
           }
-          fail(ast,
-               "pointer equality between potentially nonnull values "
-               "requires buffer address identity");
+          return storage_.compare_address(left.pointer(), right.pointer(),
+                                          equal, ast);
+        }
+        if (left.is_pointer() && right.is_pointer()) {
+          fail(ast, "pointer ordering and subtraction are not supported");
         }
         if (left.is_pointer() && !right.is_pointer()) {
           return storage_

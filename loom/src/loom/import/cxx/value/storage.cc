@@ -71,6 +71,18 @@ loom_value_id_t Storage::compare_null(loom_value_id_t root, bool equal,
   return loom_op_results(op)[0];
 }
 
+loom_value_id_t Storage::compare_address(Pointer left, Pointer right,
+                                         bool equal, cxx::AST* owner) {
+  loom_op_t* op;
+  check(loom_buffer_compare_address_build(
+      &builder_,
+      equal ? LOOM_BUFFER_COMPARE_ADDRESS_PREDICATE_EQ
+            : LOOM_BUFFER_COMPARE_ADDRESS_PREDICATE_NE,
+      left.root, left.byte_offset, right.root, right.byte_offset,
+      locations_.get(owner), &op));
+  return loom_buffer_compare_address_result(op);
+}
+
 Pointer Storage::constrain_origin(Pointer pointer, cxx::AST* owner) {
   if (unit_.control()->memoryLayout()->sizeOfPointer() != 4) {
     return pointer;

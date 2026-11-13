@@ -3412,9 +3412,26 @@ operations fold when their nullability is known, while a mixed null/live choice
 retains its runtime test. Exported C++ spells these operations
 `loom::buffer::null<T>()` and `loom::buffer::compare::null(buffer)`.
 
-Dereferencing null remains invalid. Equality between two potentially live
-pointers requires source-address identity across buffer origins and is
-diagnosed; it is not approximated with buffer-handle equality.
+Equality and inequality between live pointers preserve both byte positions:
+
+```cpp
+bool same_element(const int* left, const int* right) {
+  return left + 1 == right;
+}
+```
+
+The importer emits `buffer.compare.address eq` or `ne` with both buffer/offset
+pairs. Independently supplied buffers may alias or describe overlapping storage;
+equality compares their selected positions, not their wrapper identities. When
+cleanup proves a common byte origin, it reduces the operation to `index.cmp`
+on the offsets. This also enables ordinary pointer-iterator termination after
+inlining a helper whose `first` and `last` arguments came from one array.
+
+Exported C++ preserves unresolved comparisons through
+`loom::buffer::compare::address<loom::buffer::compare::predicate::eq>` or `ne`.
+The explicit facade takes two typed buffers and two `loom::type::offset` values.
+Dereferencing null remains invalid. Ordered pointer comparisons and pointer
+subtraction have separate semantics and remain diagnosed.
 
 `void*`, qualified void pointers, and pointers to forward-declared objects use
 the same representation. Copies, casts, helpers, branches, loops, and SSA record

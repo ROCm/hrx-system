@@ -305,6 +305,25 @@ class CxxRenderer(CxxFunctionRenderer):
                 f"loom::buffer::compare::null({argument})",
             )
             return ()
+        if name == "buffer.compare.address":
+            resolved = self._resolved(operation)
+            arguments = []
+            for side in ("lhs", "rhs"):
+                root = resolved.value_id(side)
+                arguments.extend(
+                    (
+                        self._buffer_argument(root, self._buffer_element(root)),
+                        self.expression(resolved.value_id(f"{side}_offset")),
+                    )
+                )
+            predicate = resolved.attr("predicate")
+            self._declare(
+                resolved.value_id("result"),
+                "loom::buffer::compare::address<"
+                f"loom::buffer::compare::predicate::{predicate}>("
+                f"{', '.join(arguments)})",
+            )
+            return ("predicate",)
         projected = self._render_atomic(operation)
         if projected is not None:
             return projected

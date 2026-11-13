@@ -81,6 +81,10 @@ class Storage {
   // The caller has already evaluated the source pointer expression.
   loom_value_id_t compare_null(loom_value_id_t root, bool equal,
                                cxx::AST* owner);
+  // Tests opaque byte positions. Shared IR cleanup can use a common root
+  // established after inlining; independent roots retain address equality.
+  loom_value_id_t compare_address(Pointer left, Pointer right, bool equal,
+                                  cxx::AST* owner);
   // Refines an opaque pointer origin to the configured source pointer width.
   // The allocation root remains independent; this only publishes the range
   // every valid source pointer representation already satisfies.

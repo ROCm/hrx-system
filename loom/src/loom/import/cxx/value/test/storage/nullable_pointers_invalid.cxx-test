@@ -6,13 +6,6 @@ int* integer_address(unsigned long long value) {
 }
 
 // ====
-// Two live roots need address identity, not buffer-handle or content equality.
-bool compare(const int* left, const int* right) {
-  // ERROR@+1: LOWERING/059 "pointer equality between potentially nonnull values requires buffer address identity"
-  return left == right;
-}
-
-// ====
 // Raw pointers carry a byte origin as well as a root; the facade returns a root.
 // ERROR@+1: LOWERING/059 "buffer.null requires a typed buffer result"
 [[loom::op("buffer.null")]] int* wrong_result();
@@ -26,4 +19,27 @@ int* entry() {
 [[loom::op("buffer.compare.null")]] unsigned wrong_predicate(loom::type::buffer<int>);
 unsigned entry(loom::type::buffer<int> input) {
   return wrong_predicate(input);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+// ERROR@+1: LOWERING/059 "buffer.compare.address requires two typed buffer and offset pairs and a bool result"
+[[loom::op("buffer.compare.address")]] unsigned wrong_address(loom::type::buffer<int>, loom::type::offset, loom::type::buffer<int>, loom::type::offset);
+unsigned entry(loom::type::buffer<int> left, loom::type::buffer<int> right) {
+  return wrong_address(left, loom::type::offset{0}, right, loom::type::offset{0});
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+bool entry(loom::type::buffer<int> left, loom::type::buffer<int> right) {
+  // ERROR@+1: LOWERING/059 "buffer.compare.address requires an eq or ne predicate as its first template argument"
+  return loom::buffer::compare::address<static_cast<loom::buffer::compare::predicate>(2)>(left, loom::type::offset{0}, right, loom::type::offset{0});
+}
+
+// ====
+bool ordered(const int* left, const int* right) {
+  // ERROR@+1: LOWERING/059 "ordering and subtraction are not supported"
+  return left < right;
 }

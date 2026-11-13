@@ -65,6 +65,8 @@ class BufferIntrinsic {
     Root,
     Null,
     CompareNull,
+    CompareAddressEqual,
+    CompareAddressUnequal,
   };
 
   BufferIntrinsic(Operation operation,
