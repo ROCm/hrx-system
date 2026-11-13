@@ -13,7 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/hal/utils/resource_set.h"
-#include "libhrx/src/libhrx/graph_dependencies.h"
+#include "libhrx/src/libhrx/graph_replay.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,17 +26,20 @@ typedef struct iree_hal_streaming_event_t iree_hal_streaming_event_t;
 
 typedef enum iree_hal_streaming_graph_block_type_e {
   // iree_hal_queue_barrier
-  IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER = 0,
+  IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER =
+      HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER,
+  // iree_hal_queue_execute
+  IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE =
+      HRX_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE,
   // iree_hal_queue_host_call
-  IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL,
+  IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL =
+      HRX_GRAPH_BLOCK_TYPE_FRONTEND,
   // Event record node.
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD,
   // Event wait node.
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT,
   // iree_hal_queue_dispatch
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH,
-  // iree_hal_queue_execute
-  IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE,
   // Native graph allocation on the graph timeline.
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_MEMORY_ALLOCATE,
   // Native graph free on the graph timeline.
@@ -44,12 +47,6 @@ typedef enum iree_hal_streaming_graph_block_type_e {
   // Nested graph executable.
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH,
 } iree_hal_streaming_graph_block_type_t;
-
-// IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
-typedef struct iree_hal_streaming_graph_barrier_block_attrs_t {
-  // HAL submission flags for this dependency-only block.
-  iree_hal_queue_barrier_flags_t flags;
-} iree_hal_streaming_graph_barrier_block_attrs_t;
 
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL
 typedef struct iree_hal_streaming_graph_host_call_block_attrs_t {
@@ -90,62 +87,52 @@ typedef struct iree_hal_streaming_graph_dispatch_block_attrs_t {
   iree_hal_dispatch_flags_t flags;
 } iree_hal_streaming_graph_dispatch_block_attrs_t;
 
-// IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE
-typedef struct iree_hal_streaming_graph_execute_block_attrs_t {
-  // Recorded commands borrowed from the compiled resource set.
-  iree_hal_command_buffer_t* command_buffer;
-  // HAL execution flags captured at compilation.
-  iree_hal_queue_execute_flags_t flags;
-} iree_hal_streaming_graph_execute_block_attrs_t;
-
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH
 typedef struct iree_hal_streaming_graph_child_graph_block_attrs_t {
   // Owned child executable, released with this compiled block.
   iree_hal_streaming_graph_exec_t* exec;
 } iree_hal_streaming_graph_child_graph_block_attrs_t;
 
-// Block-specific data stored inline in the block header.
-typedef union iree_hal_streaming_graph_block_attrs_t {
-  // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
-  iree_hal_streaming_graph_barrier_block_attrs_t barrier;
-  // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL
-  iree_hal_streaming_graph_host_call_block_attrs_t host_call;
-  // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD/WAIT
-  iree_hal_streaming_graph_event_block_attrs_t event;
-  // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH
-  iree_hal_streaming_graph_dispatch_block_attrs_t dispatch;
-  // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE
-  iree_hal_streaming_graph_execute_block_attrs_t execute;
-  // MEMORY_ALLOCATE/MEMORY_FREE; owner retained by the compiled resource set.
-  struct {
-    // Stable virtual address and current physical lifetime.
-    iree_hal_streaming_graph_allocation_t* allocation;
-    // Prepared allocation/free action and replay policy.
-    iree_hal_streaming_graph_allocation_flags_t flags;
-  } memory;
-  // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH
-  iree_hal_streaming_graph_child_graph_block_attrs_t child_graph;
-} iree_hal_streaming_graph_block_attrs_t;
+// MEMORY_ALLOCATE/MEMORY_FREE share the same prepared allocation action.
+typedef struct iree_hal_streaming_graph_memory_block_attrs_t {
+  // Stable address and physical lifetime retained by the recording's resources.
+  iree_hal_streaming_graph_allocation_t* allocation;
+  // Prepared allocation/free action and replay policy.
+  iree_hal_streaming_graph_allocation_flags_t flags;
+} iree_hal_streaming_graph_memory_block_attrs_t;
 
-// One recorded range, isolated frontend operation, or terminal dependency join.
-typedef struct iree_hal_streaming_graph_block_t {
-  // Operation interpreted by the frontend's submission policy.
-  iree_hal_streaming_graph_block_type_t type;
-  // Compact predecessor span relative to this block's submission ordinal.
-  hrx_graph_dependencies_t dependencies;
-  // Parameters owned by the executable and retained by accepted submissions.
-  iree_hal_streaming_graph_block_attrs_t attrs;
-} iree_hal_streaming_graph_block_t;
+static inline iree_hal_streaming_graph_host_call_block_attrs_t*
+iree_hal_streaming_graph_block_host_call(const hrx_graph_block_t* block) {
+  return (iree_hal_streaming_graph_host_call_block_attrs_t*)block->data;
+}
+
+static inline iree_hal_streaming_graph_event_block_attrs_t*
+iree_hal_streaming_graph_block_event(const hrx_graph_block_t* block) {
+  return (iree_hal_streaming_graph_event_block_attrs_t*)block->data;
+}
+
+static inline iree_hal_streaming_graph_dispatch_block_attrs_t*
+iree_hal_streaming_graph_block_dispatch(const hrx_graph_block_t* block) {
+  return (iree_hal_streaming_graph_dispatch_block_attrs_t*)block->data;
+}
+
+static inline iree_hal_streaming_graph_child_graph_block_attrs_t*
+iree_hal_streaming_graph_block_child_graph(const hrx_graph_block_t* block) {
+  return (iree_hal_streaming_graph_child_graph_block_attrs_t*)block->data;
+}
+
+static inline iree_hal_streaming_graph_memory_block_attrs_t*
+iree_hal_streaming_graph_block_memory(const hrx_graph_block_t* block) {
+  return (iree_hal_streaming_graph_memory_block_attrs_t*)block->data;
+}
 
 // Replaceable compiled state. It is embedded in an executable or temporarily
 // held by an editor; accepted queue operations retain their own resources.
 typedef struct iree_hal_streaming_graph_recording_t {
   // Owns block descriptors and copied submission parameters.
   iree_arena_allocator_t arena_allocator;
-  // Arena-owned immutable submission order.
-  iree_hal_streaming_graph_block_t** blocks;
-  // Initialized entries, including during partial compilation.
-  uint32_t block_count;
+  // Compiled submission order and borrowed internal completion timelines.
+  hrx_graph_block_list_t blocks;
   // This recording or one of its children records an event.
   bool records_events;
   // An event producer can change between launches and need an independent
@@ -153,10 +140,6 @@ typedef struct iree_hal_streaming_graph_recording_t {
   bool waits_for_events;
   // A cooperative dispatch needs residency admission before submission.
   bool has_cooperative_dispatches;
-  // Internal completion points used by the compiled dependency spans.
-  uint32_t semaphore_count;
-  // Contiguous timeline references borrowed from resource_set.
-  iree_hal_semaphore_t** semaphores;
   // Owns explicitly captured buffers, executables, and command buffers.
   iree_hal_resource_set_t* resource_set;
   // Arena-owned graph-allocation claims held by this recording.

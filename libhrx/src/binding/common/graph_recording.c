@@ -85,17 +85,20 @@ static iree_status_t iree_hal_streaming_graph_memory_acquire_claims(
 
 static void iree_hal_streaming_graph_recording_release_children(
     iree_hal_streaming_graph_recording_t* recording) {
-  for (uint32_t i = 0; recording->blocks && i < recording->block_count; ++i) {
-    iree_hal_streaming_graph_block_t* block = recording->blocks[i];
+  for (uint32_t i = 0; recording->blocks.values && i < recording->blocks.count;
+       ++i) {
+    hrx_graph_block_t* block = recording->blocks.values[i];
     switch (block->type) {
       case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH:
-        iree_hal_streaming_graph_exec_release(block->attrs.child_graph.exec);
-        block->attrs.child_graph.exec = NULL;
+        iree_hal_streaming_graph_exec_release(
+            iree_hal_streaming_graph_block_child_graph(block)->exec);
+        iree_hal_streaming_graph_block_child_graph(block)->exec = NULL;
         break;
       case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD:
       case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT:
-        iree_hal_streaming_event_release(block->attrs.event.event);
-        block->attrs.event.event = NULL;
+        iree_hal_streaming_event_release(
+            iree_hal_streaming_graph_block_event(block)->event);
+        iree_hal_streaming_graph_block_event(block)->event = NULL;
         break;
       default:
         break;
@@ -122,25 +125,30 @@ static void iree_hal_streaming_graph_memory_release_claims(
 static iree_status_t iree_hal_streaming_graph_block_allocate(
     iree_arena_allocator_t* arena_allocator,
     iree_hal_streaming_graph_block_type_t type,
-    hrx_graph_dependencies_t dependencies,
-    iree_hal_streaming_graph_block_t** out_block) {
-  iree_hal_streaming_graph_block_t* block = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(arena_allocator, sizeof(*block), (void**)&block));
-  block->type = type;
-  block->dependencies = dependencies;
-  *out_block = block;
-  return iree_ok_status();
+    hrx_graph_dependencies_t dependencies, hrx_graph_block_t** out_block) {
+  static const uint16_t payload_sizes[] = {
+      sizeof(hrx_graph_barrier_block_t),
+      sizeof(hrx_graph_execute_block_t),
+      sizeof(iree_hal_streaming_graph_host_call_block_attrs_t),
+      sizeof(iree_hal_streaming_graph_event_block_attrs_t),
+      sizeof(iree_hal_streaming_graph_event_block_attrs_t),
+      sizeof(iree_hal_streaming_graph_dispatch_block_attrs_t),
+      sizeof(iree_hal_streaming_graph_memory_block_attrs_t),
+      sizeof(iree_hal_streaming_graph_memory_block_attrs_t),
+      sizeof(iree_hal_streaming_graph_child_graph_block_attrs_t),
+  };
+  return hrx_graph_block_allocate(arena_allocator, (uint8_t)type, dependencies,
+                                  payload_sizes[type], out_block);
 }
 
 static iree_status_t iree_hal_streaming_graph_allocate_barrier_block(
     iree_hal_streaming_graph_compiler_t* compiler,
     hrx_graph_dependencies_t dependencies, iree_hal_queue_barrier_flags_t flags,
-    iree_hal_streaming_graph_block_t** out_block) {
+    hrx_graph_block_t** out_block) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Allocate the operation and its compact predecessor span.
-  iree_hal_streaming_graph_block_t* block = NULL;
+  hrx_graph_block_t* block = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_block_allocate(
               &compiler->recording->arena_allocator,
@@ -148,7 +156,7 @@ static iree_status_t iree_hal_streaming_graph_allocate_barrier_block(
               &block));
 
   // Set barrier attributes.
-  iree_hal_streaming_graph_barrier_block_attrs_t* attrs = &block->attrs.barrier;
+  hrx_graph_barrier_block_t* attrs = hrx_graph_block_barrier(block);
   attrs->flags = flags;
 
   *out_block = block;
@@ -161,12 +169,11 @@ static iree_status_t iree_hal_streaming_graph_allocate_host_call_block(
     hrx_graph_dependencies_t dependencies,
     iree_hal_streaming_host_callback_t callback, void* user_data,
     const iree_hal_streaming_graph_node_t* source_node,
-    iree_hal_host_call_flags_t flags,
-    iree_hal_streaming_graph_block_t** out_block) {
+    iree_hal_host_call_flags_t flags, hrx_graph_block_t** out_block) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Allocate the operation and its compact predecessor span.
-  iree_hal_streaming_graph_block_t* block = NULL;
+  hrx_graph_block_t* block = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_block_allocate(
               &compiler->recording->arena_allocator,
@@ -175,7 +182,7 @@ static iree_status_t iree_hal_streaming_graph_allocate_host_call_block(
 
   // Set host call attributes.
   iree_hal_streaming_graph_host_call_block_attrs_t* attrs =
-      &block->attrs.host_call;
+      iree_hal_streaming_graph_block_host_call(block);
   attrs->callback = callback;
   attrs->user_data = user_data;
   attrs->user_data_size =
@@ -215,17 +222,16 @@ static iree_status_t iree_hal_streaming_graph_allocate_event_block(
     iree_hal_streaming_graph_block_type_t type,
     hrx_graph_dependencies_t dependencies,
     iree_hal_streaming_graph_node_t* source_node,
-    iree_hal_streaming_event_t* event,
-    iree_hal_streaming_graph_block_t** out_block) {
+    iree_hal_streaming_event_t* event, hrx_graph_block_t** out_block) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_graph_block_t* block = NULL;
+  hrx_graph_block_t* block = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       iree_hal_streaming_graph_block_allocate(
           &compiler->recording->arena_allocator, type, dependencies, &block));
 
-  block->attrs.event.source_node = source_node;
-  block->attrs.event.event = event;
+  iree_hal_streaming_graph_block_event(block)->source_node = source_node;
+  iree_hal_streaming_graph_block_event(block)->event = event;
   iree_hal_streaming_event_retain(event);
   // The one place a record block is built, and so where |compiler| learns it
   // holds one. A launch reads this to answer for every record at once.
@@ -245,12 +251,11 @@ static iree_status_t iree_hal_streaming_graph_allocate_dispatch_block(
     hrx_graph_dependencies_t dependencies, iree_hal_executable_t* executable,
     iree_host_size_t entry_point, iree_hal_dispatch_config_t config,
     iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings,
-    iree_hal_dispatch_flags_t flags,
-    iree_hal_streaming_graph_block_t** out_block) {
+    iree_hal_dispatch_flags_t flags, hrx_graph_block_t** out_block) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Allocate the operation and its compact predecessor span.
-  iree_hal_streaming_graph_block_t* block = NULL;
+  hrx_graph_block_t* block = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_block_allocate(
               &compiler->recording->arena_allocator,
@@ -259,7 +264,7 @@ static iree_status_t iree_hal_streaming_graph_allocate_dispatch_block(
 
   // Set dispatch attributes.
   iree_hal_streaming_graph_dispatch_block_attrs_t* attrs =
-      &block->attrs.dispatch;
+      iree_hal_streaming_graph_block_dispatch(block);
   attrs->executable = executable;
   attrs->entry_point = entry_point;
   attrs->config = config;
@@ -316,18 +321,18 @@ static iree_status_t iree_hal_streaming_graph_allocate_dispatch_block(
 static iree_status_t iree_hal_streaming_graph_allocate_execute_block(
     iree_hal_streaming_graph_compiler_t* compiler,
     hrx_graph_dependencies_t dependencies, iree_hal_queue_execute_flags_t flags,
-    iree_hal_streaming_graph_block_t** out_block) {
+    hrx_graph_block_t** out_block) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Allocate the operation and its compact predecessor span.
-  iree_hal_streaming_graph_block_t* block = NULL;
+  hrx_graph_block_t* block = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_block_allocate(
               &compiler->recording->arena_allocator,
               IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE, dependencies,
               &block));
 
-  iree_hal_streaming_graph_execute_block_attrs_t* attrs = &block->attrs.execute;
+  hrx_graph_execute_block_t* attrs = hrx_graph_block_execute(block);
   attrs->flags = flags;
 
   // Parameter updates can replace this compiled graph while an older launch
@@ -362,8 +367,7 @@ static iree_status_t iree_hal_streaming_graph_allocate_execute_block(
 static iree_status_t iree_hal_streaming_graph_allocate_child_graph_block(
     iree_hal_streaming_graph_compiler_t* compiler,
     hrx_graph_dependencies_t dependencies,
-    iree_hal_streaming_graph_t* child_graph,
-    iree_hal_streaming_graph_block_t** out_block) {
+    iree_hal_streaming_graph_t* child_graph, hrx_graph_block_t** out_block) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_streaming_graph_exec_t* child_exec = NULL;
@@ -375,12 +379,12 @@ static iree_status_t iree_hal_streaming_graph_allocate_child_graph_block(
           compiler->params->execution_owner, compiler->params->host_allocator,
           &child_exec));
 
-  iree_hal_streaming_graph_block_t* block = NULL;
+  hrx_graph_block_t* block = NULL;
   iree_status_t status = iree_hal_streaming_graph_block_allocate(
       &compiler->recording->arena_allocator,
       IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH, dependencies, &block);
   if (iree_status_is_ok(status)) {
-    block->attrs.child_graph.exec = child_exec;
+    iree_hal_streaming_graph_block_child_graph(block)->exec = child_exec;
     const iree_hal_streaming_graph_recording_t* child_recording =
         iree_hal_streaming_graph_exec_recording(child_exec);
     // A launch of this recording walks the child's blocks too, so the records
@@ -412,8 +416,8 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
       z0, iree_hal_command_buffer_begin(command_buffer));
 
   // Scope the partition into a debug group.
-  // TODO: propagate graph information (name, origin, etc).
-  const iree_string_view_t label_name = iree_make_cstring_view("tbd_partition");
+  const iree_string_view_t label_name =
+      iree_make_cstring_view("graph partition");
   const iree_hal_label_location_t* location = NULL;
   const iree_hal_label_color_t label_color = iree_hal_label_color_unspecified();
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -474,10 +478,9 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
 static iree_status_t iree_hal_streaming_graph_compile_block(
     iree_hal_streaming_graph_compiler_t* compiler,
     const hrx_graph_schedule_t* schedule,
-    const hrx_graph_dependency_block_t* plan,
-    iree_hal_streaming_graph_block_t** out_block) {
+    const hrx_graph_dependency_block_t* plan, hrx_graph_block_t** out_block) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_graph_block_t* block = NULL;
+  hrx_graph_block_t* block = NULL;
   const hrx_graph_partition_t* partition = plan->partition;
   if (!partition) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -496,7 +499,8 @@ static iree_status_t iree_hal_streaming_graph_compile_block(
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_graph_record_partition(
                   compiler, schedule, partition->start_index, partition->count,
-                  plan->stream_index, block->attrs.execute.command_buffer));
+                  plan->stream_index,
+                  hrx_graph_block_execute(block)->command_buffer));
     } else {
       iree_hal_streaming_graph_node_t* first_node =
           schedule->sources[first_index];
@@ -544,24 +548,25 @@ static iree_status_t iree_hal_streaming_graph_compile_block(
                   allocate ? IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_MEMORY_ALLOCATE
                            : IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_MEMORY_FREE,
                   plan->dependencies, &block));
-          block->attrs.memory.allocation =
+          iree_hal_streaming_graph_memory_block_attrs_t* memory =
+              iree_hal_streaming_graph_block_memory(block);
+          memory->allocation =
               allocate
                   ? iree_hal_streaming_graph_node_mem_alloc(node)->allocation
                   : iree_hal_streaming_graph_node_mem_free(node)->allocation;
-          block->attrs.memory.flags =
+          memory->flags =
               allocate ? IREE_HAL_STREAMING_GRAPH_ALLOCATION_FLAG_ALLOCATE
                        : IREE_HAL_STREAMING_GRAPH_ALLOCATION_FLAG_NONE;
           if (allocate &&
               iree_any_bit_set(
                   compiler->params->flags,
                   IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH)) {
-            block->attrs.memory.flags |=
-                IREE_HAL_STREAMING_GRAPH_ALLOCATION_FLAG_AUTO_FREE;
+            memory->flags |= IREE_HAL_STREAMING_GRAPH_ALLOCATION_FLAG_AUTO_FREE;
           }
           IREE_RETURN_AND_END_ZONE_IF_ERROR(
               z0,
               iree_hal_resource_set_insert(compiler->recording->resource_set, 1,
-                                           &block->attrs.memory.allocation));
+                                           &memory->allocation));
         } else {
           // Event record/wait are the remaining isolated operations. Empty
           // and disabled nodes have no partition in the compiled schedule.
@@ -596,27 +601,28 @@ static iree_status_t iree_hal_streaming_graph_recording_compile_schedule(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_arena_allocate(
               &compiler->recording->arena_allocator,
-              cursor.block_count * sizeof(*compiler->recording->blocks),
-              (void**)&compiler->recording->blocks));
+              cursor.block_count * sizeof(*compiler->recording->blocks.values),
+              (void**)&compiler->recording->blocks.values));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, hrx_graph_dependencies_allocate(compiler->params->context->device,
-                                          cursor.semaphore_count,
-                                          &compiler->recording->arena_allocator,
-                                          compiler->recording->resource_set,
-                                          &compiler->recording->semaphores));
-  compiler->recording->semaphore_count = cursor.semaphore_count;
+      z0, hrx_graph_dependencies_allocate(
+              compiler->params->context->device, cursor.semaphore_count,
+              &compiler->recording->arena_allocator,
+              compiler->recording->resource_set,
+              &compiler->recording->blocks.semaphores));
+  compiler->recording->blocks.semaphore_count = cursor.semaphore_count;
 
   hrx_graph_dependency_block_t plan;
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status) &&
          hrx_graph_dependency_cursor_next(&cursor, &plan)) {
-    iree_hal_streaming_graph_block_t* block = NULL;
+    hrx_graph_block_t* block = NULL;
     status = iree_hal_streaming_graph_compile_block(compiler, schedule, &plan,
                                                     &block);
     if (iree_status_is_ok(status)) {
       // Publish only initialized entries so partial compilation releases child
       // executable and event references alongside the shared resource set.
-      compiler->recording->blocks[compiler->recording->block_count++] = block;
+      compiler->recording->blocks.values[compiler->recording->blocks.count++] =
+          block;
     }
   }
   IREE_TRACE_ZONE_END(z0);

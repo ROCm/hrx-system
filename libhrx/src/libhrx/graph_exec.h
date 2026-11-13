@@ -4,6 +4,7 @@
 #ifndef LIBHRX_SRC_LIBHRX_GRAPH_EXEC_H_
 #define LIBHRX_SRC_LIBHRX_GRAPH_EXEC_H_
 
+#include "graph_replay.h"
 #include "hrx_runtime.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/atomics.h"
@@ -24,14 +25,8 @@ typedef struct hrx_graph_recording_t {
   hrx_graph_t graph;
   // Storage for compiled blocks and borrowed semaphore pointers.
   iree_arena_allocator_t arena_allocator;
-  // Blocks in submission order, ending in a single completion producer.
-  struct hrx_graph_exec_block_t** blocks;
-  // Number of initialized entries in |blocks|.
-  uint32_t block_count;
-  // Number of internal edge semaphores.
-  uint32_t semaphore_count;
-  // Internal edge semaphores borrowed from |resource_set|.
-  iree_hal_semaphore_t** semaphores;
+  // Compiled submission order and borrowed internal completion timelines.
+  hrx_graph_block_list_t blocks;
   // Owns retaining command buffers and internal edge semaphores.
   iree_hal_resource_set_t* resource_set;
 } hrx_graph_recording_t;

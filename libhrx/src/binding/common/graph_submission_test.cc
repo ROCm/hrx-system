@@ -76,7 +76,7 @@ void ObserveGraphLaunchPrefix(void* user_data) {
   observation->notification.notify_all();
 }
 
-struct RejectHostCallQueue {
+struct RejectGraphQueue {
   // Base queue interface exposed to the graph executor.
   iree_hal_queue_t base;
   // Retained queue receiving submissions accepted by this wrapper.
@@ -89,50 +89,75 @@ struct RejectHostCallQueue {
   GraphLaunchObservation* observation = nullptr;
   // Zero-based call to reject once; later retry calls reach the real queue.
   int rejected_call_index = 1;
+  // Zero-based command-buffer execution to reject once, or -1 for none.
+  int rejected_execute_index = -1;
+  // Number of command buffers presented to this wrapper.
+  std::atomic<int> execute_count = 0;
   // Number of host calls presented to this wrapper.
   std::atomic<int> host_call_count = 0;
   // Number of host calls accepted by the target queue.
   std::atomic<int> accepted_host_call_count = 0;
 };
 
-RejectHostCallQueue* CastRejectHostCallQueue(iree_hal_queue_t* base_queue) {
-  return reinterpret_cast<RejectHostCallQueue*>(base_queue);
+RejectGraphQueue* CastRejectGraphQueue(iree_hal_queue_t* base_queue) {
+  return reinterpret_cast<RejectGraphQueue*>(base_queue);
 }
 
-void DestroyRejectHostCallQueue(iree_hal_queue_t* base_queue) {
-  auto* queue = CastRejectHostCallQueue(base_queue);
+void DestroyRejectGraphQueue(iree_hal_queue_t* base_queue) {
+  auto* queue = CastRejectGraphQueue(base_queue);
   iree_hal_queue_release(queue->target);
   queue->target = nullptr;
 }
 
-iree_status_t RejectHostCallQueueBarrier(
+iree_status_t RejectGraphQueueBarrier(
     iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_queue_barrier_flags_t flags) {
-  return iree_hal_queue_barrier(CastRejectHostCallQueue(base_queue)->target,
+  return iree_hal_queue_barrier(CastRejectGraphQueue(base_queue)->target,
                                 wait_semaphore_list, signal_semaphore_list,
                                 barriers, flags);
 }
 
-iree_status_t RejectHostCallQueueHostCall(
+iree_status_t RejectGraphSubmission(RejectGraphQueue* queue) {
+  {
+    std::lock_guard<std::mutex> lock(queue->observation->mutex);
+    queue->observation->later_call_rejected = true;
+  }
+  queue->observation->notification.notify_all();
+  return iree_make_status(IREE_STATUS_ABORTED,
+                          "injected later graph block rejection");
+}
+
+iree_status_t RejectGraphQueueExecute(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    iree_hal_queue_execute_flags_t flags) {
+  auto* queue = CastRejectGraphQueue(base_queue);
+  const int execute_index = queue->execute_count.fetch_add(1);
+  if (execute_index == queue->rejected_execute_index) {
+    return RejectGraphSubmission(queue);
+  }
+  return iree_hal_queue_execute(queue->target, wait_semaphore_list,
+                                signal_semaphore_list, command_buffer,
+                                binding_table, flags);
+}
+
+iree_status_t RejectGraphQueueHostCall(
     iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_host_call_t call, const uint64_t args[4],
     iree_hal_host_call_flags_t flags) {
-  auto* queue = CastRejectHostCallQueue(base_queue);
+  auto* queue = CastRejectGraphQueue(base_queue);
   const int call_index =
       queue->host_call_count.fetch_add(1, std::memory_order_acq_rel);
   if (call_index == queue->rejected_call_index) {
-    {
-      std::lock_guard<std::mutex> lock(queue->observation->mutex);
-      queue->observation->later_call_rejected = true;
-    }
-    queue->observation->notification.notify_all();
-    return iree_make_status(IREE_STATUS_ABORTED,
-                            "injected later graph block rejection");
+    return RejectGraphSubmission(queue);
   }
   if (call_index != 0 || !queue->first_call_gate) {
     iree_status_t status =
@@ -169,22 +194,22 @@ iree_status_t RejectHostCallQueueHostCall(
   return status;
 }
 
-iree_status_t RejectHostCallQueueFlush(iree_hal_queue_t* base_queue) {
-  return iree_hal_queue_flush(CastRejectHostCallQueue(base_queue)->target);
+iree_status_t RejectGraphQueueFlush(iree_hal_queue_t* base_queue) {
+  return iree_hal_queue_flush(CastRejectGraphQueue(base_queue)->target);
 }
 
-const iree_hal_queue_vtable_t kRejectHostCallQueueVtable = {
-    .destroy = DestroyRejectHostCallQueue,
-    .barrier = RejectHostCallQueueBarrier,
-    .execute = nullptr,
-    .host_call = RejectHostCallQueueHostCall,
+const iree_hal_queue_vtable_t kRejectGraphQueueVtable = {
+    .destroy = DestroyRejectGraphQueue,
+    .barrier = RejectGraphQueueBarrier,
+    .execute = RejectGraphQueueExecute,
+    .host_call = RejectGraphQueueHostCall,
     .query_dispatch_concurrency = nullptr,
     .dispatch = nullptr,
     .atomic_wait = nullptr,
     .atomic_store = nullptr,
     .atomic_rmw = nullptr,
     .timestamp = nullptr,
-    .flush = RejectHostCallQueueFlush,
+    .flush = RejectGraphQueueFlush,
     .alloca = nullptr,
     .dealloca = nullptr,
     .transfer = nullptr,
@@ -192,9 +217,9 @@ const iree_hal_queue_vtable_t kRejectHostCallQueueVtable = {
     .write = nullptr,
 };
 
-void InitializeRejectHostCallQueue(iree_hal_queue_t* target,
-                                   GraphLaunchObservation* observation,
-                                   RejectHostCallQueue* out_queue) {
+void InitializeRejectGraphQueue(iree_hal_queue_t* target,
+                                GraphLaunchObservation* observation,
+                                RejectGraphQueue* out_queue) {
   out_queue->target = target;
   out_queue->observation = observation;
   iree_hal_queue_retain(target);
@@ -204,7 +229,7 @@ void InitializeRejectHostCallQueue(iree_hal_queue_t* target,
   params.features = iree_hal_queue_features(target);
   params.execution_resources = iree_hal_queue_execution_resources(target);
   iree_hal_queue_initialize(iree_hal_queue_family(target), &params,
-                            &kRejectHostCallQueueVtable, &out_queue->base);
+                            &kRejectGraphQueueVtable, &out_queue->base);
 }
 
 iree_hal_queue_t* ReplaceGraphExecTestQueue(iree_hal_streaming_stream_t* stream,
@@ -217,7 +242,7 @@ iree_hal_queue_t* ReplaceGraphExecTestQueue(iree_hal_streaming_stream_t* stream,
 }
 
 class GraphSubmissionTest
-    : public ::testing::TestWithParam<std::tuple<int, bool, bool>> {
+    : public ::testing::TestWithParam<std::tuple<int, bool, bool, bool>> {
  protected:
   // Owns the task device and its runtime through fixture cleanup.
   hrx_device_group_t group_ = nullptr;
@@ -293,13 +318,15 @@ TEST_P(GraphSubmissionTest,
   const int child_prefix_count = std::get<0>(GetParam());
   const bool reject_parent_suffix = std::get<1>(GetParam());
   const bool parallel_prefix = std::get<2>(GetParam());
+  const bool reject_recorded_block = std::get<3>(GetParam());
   const int accepted_count = child_prefix_count + 1;
   iree_hal_streaming_graph_t* child_graph = nullptr;
   iree_hal_streaming_graph_t* parent_graph = nullptr;
   iree_hal_streaming_graph_exec_t* exec = nullptr;
   iree_hal_semaphore_t* gate = nullptr;
+  iree_hal_streaming_buffer_t* storage = nullptr;
   GraphLaunchObservation launch_observation;
-  RejectHostCallQueue fault_queue = {};
+  RejectGraphQueue fault_queue = {};
   iree_hal_queue_t* original_queue = nullptr;
   bool wrapper_installed = false;
   ScopeExit release_handles([&] {
@@ -313,8 +340,23 @@ TEST_P(GraphSubmissionTest,
     iree_hal_streaming_graph_exec_release(exec);
     iree_hal_streaming_graph_release(parent_graph);
     iree_hal_streaming_graph_release(child_graph);
+    iree_hal_streaming_memory_release_wrapped_buffer(storage);
   });
 
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host_staging(
+      context_, sizeof(uint32_t), &storage));
+  *static_cast<uint32_t*>(storage->host_ptr) = 0;
+  const auto append_rejected_suffix =
+      [&](iree_hal_streaming_graph_t* graph,
+          iree_hal_streaming_graph_node_t* tail) {
+        if (reject_recorded_block) {
+          return iree_hal_streaming_graph_add_fill_ptr_node(
+              graph, &tail, 1, storage->device_ptr, 34, sizeof(uint32_t), 1,
+              nullptr);
+        }
+        return iree_hal_streaming_graph_add_host_call_node(
+            graph, &tail, 1, &SetFlag, &stream_marker_ran_, nullptr);
+      };
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &gate));
@@ -332,8 +374,7 @@ TEST_P(GraphSubmissionTest,
         &first_node));
   }
   if (!reject_parent_suffix) {
-    IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
-        child_graph, &first_node, 1, &SetFlag, &stream_marker_ran_, nullptr));
+    IREE_ASSERT_OK(append_rejected_suffix(child_graph, first_node));
   }
 
   IREE_ASSERT_OK(iree_hal_streaming_graph_create(
@@ -343,26 +384,31 @@ TEST_P(GraphSubmissionTest,
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
       parent_graph, nullptr, 0, &ObserveGraphLaunchPrefix, &launch_observation,
       &parent_prefix));
+  // A real recorded transfer separates the parent's frontend operation from
+  // the child. Its output and completion must survive a later rejected block.
+  iree_hal_streaming_graph_node_t* recorded_prefix = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_fill_ptr_node(
+      parent_graph, &parent_prefix, 1, storage->device_ptr, 17,
+      sizeof(uint32_t), 1, &recorded_prefix));
   iree_hal_streaming_graph_node_t* child_node = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
-      parent_graph, &parent_prefix, 1, child_graph, &child_node));
+      parent_graph, &recorded_prefix, 1, child_graph, &child_node));
   if (reject_parent_suffix) {
-    IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
-        parent_graph, &child_node, 1, &SetFlag, &stream_marker_ran_, nullptr));
+    IREE_ASSERT_OK(append_rejected_suffix(parent_graph, child_node));
   }
 
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       parent_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
 
   original_queue = stream_->queue;
-  InitializeRejectHostCallQueue(original_queue, &launch_observation,
-                                &fault_queue);
+  InitializeRejectGraphQueue(original_queue, &launch_observation, &fault_queue);
   EXPECT_EQ(original_queue,
             ReplaceGraphExecTestQueue(stream_, &fault_queue.base));
   // Transfer the stream's old queue reference to the wrapper target.
   iree_hal_queue_release(original_queue);
   wrapper_installed = true;
-  fault_queue.rejected_call_index = accepted_count;
+  fault_queue.rejected_call_index = reject_recorded_block ? -1 : accepted_count;
+  fault_queue.rejected_execute_index = reject_recorded_block ? 1 : -1;
   fault_queue.first_call_gate = gate;
   fault_queue.first_call_gate_value = 1;
 
@@ -424,6 +470,7 @@ TEST_P(GraphSubmissionTest,
         << "launch returned before its accepted prefix completed";
   }
   EXPECT_FALSE(stream_marker_ran_.load(std::memory_order_acquire));
+  EXPECT_EQ(17u, *static_cast<uint32_t*>(storage->host_ptr));
 
   iree_slim_mutex_lock(&stream_->mutex);
   const uint64_t final_pending_value = stream_->pending_value;
@@ -449,7 +496,11 @@ TEST_P(GraphSubmissionTest,
       iree_hal_streaming_graph_exec_launch(exec, stream_, &retry_result));
   EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, retry_result);
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
-  EXPECT_TRUE(stream_marker_ran_.load(std::memory_order_acquire));
+  if (reject_recorded_block) {
+    EXPECT_EQ(34u, *static_cast<uint32_t*>(storage->host_ptr));
+  } else {
+    EXPECT_TRUE(stream_marker_ran_.load(std::memory_order_acquire));
+  }
 
   iree_hal_streaming_graph_exec_release(exec);
   exec = nullptr;
@@ -457,6 +508,7 @@ TEST_P(GraphSubmissionTest,
 
 INSTANTIATE_TEST_SUITE_P(Prefixes, GraphSubmissionTest,
                          ::testing::Combine(::testing::Values(1, 17, 64),
+                                            ::testing::Bool(),
                                             ::testing::Bool(),
                                             ::testing::Bool()));
 
