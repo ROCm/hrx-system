@@ -1365,16 +1365,22 @@ static bool iree_hal_amd_gpu_pm4_retire(
                            iree_memory_order_acq_rel)) {
     iree_hal_amd_gpu_pm4_capacity_available(queue);
   }
-  if (queue->kernel && position == published) {
-    // Enrollment precedes the predicate recheck. Either this observer sees a
-    // racing publication or that publisher sees wake_required and signals.
-    iree_atomic_exchange(&queue->kernel->wake_required, 1,
-                         iree_memory_order_acq_rel);
-    if ((uint64_t)iree_atomic_load(&queue->producer.count,
-                                   iree_memory_order_acquire) != published) {
-      iree_atomic_exchange(&queue->kernel->wake_required, 0,
+  if (queue->kernel) {
+    // KERNEL retirement has no coherent completion word. Preserve the
+    // outstanding-work fact so a lost native notification receives a bounded
+    // status recheck without keeping an idle device awake.
+    out_wait->pending = position != published;
+    if (position == published) {
+      // Enrollment precedes the predicate recheck. Either this observer sees a
+      // racing publication or that publisher sees wake_required and signals.
+      iree_atomic_exchange(&queue->kernel->wake_required, 1,
                            iree_memory_order_acq_rel);
-      return true;
+      if ((uint64_t)iree_atomic_load(&queue->producer.count,
+                                     iree_memory_order_acquire) != published) {
+        iree_atomic_exchange(&queue->kernel->wake_required, 0,
+                             iree_memory_order_acq_rel);
+        return true;
+      }
     }
   }
   if (!queue->kernel && position == published) {

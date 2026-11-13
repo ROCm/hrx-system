@@ -416,9 +416,10 @@ class KernelQueueTest : public MemoryBackendTest {
     }
   }
 
-  void Poll(uint32_t index) {
+  iree_hal_amd_gpu_completion_wait_t Poll(uint32_t index) {
     auto source = iree_hal_amd_gpu_pm4_queue_completion_source(queues_[index]);
     bool ready = true;
+    iree_hal_amd_gpu_completion_wait_t wait = {};
     while (ready) {
       iree_slim_mutex_lock(&completion_.drain_mutex);
       iree_hal_amd_gpu_completion_scope_t scope = {
@@ -426,12 +427,13 @@ class KernelQueueTest : public MemoryBackendTest {
           .source = &source,
           .fn = source.fn,
       };
-      iree_hal_amd_gpu_completion_wait_t wait = {};
+      wait = {};
       ready =
           source.fn(source.user_data, AMDF_STATUS_OK, &scope, &wait, nullptr);
       EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
       iree_slim_mutex_unlock(&completion_.drain_mutex);
     }
+    return wait;
   }
 
   void Execute(uint32_t index, uint64_t command_count = UINT64_MAX) {
@@ -557,6 +559,9 @@ TEST_F(KernelQueueTest, PayloadGrowthPreservesLaunchArgumentCapacity) {
                                        buffer, 0, first.size(), nullptr, 0));
   iree_hal_amd_gpu_context_join_memory(&context_);
   Publish(0);
+  const iree_hal_amd_gpu_completion_wait_t pending = Poll(0);
+  EXPECT_EQ(pending.address, nullptr);
+  EXPECT_TRUE(pending.pending);
   auto* first_payload = queue->producer.transfers.current;
   ASSERT_NE(first_payload, nullptr);
   EXPECT_EQ(first_payload->capacity, 16384u);

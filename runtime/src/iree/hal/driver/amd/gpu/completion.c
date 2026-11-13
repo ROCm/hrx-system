@@ -20,6 +20,13 @@ enum {
   IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT = 1 << 5,
 };
 
+static uint64_t iree_hal_amd_gpu_completion_timeout_nanoseconds(
+    iree_timeout_t timeout) {
+  return iree_timeout_is_infinite(timeout)
+             ? AMDF_TIMEOUT_INFINITE
+             : (uint64_t)iree_timeout_as_duration_ns(timeout);
+}
+
 static bool iree_hal_amd_gpu_completion_stop_requested(
     iree_hal_amd_gpu_completion_t* completion) {
   return iree_any_bit_set(
@@ -194,10 +201,19 @@ typedef enum iree_hal_amd_gpu_completion_caller_e {
   IREE_HAL_AMD_GPU_COMPLETION_CALLER_WORKER,
 } iree_hal_amd_gpu_completion_caller_t;
 
+// Aggregate wake facts from one complete worker-owned source drain.
+typedef struct iree_hal_amd_gpu_completion_wait_summary_t {
+  // At least one source has accepted work that has not retired.
+  bool has_pending;
+  // At least one pending source requires an authoritative native query.
+  bool has_event_only_pending;
+} iree_hal_amd_gpu_completion_wait_summary_t;
+
 static bool iree_hal_amd_gpu_completion_drain(
     iree_hal_amd_gpu_completion_t* completion, amdf_status_t status,
     iree_hal_amd_gpu_completion_caller_t caller, iree_host_size_t first_source,
-    bool* out_has_wait, iree_hal_amd_gpu_completion_copy_t* out_copy,
+    iree_hal_amd_gpu_completion_wait_summary_t* out_wait_summary,
+    iree_hal_amd_gpu_completion_copy_t* out_copy,
     iree_hal_amd_gpu_completion_scope_t* out_copy_scope, bool* out_wake) {
   const bool is_worker = caller == IREE_HAL_AMD_GPU_COMPLETION_CALLER_WORKER;
   bool ready = false;
@@ -231,7 +247,7 @@ static bool iree_hal_amd_gpu_completion_drain(
                                                  .is_worker = is_worker};
     ready |= scope.fn(source->user_data, status, &scope, &wait, copy);
     iree_hal_amd_gpu_completion_scope_lock(&scope);
-    if (out_has_wait) {
+    if (out_wait_summary) {
       // Another source can yield to a helper before observation begins. Pin
       // this hint while its source is still exclusively owned.
       iree_hal_amd_gpu_signal_retain(wait.signal);
@@ -246,8 +262,9 @@ static bool iree_hal_amd_gpu_completion_drain(
         iree_hal_amd_gpu_completion_scope_move(&scope, out_copy_scope);
       }
     }
-    if (out_has_wait) {
-      *out_has_wait |= wait.pending;
+    if (out_wait_summary) {
+      out_wait_summary->has_pending |= wait.pending;
+      out_wait_summary->has_event_only_pending |= wait.pending && !wait.address;
     }
     if ((!copy || !copy->fn) &&
         iree_hal_amd_gpu_completion_scope_finish(&scope)) {
@@ -406,7 +423,7 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
       iree_slim_mutex_unlock(&completion->drain_mutex);
       break;
     }
-    bool has_wait = false;
+    iree_hal_amd_gpu_completion_wait_summary_t wait_summary = {0};
     bool wake = false;
     iree_hal_amd_gpu_completion_copy_t copy = {0};
     iree_hal_amd_gpu_completion_scope_t copy_scope = {0};
@@ -418,7 +435,7 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
     if (!(state & IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES)) {
       ready = iree_hal_amd_gpu_completion_drain(
           completion, AMDF_STATUS_OK, IREE_HAL_AMD_GPU_COMPLETION_CALLER_WORKER,
-          first_source, &has_wait, &copy, &copy_scope, &wake);
+          first_source, &wait_summary, &copy, &copy_scope, &wake);
     }
     if (copy.fn) {
       first_source = copy_scope.source - completion->sources + 1;
@@ -443,7 +460,8 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
       continue;
     }
     const bool observe =
-        has_wait && completion->spin_ns && iree_time_now() < spin_deadline &&
+        wait_summary.has_pending && !wait_summary.has_event_only_pending &&
+        completion->spin_ns && iree_time_now() < spin_deadline &&
         iree_hal_amd_gpu_completion_begin_observation(completion);
     if (!observe) {
       iree_hal_amd_gpu_completion_clear_hints(completion);
@@ -472,14 +490,31 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
     // A stale or coalesced wake simply causes another authoritative scan.
     amdf_status_t status = AMDF_STATUS_OK;
     iree_status_t host_wait_status = iree_ok_status();
+    const iree_timeout_t wait_timeout =
+        wait_summary.has_pending
+            ? iree_make_timeout_ms(
+                  IREE_HAL_AMD_GPU_COMPLETION_RECHECK_MILLISECONDS)
+            : iree_infinite_timeout();
+    bool recheck = false;
     if (context->event) {
-      status = context->gpu->event_wait(context->event, AMDF_TIMEOUT_INFINITE);
+      status = context->gpu->event_wait(
+          context->event,
+          iree_hal_amd_gpu_completion_timeout_nanoseconds(wait_timeout));
+      recheck =
+          wait_summary.has_pending &&
+          status == amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED);
     } else {
-      host_wait_status = iree_async_event_native_wait(&context->kernel_event,
-                                                      iree_infinite_timeout());
-      if (!iree_status_is_ok(host_wait_status)) {
+      host_wait_status =
+          iree_async_event_native_wait(&context->kernel_event, wait_timeout);
+      recheck = wait_summary.has_pending &&
+                iree_status_is_deadline_exceeded(host_wait_status);
+      if (!iree_status_is_ok(host_wait_status) && !recheck) {
         status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
       }
+    }
+    if (recheck) {
+      iree_status_free(host_wait_status);
+      continue;
     }
     if (!amdf_status_is_ok(status)) {
       if (context->event) {

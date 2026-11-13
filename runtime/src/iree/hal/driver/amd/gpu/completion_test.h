@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVER_AMD_GPU_COMPLETION_TEST_H_
 
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <vector>
@@ -28,14 +29,20 @@ class NativeEvent {
 
   static amdf_status_t AMDF_CALL Wait(amdf_gpu_event_t* event,
                                       uint64_t timeout_nanoseconds) {
-    EXPECT_EQ(timeout_nanoseconds, AMDF_TIMEOUT_INFINITE);
     auto* self = reinterpret_cast<NativeEvent*>(event);
     std::unique_lock<std::mutex> lock(self->mutex_);
     ++self->wait_count_;
+    self->wait_timeouts_.push_back(timeout_nanoseconds);
     self->condition_.notify_all();
     self->condition_.wait(lock, [&] {
-      return self->signaled_ || !amdf_status_is_ok(self->wait_status_);
+      return self->signaled_ || !amdf_status_is_ok(self->wait_status_) ||
+             !self->queued_wait_statuses_.empty();
     });
+    if (!self->queued_wait_statuses_.empty()) {
+      const amdf_status_t status = self->queued_wait_statuses_.front();
+      self->queued_wait_statuses_.pop_front();
+      return status;
+    }
     self->signaled_ = false;
     return self->wait_status_;
   }
@@ -67,6 +74,13 @@ class NativeEvent {
     condition_.notify_all();
   }
 
+  // Supplies one deterministic native wait result without a wall-clock wait.
+  void QueueWaitStatus(amdf_status_t status) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    queued_wait_statuses_.push_back(status);
+    condition_.notify_all();
+  }
+
   void SetSignalStatus(amdf_status_t status) {
     std::lock_guard<std::mutex> lock(mutex_);
     signal_status_ = status;
@@ -75,6 +89,12 @@ class NativeEvent {
   uint32_t signal_count() {
     std::lock_guard<std::mutex> lock(mutex_);
     return signal_count_;
+  }
+
+  uint64_t wait_timeout(uint32_t index) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EXPECT_LT(index, wait_timeouts_.size());
+    return index < wait_timeouts_.size() ? wait_timeouts_[index] : 0;
   }
 
  private:
@@ -86,10 +106,14 @@ class NativeEvent {
   bool signaled_ = false;
   // Number of calls entering the native wait boundary.
   uint32_t wait_count_ = 0;
+  // Relative timeout supplied to each native wait, in call order.
+  std::vector<uint64_t> wait_timeouts_;
   // Number of attempted host signals, including failures.
   uint32_t signal_count_ = 0;
   // Native failure delivered to the waiting worker, if any.
   amdf_status_t wait_status_ = AMDF_STATUS_OK;
+  // One-shot results used to model timeout and wake outcomes deterministically.
+  std::deque<amdf_status_t> queued_wait_statuses_;
   // Native failure returned by the host wake boundary, if any.
   amdf_status_t signal_status_ = AMDF_STATUS_OK;
 };

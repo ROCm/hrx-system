@@ -31,9 +31,49 @@ TEST_F(CompletionTest, EmptyDeviceParksAndJoinsWithHostWake) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
       &context_, 0, nullptr, 0, {}, iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
+  EXPECT_EQ(event_.wait_timeout(0), AMDF_TIMEOUT_INFINITE);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
   EXPECT_EQ(event_.signal_count(), 1u);
   EXPECT_EQ(completion_.thread, nullptr);
+}
+
+TEST_F(CompletionTest, EventOnlyPendingBypassesCoherentObservationAndRechecks) {
+  event_.QueueWaitStatus(
+      amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED));
+  iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
+  std::binary_semaphore rescanned{0};
+  uint32_t calls = 0;
+  WaitCallback event_only = [&](amdf_status_t status,
+                                iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    ++calls;
+    if (calls <= 2) {
+      *out_wait = {.pending = true};
+      return calls == 1;
+    }
+    EXPECT_EQ(iree_hal_amd_gpu_completion_request_stop(&completion_),
+              AMDF_STATUS_OK);
+    rescanned.release();
+    return false;
+  };
+  WaitCallback coherent = [&](amdf_status_t status,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    *out_wait = {.address = &word, .value = 0, .pending = true};
+    return false;
+  };
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(event_only),
+                                                    Source(coherent)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion_));
+  rescanned.acquire();
+  EXPECT_EQ(
+      event_.wait_timeout(0),
+      IREE_HAL_AMD_GPU_COMPLETION_RECHECK_MILLISECONDS * UINT64_C(1000000));
+  EXPECT_TRUE(reports_.empty());
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(calls, 3u);
 }
 
 TEST_F(CompletionTest, CalloutExcludesOnlyItsOwnSource) {
@@ -1979,6 +2019,50 @@ TEST(CompletionNativeEventTest, KernelWakeSharesOneWorkerAndJoinsShutdown) {
     EXPECT_TRUE(amdf_status_is_ok(iree_hal_amd_gpu_context_signal(&context)));
     state.observed.acquire();
   }
+  IREE_EXPECT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion));
+  iree_async_event_native_deinitialize(&context.kernel_event);
+}
+
+TEST(CompletionNativeEventTest, KernelPendingRechecksAfterWaitDeadline) {
+  iree_hal_amd_gpu_context_t context = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+      &context, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
+  struct State {
+    // Completion owner used to stop the worker after the authoritative rescan.
+    iree_hal_amd_gpu_completion_t* completion = nullptr;
+    // Number of authoritative source queries made by the sole worker.
+    uint32_t calls = 0;
+    // Joins the post-deadline source query before checking the result.
+    std::binary_semaphore rescanned{0};
+  } state;
+  iree_hal_amd_gpu_completion_source_t source = {
+      .fn =
+          [](void* user_data, amdf_status_t status,
+             iree_hal_amd_gpu_completion_scope_t* scope,
+             iree_hal_amd_gpu_completion_wait_t* out_wait,
+             iree_hal_amd_gpu_completion_copy_t* out_copy) {
+            auto* state = static_cast<State*>(user_data);
+            EXPECT_TRUE(amdf_status_is_ok(status));
+            ++state->calls;
+            if (state->calls <= 2) {
+              *out_wait = {.pending = true};
+              return state->calls == 1;
+            }
+            EXPECT_EQ(
+                iree_hal_amd_gpu_completion_request_stop(state->completion),
+                AMDF_STATUS_OK);
+            state->rescanned.release();
+            return false;
+          },
+      .user_data = &state,
+  };
+  iree_hal_amd_gpu_completion_t completion = {};
+  state.completion = &completion;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context, 1, &source, IREE_DURATION_INFINITE, {}, iree_allocator_system(),
+      &completion));
+  state.rescanned.acquire();
+  EXPECT_EQ(state.calls, 3u);
   IREE_EXPECT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion));
   iree_async_event_native_deinitialize(&context.kernel_event);
 }

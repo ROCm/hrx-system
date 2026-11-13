@@ -109,19 +109,23 @@ NUMA node IDs.
 
 `completion_spin_ns` bounds active completion observation after actual progress
 (default 1,000,000,000 ns, or one second). While work remains pending, the
-existing retirement worker reads coherent USER queue completion words; a change
-resumes authoritative source drains. Actual completion progress renews the
-budget. At expiry, or when no coherent work remains pending, the worker parks
-on the native event, with no periodic wakeups. Setting zero parks immediately;
-device creation with `completion_wait_flags=NONE` also disables observation
+existing retirement worker reads coherent USER queue completion words only when
+every pending source exposes one; a change resumes authoritative source drains.
+Actual completion progress renews the budget. At expiry, or whenever an
+event-only source remains pending, the worker waits at most five milliseconds
+on the native event before querying authoritative completion state again. A
+fully idle device still parks indefinitely. Setting zero skips active
+observation; device creation with `completion_wait_flags=NONE` also disables it
 even when the URI specifies a nonzero budget.
 
 Active observation reduces completion wake-up latency between dependent GPU
 operations, at the cost of occupying a CPU core while polling. It can improve
 request throughput and energy per request, but long GPU operations may consume
-more CPU without completing faster. Idle devices can sleep. KERNEL queues,
-including the Windows native submission path, retain native events and status
-queries and do not use this budget. The setting does not alter process power
+more CPU without completing faster. Idle devices can sleep. Event-only KERNEL
+queues, including the Windows native submission path, bypass this budget and
+use bounded native waits followed by status queries while accepted work remains
+pending. Native wait expiry is a requery interval, not an execution deadline;
+accepted work is never resubmitted. The setting does not alter process power
 policy, add a thread, or change submission and retirement ordering.
 
 `code_publication_timeout_ms` bounds each synchronous code publication

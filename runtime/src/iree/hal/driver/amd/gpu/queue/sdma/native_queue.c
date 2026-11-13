@@ -608,11 +608,14 @@ static bool iree_hal_amd_gpu_sdma_native_queue_poll(
   }
   out_wait->value =
       (int32_t)iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
-  out_wait->pending = out_wait->address != NULL;
   const int64_t retired =
       iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
   const int64_t next_published =
       iree_atomic_load(&queue->published, iree_memory_order_acquire);
+  // KERNEL queues have no coherent completion word. The pending bit still
+  // requests bounded native-status rechecks until their accepted prefix
+  // retires.
+  out_wait->pending = retired != next_published;
   if (retired == next_published) {
     *out_wait = (iree_hal_amd_gpu_completion_wait_t){0};
     if (!queue->kernel.queue) {
