@@ -147,8 +147,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "scf_unroll",
-    srcs = ["scf_unroll.c"],
-    hdrs = ["scf_unroll.h"],
+    srcs = [
+        "scf_unroll.c",
+        "scf_unroll_worklist.c",
+    ],
+    hdrs = [
+        "scf_unroll.h",
+        "scf_unroll_worklist.h",
+    ],
     deps = [
         ":scf_unroll_bounds",
         ":scf_unroll_tile",
@@ -170,6 +176,7 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
