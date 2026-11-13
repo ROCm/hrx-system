@@ -34,6 +34,12 @@ _EXECUTABLE_COMPATIBLE_WITH = loom_config_compatible_with([
 )]))
 
 iree_hal_amd_gpu_cts_testdata(
+    name = "argument_preparation_testdata",
+    srcs = ["argument_preparation.loom"],
+    backend_names = ["amd_gpu_argument_preparation"],
+)
+
+iree_hal_amd_gpu_cts_testdata(
     name = "asan_report_testdata",
     srcs = ["asan_report.loom"],
     backend_names = ["amd_gpu_asan_report"],
@@ -530,6 +536,24 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/driver/amd/gpu/queue:semaphore",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:signal",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "argument_preparation_test",
+    srcs = ["argument_preparation_test.cc"],
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
+    deps = [
+        ":argument_preparation_testdata",
+        ":test_device",
+        ":testdata",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/aql:command_buffer",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/aql:queue",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

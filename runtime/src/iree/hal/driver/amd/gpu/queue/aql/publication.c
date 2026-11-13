@@ -877,16 +877,26 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
                   : IREE_HAL_AMD_GPU_AQL_PUBLISH_MORE;
 }
 
-// Only mutable host templates need this bounded CPU preparation extent. It is
-// borrowed synchronously by the exclusive publisher and never exposed to GPU
-// readers or retained by retirement. Other replay paths keep their small stack.
-static IREE_ATTRIBUTE_NOINLINE iree_hal_amd_gpu_aql_publish_result_t
+// CPU preparation is private to the exclusive publisher. A larger ABI grows
+// this reusable host workspace without changing its native execution path.
+static iree_hal_amd_gpu_aql_publish_result_t
 iree_hal_amd_gpu_aql_publish_execute_host(
     iree_hal_amd_gpu_aql_queue_t* queue,
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t* out_status) {
-  uint8_t contents[IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_BYTES];
-  return iree_hal_amd_gpu_aql_publish_execute_prepared(queue, submission,
-                                                       contents, out_status);
+  const iree_host_size_t required =
+      submission->execute.program->host_template->preparation_byte_length;
+  iree_byte_span_t* workspace = &queue->producer.preparation;
+  if (required > workspace->data_length) {
+    const iree_host_size_t capacity = iree_max(required, 16384u);
+    *out_status = iree_allocator_realloc(queue->host_allocator, capacity,
+                                         (void**)&workspace->data);
+    if (!iree_status_is_ok(*out_status)) {
+      return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
+    }
+    workspace->data_length = capacity;
+  }
+  return iree_hal_amd_gpu_aql_publish_execute_prepared(
+      queue, submission, workspace->data, out_status);
 }
 
 iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(

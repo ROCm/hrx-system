@@ -834,8 +834,9 @@ TEST_P(GpuNativeRecordingProgressTest,
        SealingAndExecutionCompleteWhileAllocationIsHeld) {
   using iree::hal::cts::Ref;
   const uint32_t pattern = 0x1234CAFE;
-  // Nine native payloads exceed the bounded host template's eight packets.
-  constexpr uint32_t kFillCount = 9;
+  // Exceed the CPU template's native packet budget to exercise resident
+  // allocation independently of the kernel argument byte count.
+  constexpr uint32_t kFillCount = 129;
   const auto request = iree_hal_make_pool_reservation_request(4096, 4);
   uint64_t one = 1, two = 2;
   Ref<iree_hal_buffer_t> output, pending;
@@ -915,9 +916,9 @@ TEST_P(GpuNativeRecordingProgressTest,
                                        {1, &semaphores_[0], &one}, pool_, 1,
                                        &request, output.out()));
   Wait(semaphores_[0]);
-  // Retain a shared source and copy to disjoint invocation destinations. Nine
-  // packets force resident storage, whose clone allocation is gated below.
-  constexpr uint32_t kCopyCount = 9;
+  // Retain a shared source and copy to disjoint invocation destinations. The
+  // packet count requires resident storage, whose clone allocation is gated.
+  constexpr uint32_t kCopyCount = 129;
   constexpr uint32_t kCopyLength = kCopyCount * sizeof(uint32_t);
   const uint32_t pattern = 0x1234CAFE;
   uint64_t initialized = 2;

@@ -1,0 +1,271 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Pointer-first ABIs straddle small and large preparation extents. Each lane
+// writes a distinct output from the first and last scalar in the full ABI.
+// Multiple ordinary vector arguments keep large payloads within target carrier
+// limits while preserving the complete kernel argument byte range.
+
+kernel.def export("k64") @k64() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<7xf64>) {
+  %first = vector.extract %values0[0] : vector<7xf64> -> f64
+  %last = vector.extract %values0[6] : vector<7xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k256") @k256() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<31xf64>) {
+  %first = vector.extract %values0[0] : vector<31xf64> -> f64
+  %last = vector.extract %values0[30] : vector<31xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k376") @k376() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<46xf64>) {
+  %first = vector.extract %values0[0] : vector<46xf64> -> f64
+  %last = vector.extract %values0[45] : vector<46xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k384") @k384() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<47xf64>) {
+  %first = vector.extract %values0[0] : vector<47xf64> -> f64
+  %last = vector.extract %values0[46] : vector<47xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k392") @k392() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<48xf64>) {
+  %first = vector.extract %values0[0] : vector<48xf64> -> f64
+  %last = vector.extract %values0[47] : vector<48xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k504") @k504() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<62xf64>) {
+  %first = vector.extract %values0[0] : vector<62xf64> -> f64
+  %last = vector.extract %values0[61] : vector<62xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k512") @k512() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<63xf64>) {
+  %first = vector.extract %values0[0] : vector<63xf64> -> f64
+  %last = vector.extract %values0[62] : vector<63xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k520") @k520() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<64xf64>) {
+  %first = vector.extract %values0[0] : vector<64xf64> -> f64
+  %last = vector.extract %values0[63] : vector<64xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k1024") @k1024() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<127xf64>) {
+  %first = vector.extract %values0[0] : vector<127xf64> -> f64
+  %last = vector.extract %values0[126] : vector<127xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k2048") @k2048() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<128xf64>, %values1: vector<127xf64>) {
+  %first = vector.extract %values0[0] : vector<128xf64> -> f64
+  %last = vector.extract %values1[126] : vector<127xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k4096") @k4096() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<128xf64>, %values1: vector<128xf64>, %values2: vector<128xf64>, %values3: vector<127xf64>) {
+  %first = vector.extract %values0[0] : vector<128xf64> -> f64
+  %last = vector.extract %values3[126] : vector<127xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k8192") @k8192() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<128xf64>, %values1: vector<128xf64>, %values2: vector<128xf64>, %values3: vector<128xf64>, %values4: vector<128xf64>, %values5: vector<128xf64>, %values6: vector<128xf64>, %values7: vector<127xf64>) {
+  %first = vector.extract %values0[0] : vector<128xf64> -> f64
+  %last = vector.extract %values7[126] : vector<127xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k8200") @k8200() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<128xf64>, %values1: vector<128xf64>, %values2: vector<128xf64>, %values3: vector<128xf64>, %values4: vector<128xf64>, %values5: vector<128xf64>, %values6: vector<128xf64>, %values7: vector<128xf64>) {
+  %first = vector.extract %values0[0] : vector<128xf64> -> f64
+  %last = vector.extract %values7[127] : vector<128xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k16384") @k16384() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<128xf64>, %values1: vector<128xf64>, %values2: vector<128xf64>, %values3: vector<128xf64>, %values4: vector<128xf64>, %values5: vector<128xf64>, %values6: vector<128xf64>, %values7: vector<128xf64>, %values8: vector<128xf64>, %values9: vector<128xf64>, %values10: vector<128xf64>, %values11: vector<128xf64>, %values12: vector<128xf64>, %values13: vector<128xf64>, %values14: vector<128xf64>, %values15: vector<127xf64>) {
+  %first = vector.extract %values0[0] : vector<128xf64> -> f64
+  %last = vector.extract %values15[126] : vector<127xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+kernel.def export("k32768") @k32768() {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%output: buffer, %values0: vector<128xf64>, %values1: vector<128xf64>, %values2: vector<128xf64>, %values3: vector<128xf64>, %values4: vector<128xf64>, %values5: vector<128xf64>, %values6: vector<128xf64>, %values7: vector<128xf64>, %values8: vector<128xf64>, %values9: vector<128xf64>, %values10: vector<128xf64>, %values11: vector<128xf64>, %values12: vector<128xf64>, %values13: vector<128xf64>, %values14: vector<128xf64>, %values15: vector<128xf64>, %values16: vector<128xf64>, %values17: vector<128xf64>, %values18: vector<128xf64>, %values19: vector<128xf64>, %values20: vector<128xf64>, %values21: vector<128xf64>, %values22: vector<128xf64>, %values23: vector<128xf64>, %values24: vector<128xf64>, %values25: vector<128xf64>, %values26: vector<128xf64>, %values27: vector<128xf64>, %values28: vector<128xf64>, %values29: vector<128xf64>, %values30: vector<128xf64>, %values31: vector<127xf64>) {
+  %first = vector.extract %values0[0] : vector<128xf64> -> f64
+  %last = vector.extract %values31[126] : vector<127xf64> -> f64
+  %value = scalar.addf %first, %last : f64
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xf64>
+  view.store %value, %view[%lane] : f64, view<64xf64>
+  kernel.return
+}
+
+// Repeated dispatches bind distinct invocation slots to the same kernel. All
+// eight input addresses and the output address contribute to the result.
+kernel.def export("many_bindings") @many_bindings() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%a: buffer, %b: buffer, %c: buffer, %d: buffer, %e: buffer, %f: buffer, %g: buffer, %h: buffer, %output: buffer, %increment: i32) {
+  %base = index.constant 0 : offset
+  %a_view = buffer.view %a[%base] : buffer -> view<1xi32>
+  %a_value = view.load %a_view[0] : view<1xi32> -> i32
+  %b_view = buffer.view %b[%base] : buffer -> view<1xi32>
+  %b_value = view.load %b_view[0] : view<1xi32> -> i32
+  %c_view = buffer.view %c[%base] : buffer -> view<1xi32>
+  %c_value = view.load %c_view[0] : view<1xi32> -> i32
+  %d_view = buffer.view %d[%base] : buffer -> view<1xi32>
+  %d_value = view.load %d_view[0] : view<1xi32> -> i32
+  %e_view = buffer.view %e[%base] : buffer -> view<1xi32>
+  %e_value = view.load %e_view[0] : view<1xi32> -> i32
+  %f_view = buffer.view %f[%base] : buffer -> view<1xi32>
+  %f_value = view.load %f_view[0] : view<1xi32> -> i32
+  %g_view = buffer.view %g[%base] : buffer -> view<1xi32>
+  %g_value = view.load %g_view[0] : view<1xi32> -> i32
+  %h_view = buffer.view %h[%base] : buffer -> view<1xi32>
+  %h_value = view.load %h_view[0] : view<1xi32> -> i32
+  %a_sum = scalar.addi %increment, %a_value : i32
+  %b_sum = scalar.addi %a_sum, %b_value : i32
+  %c_sum = scalar.addi %b_sum, %c_value : i32
+  %d_sum = scalar.addi %c_sum, %d_value : i32
+  %e_sum = scalar.addi %d_sum, %e_value : i32
+  %f_sum = scalar.addi %e_sum, %f_value : i32
+  %g_sum = scalar.addi %f_sum, %g_value : i32
+  %h_sum = scalar.addi %g_sum, %h_value : i32
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %h_sum, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}

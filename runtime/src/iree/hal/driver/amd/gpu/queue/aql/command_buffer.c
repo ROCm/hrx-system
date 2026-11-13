@@ -351,49 +351,59 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
   }
   if (length > UINT32_MAX - 15) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "resident command/data placement exceeds 4 GiB");
+                            "command/data placement exceeds 4 GiB");
   }
   buffer->program->value_count = 1 + buffer->inputs.count;
   if (length) {
     const uint32_t fixup_count =
         iree_hal_amd_gpu_recording_fixup_count(&buffer->recording);
-    // Direct dispatch sequences admit a larger bounded host template. Immutable
-    // arguments stay resident, so only packet bytes consume that copy budget.
-    // Mutable arguments/fixups retain their dispatch and combined-byte limits.
-    // Scalar control/blit helpers retain the smaller packet/ABI bound.
+    // CPU packet preparation is bounded by native work, independently of ABI
+    // size. Reusable immutable direct sequences can amortize resident
+    // arguments; one-shot streams publish their ABI through the ordinary
+    // argument pool.
     const bool direct = buffer->program->block_count == 1 &&
                         buffer->program->blocks[0].packet_count ==
                             buffer->program->dispatch_count;
-    const bool constants = direct && !buffer->inputs.count &&
-                           buffer->recording.data.length &&
-                           (buffer->pool->storage.resident.host_access &
-                            AMDF_MEMORY_MAP_FLAG_WRITE);
+    const bool constants =
+        direct &&
+        !(buffer->base.mode & IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT) &&
+        !buffer->inputs.count && buffer->recording.data.length &&
+        fixup_count <= IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS &&
+        (buffer->pool->storage.resident.host_access &
+         AMDF_MEMORY_MAP_FLAG_WRITE);
     if (buffer->program->block_count == 1 &&
         !buffer->requires_resident_storage &&
-        buffer->program->value_count +
-                (buffer->recording.command_data.length != 0) <=
-            IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES &&
         buffer->recording.command_data.length <=
             IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE &&
-        ((length <= 512 &&
-          fixup_count <= 512 / sizeof(iree_hal_amd_gpu_fixup_t)) ||
-         (direct &&
-          (constants
-               ? buffer->recording.commands.length <=
-                     IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_BYTES
-               : buffer->program->dispatch_count <= 32 &&
-                     length <= IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_BYTES) &&
-          fixup_count <= IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS))) {
+        buffer->recording.commands.length <=
+            IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_PACKET_BYTES &&
+        (constants || buffer->program->dispatch_count <= 32)) {
       const uint32_t template_length =
           constants ? buffer->recording.commands.length : (uint32_t)length;
       const uint32_t template_fixup_count = constants ? 0 : fixup_count;
       const uint32_t fixup_offset = iree_host_align(template_length, 16);
-      IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-          buffer->host_allocator,
-          sizeof(*buffer->program->host_template) + fixup_offset +
-              template_fixup_count * sizeof(iree_hal_amd_gpu_fixup_t),
-          (void**)&buffer->program->host_template));
+      iree_host_size_t allocation_size = 0;
+      iree_host_size_t preparation_size = 0;
+      if (!iree_host_size_checked_add(sizeof(*buffer->program->host_template),
+                                      fixup_offset, &allocation_size) ||
+          !iree_host_size_checked_mul_add(allocation_size, template_fixup_count,
+                                          sizeof(iree_hal_amd_gpu_fixup_t),
+                                          &allocation_size) ||
+          !iree_host_size_checked_align(template_length, 8,
+                                        &preparation_size) ||
+          !iree_host_size_checked_mul_add(
+              preparation_size,
+              buffer->program->value_count +
+                  (buffer->recording.command_data.length != 0),
+              sizeof(uint64_t), &preparation_size)) {
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "CPU command preparation size overflows");
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_allocator_malloc(buffer->host_allocator, allocation_size,
+                                (void**)&buffer->program->host_template));
       *buffer->program->host_template = (iree_hal_amd_gpu_aql_host_template_t){
+          .preparation_byte_length = preparation_size,
           .byte_length = template_length,
           .data_offset = constants ? template_length
                                    : iree_hal_amd_gpu_recording_data_offset(
@@ -886,7 +896,8 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
   invocation->command_buffer = NULL;
 }
 
-// Keep bounded CPU fixup storage off the resident replay stack.
+// The exclusive publisher supplies CPU preparation storage; GPU readers only
+// borrow the separately published argument and native-command allocations.
 static IREE_ATTRIBUTE_NOINLINE iree_status_t
 iree_hal_amd_gpu_aql_command_invocation_write_host(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
@@ -896,7 +907,8 @@ iree_hal_amd_gpu_aql_command_invocation_write_host(
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       invocation->program->host_template;
-  uint64_t values[IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES];
+  uint64_t* values = (void*)((uint8_t*)host_contents +
+                             iree_host_align(host_template->byte_length, 8));
   // Relocations retain the recording's combined command/data coordinates.
   // Actual ABI and native commands have independent native bases.
   values[0] = upload_address - host_template->data_offset;

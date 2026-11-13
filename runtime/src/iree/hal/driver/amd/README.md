@@ -92,11 +92,11 @@ advertised native protocol and publication mode. The default prefers PM4 on RDNA
 and AQL on CDNA among supported families; explicit family selection is independent
 of architecture. PM4 supports USER host-producer and KERNEL submission families.
 AQL requires USER publication with both host and device producers and native
-scratch service. Recorded AQL programs remain device-local: GPU materialization
-writes reserved native ring slots and publishes the first header only after the
-packet bodies are visible. Both protocols share memory, dependency admission,
-and device progress owners. Other native services fail explicitly at construction
-or operation admission.
+scratch service. Bounded AQL recordings use CPU packet preparation; larger or
+GPU-mutated programs use device-local storage and GPU materialization. Each
+path publishes native work only after the required packet bytes are visible.
+Both protocols share memory, dependency admission, and device progress owners.
+Other native services fail explicitly at construction or operation admission.
 
 GPU devices provision four compute queues by default, sharing the device's
 execution workers. `rdna://0`, `cdna://0`, and `amdgpu://0` use this default
@@ -168,10 +168,21 @@ default and executes resident indirect buffers.
 The host may publish multiple AQL chunks ahead while ring credit permits.
 Each chunk's ordered terminal packet joins its payload before the next chunk's
 materializer runs. This bounds storage and retirement without a device-wide
-idle. A recording containing exactly one direct dispatch, at most 512 bytes of
-packet/private data, and at most sixteen fixups instead uses a sealed host
-template. Submission copies and patches that bounded template directly, avoiding
-the two preparation kernels required by the resident path.
+idle. A recording with one native chunk, at most 8 KiB of packets, and at most
+32 dispatches instead uses a sealed CPU template when its data needs no GPU
+mutation and its indirect command data fits the native per-invocation slot.
+Argument bytes and resolved binding values have no separate size cutoff for
+this path. Submission prepares packets and fixups in a reusable CPU workspace;
+only the actual ABI bytes are published into the queue's kernarg storage.
+Native indirect commands and profiling samples keep their separate owners.
+CPU workspace growth occurs on demand, and explicit trim or joined destruction
+releases it. Neither the GPU nor retirement retains that workspace.
+
+Reusable direct sequences with immutable arguments can cache those arguments
+in device-local program storage. Their packet-only CPU template retains the
+8 KiB packet budget without the mutable dispatch-count bound. One-shot streams
+use ordinary queue kernargs, avoiding a resident allocation and host cache
+maintenance for an argument block that will be consumed only once.
 
 Resident instances use vector-clock frontiers to prove safe reuse across queues.
 Same-FIFO reuse can pipeline behind the previous invocation; overlapping work
@@ -182,12 +193,12 @@ storage. Synchronous executable and command-buffer construction allocate on the
 calling thread.
 
 Executable loading writes directly to qualified host-mapped code when possible.
-Unmapped code uses an independent cold queue in the selected compute family:
-bounded confirmed `WRITE_DATA` commands upload the bytes, and instruction-cache
-publication completes before loading returns. This bootstraps the resident blit
-shaders without an SDMA queue or a shader that must already be resident. AQL
-always uses this owner for instruction-cache publication; mapped PM4 code uses
-its ordinary before-dispatch cache action. Application queue dependencies cannot
+An independent cold queue in the selected compute family completes instruction
+publication before loading returns. Unmapped code also uses bounded confirmed
+`WRITE_DATA` commands on that queue to upload the bytes. This bootstraps resident
+blit shaders without an SDMA queue or a shader that must already be resident.
+Both AQL and PM4 consumers reuse published immutable instructions without a
+per-dispatch instruction-cache invalidation. Application queue dependencies cannot
 block the loader. Accepted uploads retain their target until checked retirement
 or native stop, including when shutdown wakes a blocked loading caller.
 

@@ -31,20 +31,22 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
   } dispatches;
 } iree_hal_amd_gpu_aql_program_block_t;
 
-// Bounds on publisher-stack preparation selected while sealing a recording.
+// Bounds on CPU-prepared native packet work, independent of ABI byte count.
 enum {
-  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_BYTES = 8192,
+  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_PACKET_BYTES = 8192,
+  // Cold fixup scratch for caching reusable immutable arguments.
   IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS = 256,
   // Retirement-owned native IB capacity for direct and bounded recorded work.
   IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE = 256,
-  IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_VALUES =
-      IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS + 1,
 };
 
-// Bounded native packets and any invocation-varying private data. The byte
-// template and fixup table follow in the same host allocation. Immutable
-// arguments may instead have a fixed device placement baked into the packets.
+// CPU-owned native packet template and private data. The bytes and fixup
+// table follow in the same allocation. Packet work is bounded independently
+// of argument size. Reusable immutable arguments may instead have a fixed
+// device placement baked into the packets.
 typedef struct iree_hal_amd_gpu_aql_host_template_t {
+  // CPU workspace for the complete private copy and dense resolved values.
+  iree_host_size_t preparation_byte_length;
   // Complete host packet/private-data extent. Zero-fixup templates are read
   // directly; mutable templates are prepared in publisher-owned CPU storage.
   uint32_t byte_length;
@@ -155,7 +157,7 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
 // host template is patched in host_contents; its actual ABI and native commands
 // are copied to their separate mappings. Resident programs write their separate
 // dense value table. values is NULL when the resident instance needs no fixups.
-// host_contents has HOST_TEMPLATE_MAX_BYTES bytes for a mutable host template
+// host_contents has preparation_byte_length bytes for a mutable host template
 // and is NULL for a resident program. Its caller keeps it through publication.
 // The publisher borrows zero-fixup host templates directly and omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
