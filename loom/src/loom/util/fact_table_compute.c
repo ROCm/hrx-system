@@ -1321,7 +1321,8 @@ iree_status_t loom_value_fact_table_compute_op(loom_value_fact_table_t* table,
   return loom_value_fact_table_compute_op_and_report(table, module, op, NULL);
 }
 
-static iree_status_t loom_value_fact_table_define_observation_results(
+static IREE_ATTRIBUTE_NOINLINE iree_status_t
+loom_value_fact_table_define_observation_results(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_op_t* op, loom_value_facts_t* result_facts, bool* out_changed) {
   const bool observes_execution =
@@ -1343,10 +1344,10 @@ static iree_status_t loom_value_fact_table_define_observation_results(
           LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER;
       const loom_value_id_t* operands = loom_op_const_operands(op);
       for (uint16_t i = 0; i < op->operand_count; ++i) {
-        invariant_scope =
-            iree_min(invariant_scope,
-                     loom_value_facts_uniform_scope(
-                         loom_value_fact_table_lookup(table, operands[i])));
+        const loom_value_fact_uniform_scope_t input_scope =
+            loom_value_facts_uniform_scope(
+                loom_value_fact_table_lookup(table, operands[i]));
+        invariant_scope = iree_min(invariant_scope, input_scope);
       }
       if (invariant_scope > loom_value_facts_uniform_scope(temporal_scope)) {
         loom_value_facts_mark_uniform_at_scope(&temporal_scope,
@@ -1397,9 +1398,12 @@ static iree_status_t loom_value_fact_table_define_observation_results(
       observes_execution ? &temporal_scope : NULL, out_changed);
 }
 
-static iree_status_t loom_value_fact_table_define_ordinary_results(
-    loom_value_fact_table_t* table, const loom_module_t* module,
-    const loom_op_t* op, loom_value_facts_t* result_facts, bool* out_changed) {
+static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
+loom_value_fact_table_define_ordinary_results(loom_value_fact_table_t* table,
+                                              const loom_module_t* module,
+                                              const loom_op_t* op,
+                                              loom_value_facts_t* result_facts,
+                                              bool* out_changed) {
   if (!table->definition_distributions && !loom_traits_may_read(op->traits) &&
       !loom_traits_are_convergent(op->traits) &&
       !loom_traits_has_unique_identity(op->traits) &&
