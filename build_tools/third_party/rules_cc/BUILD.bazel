@@ -9,6 +9,7 @@
 
 exports_files([
     "compressed_debug_info.patch",
+    "gcc_linker_search_path.patch",
     "optimized_profile.patch",
     "sanitizer_debug_info.patch",
 ])
