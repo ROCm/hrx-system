@@ -34,14 +34,30 @@ typedef struct loom_storage_interference_barrier_t {
   bool uniform;
 } loom_storage_interference_barrier_t;
 
-typedef struct loom_storage_interference_live_barrier_t {
-  // CFG block containing rendezvous crossed by live root accesses.
-  uint16_t block_index;
-  // Number of uniform rendezvous in this block with live root accesses.
-  uint32_t count;
-  // Next nonquiescent block for the same allocation root.
-  struct loom_storage_interference_live_barrier_t* next;
-} loom_storage_interference_live_barrier_t;
+typedef struct loom_storage_interference_bounds_t {
+  // Earliest operation ordinal, or UINT64_MAX for an empty range.
+  uint64_t first;
+  // Latest operation ordinal, or zero for an empty range.
+  uint64_t last;
+} loom_storage_interference_bounds_t;
+
+typedef struct loom_storage_interference_cfg_block_t {
+  // Current root's accesses projected into this block.
+  loom_storage_interference_bounds_t accesses;
+  // First uniform barrier in the retained table, or UINT32_MAX when absent.
+  uint32_t first_barrier;
+  // Last uniform barrier in the retained table, or UINT32_MAX when absent.
+  uint32_t last_barrier;
+} loom_storage_interference_cfg_block_t;
+
+enum {
+  // An access since the last rendezvous belongs to the current instance.
+  LOOM_STORAGE_INTERFERENCE_CURRENT_ACCESS = 1u << 0,
+  // An access since the last rendezvous precedes the latest allocation.
+  LOOM_STORAGE_INTERFERENCE_PREVIOUS_ACCESS = 1u << 1,
+  // The block already has a pending worklist entry.
+  LOOM_STORAGE_INTERFERENCE_QUEUED = 1u << 2,
+};
 
 typedef struct loom_storage_interference_async_access_t {
   // Buffer or view whose allocation instance is accessed asynchronously.
@@ -504,80 +520,180 @@ static iree_status_t loom_storage_interference_append_async_events(
   return iree_ok_status();
 }
 
+static void loom_storage_interference_include_ordinal(
+    loom_storage_interference_bounds_t* bounds, uint64_t ordinal) {
+  bounds->first = iree_min(bounds->first, ordinal);
+  bounds->last = iree_max(bounds->last, ordinal);
+}
+
+// Applies one allocation-free block segment. A barrier retires incoming
+// accesses; only accesses after its final barrier remain live at the exit.
+static bool loom_storage_interference_transfer_accesses(
+    loom_storage_interference_bounds_t accesses,
+    loom_storage_interference_bounds_t barriers, uint8_t* state) {
+  if (iree_any_bit_set(*state, LOOM_STORAGE_INTERFERENCE_PREVIOUS_ACCESS) &&
+      accesses.first < barriers.first) {
+    return false;
+  }
+  const bool has_barrier = barriers.first != UINT64_MAX;
+  if (has_barrier) {
+    *state = 0;
+  }
+  if (accesses.first != UINT64_MAX &&
+      (!has_barrier || accesses.last > barriers.last)) {
+    *state |= LOOM_STORAGE_INTERFERENCE_CURRENT_ACCESS;
+  }
+  return true;
+}
+
 static iree_status_t loom_storage_interference_prove_cfg_reuse_cuts(
     loom_storage_interference_t* analysis, const loom_cfg_graph_t* graph,
     const loom_value_ordinal_t* roots, iree_host_size_t root_count,
-    loom_storage_interference_live_barrier_t* const* live_barriers,
-    uint32_t* barrier_counts, iree_arena_allocator_t* arena) {
-  uint32_t* visited_marks = NULL;
+    iree_arena_allocator_t* arena) {
+  if (analysis->workgroup_barrier_count == 0) {
+    return iree_ok_status();
+  }
+  loom_storage_interference_cfg_block_t* blocks = NULL;
+  uint8_t* states = NULL;
   uint16_t* worklist = NULL;
   for (iree_host_size_t i = 0; i < root_count; ++i) {
-    if (!iree_any_bit_set(analysis->entries[roots[i]].flags,
+    loom_storage_interference_entry_t* entry = &analysis->entries[roots[i]];
+    if (!iree_any_bit_set(entry->flags,
                           LOOM_STORAGE_INTERFERENCE_ENTRY_SINGLE_INSTANCE) ||
-        iree_any_bit_set(analysis->entries[roots[i]].flags,
+        iree_any_bit_set(entry->flags,
                          LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT)) {
       continue;
     }
     const loom_value_t* root = loom_module_value(
         analysis->module, analysis->value_domain->value_ids[roots[i]]);
-    const loom_block_t* allocation = loom_value_def_op(root)->parent_block;
-    if (allocation->parent_region != graph->region ||
-        !graph->blocks[allocation->region_index].component_is_cyclic) {
+    const loom_op_t* allocation = loom_value_def_op(root);
+    if (allocation->parent_block->parent_region != graph->region ||
+        !graph->blocks[allocation->parent_block->region_index]
+             .component_is_cyclic) {
       continue;
     }
-    if (!visited_marks) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, graph->block_count,
-                                                     sizeof(*visited_marks),
-                                                     (void**)&visited_marks));
+    if (!blocks) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, graph->block_count, sizeof(*blocks), (void**)&blocks));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, graph->block_count, sizeof(*states), (void**)&states));
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           arena, graph->block_count, sizeof(*worklist), (void**)&worklist));
-      memset(visited_marks, 0xFF, graph->block_count * sizeof(*visited_marks));
-    }
-    const uint32_t mark = (uint32_t)i;
-    // Most roots are dead at most barriers. Store only live exceptions and
-    // reuse the shared counts, avoiding a roots-by-barriers relation table.
-    for (const loom_storage_interference_live_barrier_t* live =
-             live_barriers[i];
-         live; live = live->next) {
-      barrier_counts[live->block_index] -= live->count;
-    }
-    const uint16_t allocation_block = allocation->region_index;
-    const uint16_t component = graph->blocks[allocation_block].component;
-    iree_host_size_t worklist_count = 1;
-    worklist[0] = allocation_block;
-    visited_marks[allocation_block] = mark;
-    bool cut_all_reentries = true;
-    // Every reentry path stays in the allocation's retained CFG component.
-    // Quiescent rendezvous cut those paths. Postdominance alone cannot prove
-    // this: an inner cycle may recreate storage before reaching its postdom.
-    while (worklist_count && cut_all_reentries) {
-      const uint16_t block = worklist[--worklist_count];
-      const loom_cfg_block_index_span_t predecessors =
-          loom_cfg_graph_predecessors(graph, block);
-      for (iree_host_size_t j = 0; j < predecessors.count; ++j) {
-        const uint16_t predecessor = predecessors.values[j];
-        if (graph->blocks[predecessor].component != component ||
-            barrier_counts[predecessor] != 0) {
+      for (iree_host_size_t j = 0; j < graph->block_count; ++j) {
+        blocks[j].first_barrier = UINT32_MAX;
+        blocks[j].last_barrier = UINT32_MAX;
+      }
+      for (iree_host_size_t j = 0; j < analysis->workgroup_barrier_count; ++j) {
+        const loom_storage_interference_barrier_t* barrier =
+            &analysis->workgroup_barriers[j];
+        if (!barrier->uniform ||
+            barrier->op->parent_block->parent_region != graph->region) {
           continue;
         }
-        if (predecessor == allocation_block) {
-          cut_all_reentries = false;
-          break;
+        loom_storage_interference_cfg_block_t* block =
+            &blocks[barrier->op->parent_block->region_index];
+        if (block->first_barrier == UINT32_MAX) {
+          block->first_barrier = (uint32_t)j;
         }
-        if (visited_marks[predecessor] != mark) {
-          visited_marks[predecessor] = mark;
-          worklist[worklist_count++] = predecessor;
+        block->last_barrier = (uint32_t)j;
+      }
+    }
+    const uint16_t allocation_block = allocation->parent_block->region_index;
+    const loom_storage_interference_bounds_t empty = {UINT64_MAX, 0};
+    loom_storage_interference_bounds_t accesses_after_allocation = empty;
+    loom_storage_interference_bounds_t barriers_before_allocation = empty;
+    loom_storage_interference_bounds_t barriers_after_allocation = empty;
+    for (iree_host_size_t j = 0; j < graph->block_count; ++j) {
+      blocks[j].accesses = empty;
+    }
+    memset(states, 0, graph->block_count * sizeof(*states));
+    iree_host_size_t worklist_count = 0;
+    bool cut_all_reentries = true;
+    // The canonical footprint already includes aliases and asynchronous
+    // completion. Seed its blocks without walking IR or sorting operations.
+    for (uint32_t j = 0; j < entry->footprint.operation_count; ++j) {
+      const loom_op_t* access = NULL;
+      if (!loom_storage_interference_project_to_region(
+              entry->footprint.operations[j], graph->region, &access)) {
+        cut_all_reentries = false;
+        break;
+      }
+      const uint16_t block = access->parent_block->region_index;
+      loom_storage_interference_bounds_t* bounds =
+          block == allocation_block &&
+                  access->block_ordinal > allocation->block_ordinal
+              ? &accesses_after_allocation
+              : &blocks[block].accesses;
+      loom_storage_interference_include_ordinal(bounds, access->block_ordinal);
+      if (!iree_any_bit_set(states[block], LOOM_STORAGE_INTERFERENCE_QUEUED)) {
+        states[block] |= LOOM_STORAGE_INTERFERENCE_QUEUED;
+        worklist[worklist_count++] = block;
+      }
+    }
+    // Only the allocation block needs two transfer segments. Other blocks
+    // share their barrier bounds across every root. Nested-region barriers
+    // cannot retire accesses in the enclosing CFG block.
+    const loom_storage_interference_cfg_block_t* allocation_summary =
+        &blocks[allocation_block];
+    if (allocation_summary->first_barrier != UINT32_MAX) {
+      for (uint32_t j = allocation_summary->first_barrier;
+           j <= allocation_summary->last_barrier; ++j) {
+        const loom_storage_interference_barrier_t* barrier =
+            &analysis->workgroup_barriers[j];
+        if (barrier->uniform &&
+            barrier->op->parent_block == allocation->parent_block) {
+          loom_storage_interference_include_ordinal(
+              barrier->op->block_ordinal < allocation->block_ordinal
+                  ? &barriers_before_allocation
+                  : &barriers_after_allocation,
+              barrier->op->block_ordinal);
         }
       }
     }
-    for (const loom_storage_interference_live_barrier_t* live =
-             live_barriers[i];
-         live; live = live->next) {
-      barrier_counts[live->block_index] += live->count;
+    // Each of the two access states reaches each block at most once. A
+    // current access becomes a prior-instance access at allocation; finding
+    // another access before a rendezvous then disproves fixed-slot reuse.
+    while (worklist_count && cut_all_reentries) {
+      const uint16_t block = worklist[--worklist_count];
+      states[block] &= ~LOOM_STORAGE_INTERFERENCE_QUEUED;
+      uint8_t state = states[block];
+      const loom_storage_interference_cfg_block_t* summary = &blocks[block];
+      if (block == allocation_block) {
+        cut_all_reentries = loom_storage_interference_transfer_accesses(
+            summary->accesses, barriers_before_allocation, &state);
+        state = state ? LOOM_STORAGE_INTERFERENCE_PREVIOUS_ACCESS : 0;
+        cut_all_reentries &= loom_storage_interference_transfer_accesses(
+            accesses_after_allocation, barriers_after_allocation, &state);
+      } else {
+        const loom_storage_interference_bounds_t barriers =
+            summary->first_barrier == UINT32_MAX
+                ? empty
+                : (loom_storage_interference_bounds_t){
+                      analysis->workgroup_barriers[summary->first_barrier]
+                          .op->block_ordinal,
+                      analysis->workgroup_barriers[summary->last_barrier]
+                          .op->block_ordinal,
+                  };
+        cut_all_reentries = loom_storage_interference_transfer_accesses(
+            summary->accesses, barriers, &state);
+      }
+      const loom_cfg_block_index_span_t successors =
+          loom_cfg_graph_successors(graph, block);
+      for (iree_host_size_t j = 0; cut_all_reentries && j < successors.count;
+           ++j) {
+        const uint16_t successor = successors.values[j];
+        if ((states[successor] & state) == state) {
+          continue;
+        }
+        if (!iree_any_bit_set(states[successor],
+                              LOOM_STORAGE_INTERFERENCE_QUEUED)) {
+          worklist[worklist_count++] = successor;
+        }
+        states[successor] |= state | LOOM_STORAGE_INTERFERENCE_QUEUED;
+      }
     }
     if (cut_all_reentries) {
-      analysis->entries[roots[i]].flags |=
-          LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
+      entry->flags |= LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
     }
   }
   return iree_ok_status();
@@ -636,19 +752,6 @@ static iree_status_t loom_storage_interference_prove_single_instances(
           ? loom_value_fact_table_lookup_cfg_region(
                 analysis->fact_table, analysis->value_domain->region)
           : NULL;
-  loom_storage_interference_live_barrier_t** live_barriers = NULL;
-  uint32_t* barrier_counts = NULL;
-  bool has_cfg_barriers = false;
-  if (cfg && cfg->graph.has_cycles) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        &lifetime->arena, workgroup_root_count, sizeof(*live_barriers),
-        (void**)&live_barriers));
-    memset(live_barriers, 0, workgroup_root_count * sizeof(*live_barriers));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        &lifetime->arena, cfg->graph.block_count, sizeof(*barrier_counts),
-        (void**)&barrier_counts));
-    memset(barrier_counts, 0, cfg->graph.block_count * sizeof(*barrier_counts));
-  }
 
   loom_liveness_analysis_t liveness;
   IREE_RETURN_IF_ERROR(loom_liveness_analyze_local_value_domain(
@@ -735,12 +838,6 @@ static iree_status_t loom_storage_interference_prove_single_instances(
         continue;
       }
       const loom_block_t* barrier_block = point->op->parent_block;
-      const bool is_cfg_barrier =
-          live_barriers && barrier_block->parent_region == cfg->graph.region;
-      if (is_cfg_barrier) {
-        ++barrier_counts[barrier_block->region_index];
-        has_cfg_barriers = true;
-      }
       for (iree_host_size_t j = 0; j < workgroup_root_count; ++j) {
         const loom_value_ordinal_t root = workgroup_roots[j];
         const loom_value_t* value = loom_module_value(
@@ -758,32 +855,17 @@ static iree_status_t loom_storage_interference_prove_single_instances(
             (live_counts[root] == 0 || is_leading_cut)) {
           analysis->entries[root].flags |=
               LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
-        } else if (live_counts[root] != 0 && is_cfg_barrier &&
-                   allocation_block->parent_region == cfg->graph.region &&
-                   cfg->graph.blocks[allocation_block->region_index]
-                       .component_is_cyclic) {
-          if (!live_barriers[j] ||
-              live_barriers[j]->block_index != barrier_block->region_index) {
-            loom_storage_interference_live_barrier_t* live = NULL;
-            IREE_RETURN_IF_ERROR(iree_arena_allocate(
-                &lifetime->arena, sizeof(*live), (void**)&live));
-            *live = (loom_storage_interference_live_barrier_t){
-                .block_index = barrier_block->region_index,
-                .next = live_barriers[j],
-            };
-            live_barriers[j] = live;
-          }
-          ++live_barriers[j]->count;
         }
       }
     }
   }
   IREE_ASSERT_EQ(barrier_index, analysis->workgroup_barrier_count);
-  if (has_cfg_barriers) {
+  if (cfg && cfg->graph.has_cycles) {
     IREE_RETURN_IF_ERROR(loom_storage_interference_prove_cfg_reuse_cuts(
         analysis, &cfg->graph, workgroup_roots, workgroup_root_count,
-        live_barriers, barrier_counts, &lifetime->arena));
+        &lifetime->arena));
   }
+
   for (iree_host_size_t i = 0; i < workgroup_root_count; ++i) {
     loom_storage_interference_entry_t* entry =
         &analysis->entries[workgroup_roots[i]];

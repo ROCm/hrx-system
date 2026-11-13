@@ -342,3 +342,93 @@ check.scenario @initialized_workgroup_values {
   }
   check.return
 }
+
+// Repeated instances share one tile. Private reduction control flow separates
+// each declaration from the leading rendezvous; that rendezvous retires the
+// previous iteration's peer reads before any new instance is accessed.
+kernel.def @workgroup_repeated_exchange() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 2 : index
+  %width = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %component_count: index, %term_count: index) {
+  %components = index.assume %component_count [range(%component_count, 0, 8)] : index
+  %terms = index.assume %term_count [range(%term_count, 0, 4)] : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 512 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %half = index.constant 64 : index
+  %initial_sum = scalar.constant 0 : i32
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %peer = index.xori %lane, %half : index
+  %source = buffer.view %input[%base] : buffer -> view<2x8x128x4xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<2x8x128xi32>
+  scf.for %component = [%begin to %components step %step] {
+    %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+    %shared = buffer.view %scratch[%base] : buffer -> view<128xi32>
+    %sum = scf.for %term = [%begin to %terms step %step](%partial = %initial_sum : i32) -> (i32) {
+      %value = view.load %source[%group, %component, %lane, %term] : view<2x8x128x4xi32> -> i32
+      %updated = scalar.addi %partial, %value : i32
+      scf.yield %updated : i32
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    view.store %sum, %shared[%lane] : i32, view<128xi32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %received = view.load %shared[%peer] : view<128xi32> -> i32
+    view.store %received, %destination[%group, %component, %lane] : i32, view<2x8x128xi32>
+  }
+  kernel.return
+}
+
+// Serially gather each peer's input without shared storage or rendezvous.
+func.def @workgroup_repeated_exchange_oracle(%input: buffer, %output: buffer, %component_count: index, %term_count: index) {
+  %components = index.assume %component_count [range(%component_count, 0, 8)] : index
+  %terms = index.assume %term_count [range(%term_count, 0, 4)] : index
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %groups = index.constant 2 : index
+  %width = index.constant 128 : index
+  %half = index.constant 64 : index
+  %initial_sum = scalar.constant 0 : i32
+  %source = buffer.view %input[%base] : buffer -> view<2x8x128x4xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<2x8x128xi32>
+  scf.for %group = [%begin to %groups step %step] {
+    scf.for %component = [%begin to %components step %step] {
+      scf.for %lane = [%begin to %width step %step] {
+        %peer = index.xori %lane, %half : index
+        %sum = scf.for %term = [%begin to %terms step %step](%partial = %initial_sum : i32) -> (i32) {
+          %value = view.load %source[%group, %component, %peer, %term] : view<2x8x128x4xi32> -> i32
+          %updated = scalar.addi %partial, %value : i32
+          scf.yield %updated : i32
+        }
+        view.store %sum, %destination[%group, %component, %lane] : i32, view<2x8x128xi32>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario @workgroup_repeated_exchange_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<2x8x128x4xi32>
+    %output = check.generate.fill value(-1) : tensor<2x8x128xi32>
+    %term_count = check.literal value(4) : index
+    check.compare<@workgroup_repeated_exchange, @workgroup_repeated_exchange_oracle>(%input, %output, %trial, %term_count) : (tensor<2x8x128x4xi32>, tensor<2x8x128xi32>, index, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2x8x128xi32>
+    }
+  }
+  check.trial[5](%terms: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%terms] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<2x8x128x4xi32>
+    %output = check.generate.fill value(-1) : tensor<2x8x128xi32>
+    %components = check.literal value(8) : index
+    check.compare<@workgroup_repeated_exchange, @workgroup_repeated_exchange_oracle>(%input, %output, %components, %terms) : (tensor<2x8x128x4xi32>, tensor<2x8x128xi32>, index, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2x8x128xi32>
+    }
+  }
+  check.return
+}

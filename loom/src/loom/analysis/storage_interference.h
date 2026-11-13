@@ -60,9 +60,11 @@ bool loom_storage_interference_root_may_be_accessed(
 // require complete provenance, no older live alias at allocation entry, and no
 // asynchronous access crossing that boundary. Accessed workgroup roots require
 // either a single-invocation launch or a uniform workgroup rendezvous at a
-// quiescent point separating reuse across invocations. In CFG functions every
-// reentry path must cross such a rendezvous; different paths may use different
-// barriers. Structured allocations use a cut in the allocation block.
+// point separating accesses to different instances across invocations. In CFG
+// functions every path from an access through reallocation to another access
+// must cross such a rendezvous; different paths may use different barriers.
+// Declarations and alias construction do not access storage. Structured
+// allocations use a cut in the allocation block.
 // The proof is retained during construction; this query neither traverses IR
 // nor computes liveness.
 bool loom_storage_interference_root_has_single_live_instance(
