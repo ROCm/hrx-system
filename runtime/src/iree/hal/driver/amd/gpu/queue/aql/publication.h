@@ -42,11 +42,9 @@ typedef enum iree_hal_amd_gpu_aql_publish_result_e {
   IREE_HAL_AMD_GPU_AQL_PUBLISH_SIGNALS,
 } iree_hal_amd_gpu_aql_publish_result_t;
 
-// Exact argument extent needed before ring reservation, including optional
-// GWS initialization arguments.
+// Exact argument extent needed before ring reservation.
 uint64_t iree_hal_amd_gpu_aql_argument_length(
-    const iree_hal_amd_gpu_aql_dispatch_request_t* request,
-    uint32_t grid_length);
+    const iree_hal_amd_gpu_aql_dispatch_request_t* request);
 
 // Exact upload extent for the current recorded-command chunk. Immutable host
 // templates need no invocation storage and return zero.

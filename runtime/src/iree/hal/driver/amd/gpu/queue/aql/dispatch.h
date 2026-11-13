@@ -41,12 +41,6 @@ iree_status_t iree_hal_amd_gpu_aql_dispatch_prepare(
     iree_host_size_t binding_count, iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_dispatch_geometry_t* out_dispatch);
 
-// One ordered workitem initializes hardware GWS from the private grid record.
-// The following ordered user dispatch joins its completion before consuming
-// resource zero. Memory-barrier targets use the confirmed write below.
-iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_grid_sync_packet(
-    uint64_t kernel_object, uint64_t grid_sync);
-
 enum {
   // WRITE_DATA's four-DWORD header and 48-byte record, plus optional PRED_EXEC.
   IREE_HAL_AMD_GPU_AQL_GRID_SYNC_COMMAND_LENGTH = 72,

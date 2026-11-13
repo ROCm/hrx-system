@@ -59,8 +59,8 @@ class FamilySpecTest
 
   iree_status_t Initialize() {
     return iree_hal_amd_gpu_queue_family_spec_initialize(
-        &context_, {11, 0, 0}, 1, std::get<1>(GetParam()), 0,
-        iree_allocator_system(), &storage_, &spec_);
+        &context_, 1, std::get<1>(GetParam()), 0, iree_allocator_system(),
+        &storage_, &spec_);
   }
 
   // Native facts are dependencies; the real translator owns public metadata.
@@ -83,6 +83,7 @@ TEST_P(FamilySpecTest, ExposesOnlyImplementedOperationsAndResourceSelections) {
       std::get<0>(GetParam()) != AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA;
   const bool user = std::get<1>(GetParam()) == AMDF_QUEUE_PUBLICATION_MODE_USER;
   EXPECT_EQ(spec_.provisioned_queue_count, 0u);
+  EXPECT_EQ(spec_.supported_queue_features, 0u);
   EXPECT_NE(spec_.flags & IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
             0u);
   EXPECT_EQ(spec_.role_flags,

@@ -45,8 +45,6 @@ typedef struct iree_hal_amd_gpu_aql_program_pool_t {
   uint64_t indirect;
   // Scalar atomic descriptors indexed by instruction scope and integer width.
   uint64_t control[IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
-  // Native one-workitem GWS initializer, zero for memory-barrier targets.
-  uint64_t grid_sync;
 } iree_hal_amd_gpu_aql_program_pool_t;
 
 // Cold construction before queue creation. A failure leaves a deinitializable

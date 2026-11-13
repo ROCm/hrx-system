@@ -14,15 +14,6 @@
 
 namespace {
 
-TEST(AqlGridSyncTest, InitializationRunsOneOrderedWorkitemFromExistingState) {
-  const auto packet = iree_hal_amd_gpu_aql_grid_sync_packet(
-      UINT64_C(0x123456780040), UINT64_C(0x4000));
-  const std::array<uint32_t, 16> expected = {
-      0x10502,    0x00010001, 1,      1, 1, 1, 0, 0,
-      0x56780040, 0x1234,     0x4000, 0, 0, 0, 0, 0};
-  EXPECT_EQ(memcmp(packet.words, expected.data(), sizeof(packet)), 0);
-}
-
 TEST(AqlGridSyncTest, ResidentInitializationHasOneWriterAndADeviceHandoff) {
   constexpr uint32_t kGuard = 0xcafebabe;
   const iree_hal_amd_gpu_grid_sync_t grid = {

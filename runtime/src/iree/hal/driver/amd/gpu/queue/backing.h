@@ -52,7 +52,7 @@ typedef struct iree_hal_amd_gpu_grid_storage_t {
 
 // Qualifies device-scope shader LOAD/ADD before allocating one grid record from
 // the queue's resident read/write policy. Failure leaves out_storage empty.
-// Ordinary and hardware-GWS queues do not acquire this backing.
+// Ordinary queues do not acquire this backing.
 iree_status_t iree_hal_amd_gpu_grid_storage_initialize(
     iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_fabric_memory_options_t* options,

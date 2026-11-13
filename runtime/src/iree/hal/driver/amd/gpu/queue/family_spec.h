@@ -9,7 +9,6 @@
 
 #include "iree/hal/device_spec.h"
 #include "iree/hal/driver/amd/gpu/context.h"
-#include "iree/hal/driver/amd/gpu/target/identity.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,8 +31,7 @@ typedef struct iree_hal_amd_gpu_queue_family_spec_storage_t {
 // The caller selects the native carrier before this query. Storage must be
 // deinitialized after either success or failure.
 iree_status_t iree_hal_amd_gpu_queue_family_spec_initialize(
-    iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_gfxip_version_t target_version, uint32_t family_ordinal,
+    iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
     amdf_queue_publication_modes_t publication_mode, uint32_t queue_count,
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_queue_family_spec_storage_t* out_storage,

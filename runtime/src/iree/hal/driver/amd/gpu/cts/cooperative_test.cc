@@ -215,9 +215,8 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
       .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
   };
-  // Small and larger recordings both retain private barrier state. AQL's GWS
-  // strategy can use a bounded host template; its memory strategy keeps even
-  // the small recording resident. Replays change bindings without a CPU wait.
+  // Small and larger recordings both retain private barrier state. Replays
+  // change bindings without a CPU wait.
   for (uint32_t dispatches : {1u, 8u}) {
     std::array<uint32_t, kGroups * kReplays> values = {};
     IREE_ASSERT_OK(

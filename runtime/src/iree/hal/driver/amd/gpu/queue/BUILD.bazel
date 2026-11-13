@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
@@ -33,8 +32,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/driver/amd:status",
         "//runtime/src/iree/hal/driver/amd/fabric:memory",
         "//runtime/src/iree/hal/driver/amd/gpu:context",
-        "//runtime/src/iree/hal/driver/amd/gpu:dispatch",
-        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
     ],
 )
 
@@ -979,16 +976,6 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
-)
-
-iree_amdgpu_binary_variants_embed_data(
-    name = "grid_sync_programs",
-    testonly = True,
-    srcs = ["grid_sync.c"],
-    identifier = "iree_hal_amd_gpu_grid_sync_programs",
-    tags = ["manual"],
-    target = "amdgcn-amd-amdhsa",
-    target_selectors_flag = "//runtime/src/iree/hal/driver/amd/gpu:targets",
 )
 
 [
