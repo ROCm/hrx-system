@@ -1101,6 +1101,7 @@ TEST_P(GpuNativeDispatchTest,
 void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
                                                iree_hal_atomic_width_t width,
                                                iree_hal_atomic_flags_t flags) {
+  options_.queue.argument_capacity = 8;
   Create();
   if (HasFatalFailure() || IsSkipped()) {
     return;

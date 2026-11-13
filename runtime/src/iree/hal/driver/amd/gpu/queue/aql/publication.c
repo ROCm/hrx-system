@@ -110,7 +110,8 @@ static iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_arguments(
     iree_hal_amd_gpu_aql_queue_t* queue, uint64_t length, uint64_t alignment,
     uint64_t* out_offset, uint64_t* out_end) {
   return iree_hal_amd_gpu_aql_reserve_bytes(
-      queue->producer.arguments, &queue->completed.arguments, length, alignment,
+      queue->producer.arguments, &queue->completed.arguments, length,
+      iree_max(alignment, (uint64_t)IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT),
       IREE_HAL_AMD_GPU_AQL_PUBLISH_ARGUMENTS, out_offset, out_end);
 }
 

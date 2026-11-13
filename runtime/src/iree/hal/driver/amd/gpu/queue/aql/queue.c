@@ -564,6 +564,8 @@ static void iree_hal_amd_gpu_aql_process_submission(
                                        ? 0
                                        : sizeof(iree_hal_amd_gpu_grid_sync_t)),
                                request->function->base.kernarg->alignment));
+      capacity =
+          iree_max(capacity, (uint64_t)IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT);
     }
     status = iree_hal_amd_gpu_aql_growth_begin(
         &queue->growth,

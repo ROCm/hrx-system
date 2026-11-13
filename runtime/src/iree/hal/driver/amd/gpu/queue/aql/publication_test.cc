@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/aql/publication.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <tuple>
@@ -328,7 +329,8 @@ TEST_P(AqlPublicationTest, TerminalReleaseSharesTheUnpublishedFinalDispatch) {
   const uint32_t terminal_release =
       release_kind ? IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM : 1u << 11;
   const uint32_t run_length = multiple_packets ? 3 : 1;
-  std::array<uint8_t, 128> argument_bytes = {};
+  std::array<uint8_t, 16 * IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT>
+      argument_bytes = {};
   arguments_.memory.contents =
       iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
   arguments_.address = 0x7000;
@@ -531,7 +533,10 @@ TEST_P(AqlPublicationTest, FullTransferStorageLeavesLaunchArgumentsAvailable) {
   std::array<uint8_t, 4096> source;
   source.fill(0xA5);
   std::array<uint8_t, 4096> payload = {};
-  std::array<uint8_t, 64> argument_bytes = {};
+  constexpr size_t kSecondArgumentOffset =
+      IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT;
+  std::array<uint8_t, 2 * kSecondArgumentOffset> argument_bytes;
+  argument_bytes.fill(0xCD);
   arguments_.memory.contents =
       iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
   arguments_.address = 0x7000;
@@ -583,25 +588,35 @@ TEST_P(AqlPublicationTest, FullTransferStorageLeavesLaunchArgumentsAvailable) {
                                                  launch_arguments.size());
   std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
   Publish(Semaphore(), waits);
-  EXPECT_EQ(arguments_.end, 64u);
+  EXPECT_EQ(arguments_.end, kSecondArgumentOffset + 32);
   EXPECT_EQ(transfers.end, 4096u);
-  EXPECT_EQ(PacketAddress(2, 10), arguments_.address + 32);
-  EXPECT_EQ(
-      std::memcmp(argument_bytes.data() + 32, launch_arguments.data(), 32), 0);
+  EXPECT_EQ(PacketAddress(2, 10), arguments_.address + kSecondArgumentOffset);
+  EXPECT_EQ(std::memcmp(argument_bytes.data() + kSecondArgumentOffset,
+                        launch_arguments.data(), 32),
+            0);
+  EXPECT_TRUE(std::all_of(argument_bytes.begin() + sizeof(blit),
+                          argument_bytes.begin() + kSecondArgumentOffset,
+                          [](uint8_t value) { return value == 0xCD; }));
+  EXPECT_TRUE(std::all_of(
+      argument_bytes.begin() + kSecondArgumentOffset + launch_arguments.size(),
+      argument_bytes.end(), [](uint8_t value) { return value == 0xCD; }));
   EXPECT_EQ(payload, source);
 }
 
 TEST_P(AqlPublicationTest, ScalarCommandsUseRetirementSlotsWithFullArguments) {
   ASSERT_NO_FATAL_FAILURE(PrepareControlBuffer());
   context_.target_info.topology.xcc_count = std::get<1>(GetParam()) ? 8 : 1;
-  std::array<uint8_t, 8> argument_bytes = {};
+  std::array<uint8_t, IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT> argument_bytes =
+      {};
   arguments_.memory.contents =
       iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
   arguments_.address = 0x7000;
   arguments_.capacity = argument_bytes.size();
   layout_.byte_length = argument_bytes.size();
-  const uint64_t constant = 0x123456789abcdef0;
-  request_.constants = iree_make_const_byte_span(&constant, sizeof(constant));
+  std::array<uint64_t, IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT / 8> constants;
+  constants.fill(UINT64_C(0x123456789ABCDEF0));
+  request_.constants =
+      iree_make_const_byte_span(constants.data(), sizeof(constants));
   std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
   Publish(Semaphore(), waits);
   ASSERT_EQ(arguments_.end, argument_bytes.size());
@@ -637,7 +652,7 @@ TEST_P(AqlPublicationTest, ScalarCommandsUseRetirementSlotsWithFullArguments) {
           IREE_HAL_AMD_GPU_AQL_PUBLISH_COMMANDS);
       IREE_ASSERT_OK(status);
       EXPECT_EQ(queue_.producer.ring.reserved, 1u);
-      EXPECT_EQ(arguments_.end, 8u);
+      EXPECT_EQ(arguments_.end, argument_bytes.size());
       queue_.commands = &commands;
     }
     ASSERT_EQ(
@@ -656,15 +671,18 @@ TEST_P(AqlPublicationTest, ScalarCommandsUseRetirementSlotsWithFullArguments) {
     EXPECT_EQ(words[address_word], control_binding_.device_address + i * 8);
     EXPECT_EQ(words[address_word + 1], 0u);
     EXPECT_EQ(words[offset / 4 + prefix + length], 0xCDCDCDCDu);
-    EXPECT_EQ(issued_[slot].arguments, 8u);
-    EXPECT_EQ(arguments_.end, 8u);
+    EXPECT_EQ(issued_[slot].arguments, argument_bytes.size());
+    EXPECT_EQ(arguments_.end, argument_bytes.size());
   }
-  EXPECT_EQ(std::memcmp(argument_bytes.data(), &constant, sizeof(constant)), 0);
+  EXPECT_EQ(
+      std::memcmp(argument_bytes.data(), constants.data(), sizeof(constants)),
+      0);
 }
 
 TEST_P(AqlPublicationTest, CooperativeCommandsAndKernargsHaveDistinctOwners) {
   context_.target_info.topology.xcc_count = std::get<1>(GetParam()) ? 8 : 1;
-  std::array<uint8_t, 16> argument_bytes = {};
+  std::array<uint8_t, 2 * IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT>
+      argument_bytes = {};
   arguments_.memory.contents =
       iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
   arguments_.address = 0x7000;
@@ -699,18 +717,20 @@ TEST_P(AqlPublicationTest, CooperativeCommandsAndKernargsHaveDistinctOwners) {
     request_.geometry.workgroup_count[0] = i + 2;
     Publish(Semaphore(), waits);
     const size_t offset = i * IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
+    const size_t argument_offset = i * IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT;
     EXPECT_EQ(PacketAddress(i * 2, 2), commands.address + offset);
-    EXPECT_EQ(PacketAddress(i * 2 + 1, 10), arguments_.address + i * 8);
+    EXPECT_EQ(PacketAddress(i * 2 + 1, 10),
+              arguments_.address + argument_offset);
     EXPECT_EQ(packets_[i * 2].words[4], (1u << 23) | (prefix + 16));
     iree_hal_amd_gpu_grid_sync_t grid;
     std::memcpy(&grid, words.data() + offset / 4 + prefix + 4, sizeof(grid));
     EXPECT_EQ(grid.workgroup_count, i + 2);
     EXPECT_EQ(grid.total_workitem_count, (i + 2) * 64);
     uint64_t hidden_pointer = 0;
-    std::memcpy(&hidden_pointer, argument_bytes.data() + i * 8,
+    std::memcpy(&hidden_pointer, argument_bytes.data() + argument_offset,
                 sizeof(hidden_pointer));
     EXPECT_EQ(hidden_pointer, queue_.grid.address);
-    EXPECT_EQ(arguments_.end, (i + 1) * 8);
+    EXPECT_EQ(arguments_.end, argument_offset + 8);
   }
   EXPECT_EQ(words[2 * IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE / 4],
             0xCDCDCDCDu);
@@ -718,7 +738,10 @@ TEST_P(AqlPublicationTest, CooperativeCommandsAndKernargsHaveDistinctOwners) {
 
 TEST_P(AqlPublicationTest, FullSamplesLeaveLaunchArgumentsAvailable) {
   auto operation = BeginProfile();
-  std::array<uint8_t, 64> argument_bytes = {};
+  constexpr size_t kSecondArgumentOffset =
+      IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT;
+  std::array<uint8_t, 2 * kSecondArgumentOffset> argument_bytes;
+  argument_bytes.fill(0xCD);
   arguments_.memory.contents =
       iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
   arguments_.address = 0x7000;
@@ -767,10 +790,12 @@ TEST_P(AqlPublicationTest, FullSamplesLeaveLaunchArgumentsAvailable) {
   EXPECT_EQ(generation.end, sizeof(sample));
   std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
   Publish(Semaphore(), waits);
-  EXPECT_EQ(arguments_.end, 64u);
+  EXPECT_EQ(arguments_.end, kSecondArgumentOffset + 32);
   EXPECT_EQ(generation.end, sizeof(sample));
-  EXPECT_EQ(PacketAddress(2, 10), arguments_.address + 32);
-  EXPECT_EQ(std::memcmp(argument_bytes.data() + 32, constants.data(), 32), 0);
+  EXPECT_EQ(PacketAddress(2, 10), arguments_.address + kSecondArgumentOffset);
+  EXPECT_EQ(std::memcmp(argument_bytes.data() + kSecondArgumentOffset,
+                        constants.data(), 32),
+            0);
 }
 
 TEST_P(AqlPublicationTest, EmptyDispatchKeepsMetadataWithoutNativeSamples) {
