@@ -60,6 +60,10 @@ typedef enum iree_hal_streaming_graph_node_flag_bits_e {
   IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN = 1u << 0,
   // Node is disabled in an executable graph and omitted from scheduling.
   IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED = 1u << 1,
+  // Temporary membership mark, cleared before dependency validation returns.
+  IREE_HAL_STREAMING_GRAPH_NODE_FLAG_VALIDATING_DEPENDENCY = 1u << 2,
+  // Added dependencies are reached through a lazily allocated membership index.
+  IREE_HAL_STREAMING_GRAPH_NODE_FLAG_INDEXED_DEPENDENCIES = 1u << 3,
 } iree_hal_streaming_graph_node_flag_bits_t;
 
 // Returns true if the node type can be recorded into a command buffer.
@@ -349,6 +353,22 @@ typedef struct iree_hal_streaming_graph_dependency_t {
   iree_hal_streaming_graph_node_t* from;
 } iree_hal_streaming_graph_dependency_t;
 
+// Exact membership for a frequently mutated wide predecessor set. The list
+// remains authoritative for enumeration; cloning does not copy this index.
+// Removing the last predecessor releases the index, preserving pointer-based
+// dependency-presence queries without a lookup through the index.
+typedef struct iree_hal_streaming_graph_dependency_index_t {
+  // Arena-owned added dependencies in their original enumeration order.
+  iree_hal_streaming_graph_dependency_t* head;
+  // Number of embedded and added predecessors represented in |slots|.
+  iree_host_size_t count;
+  // Power-of-two slot count, with at least one quarter of the slots empty.
+  iree_host_size_t capacity;
+  // Stable source indices plus one; zero terminates a linear-probe chain.
+  // Node publication excludes UINT32_MAX, so every encoded identity is nonzero.
+  uint32_t slots[];
+} iree_hal_streaming_graph_dependency_index_t;
+
 // Graph node structure.
 // Memory layout:
 // [iree_hal_streaming_graph_node_t]
@@ -365,8 +385,13 @@ typedef struct iree_hal_streaming_graph_node_t {
   uint8_t flags;
   // Number of embedded dependency pointers in |dependencies|.
   uint32_t dependency_count;
-  // Arena-owned incoming dependencies attached after node construction.
-  iree_hal_streaming_graph_dependency_t* additional_dependencies;
+  // INDEXED_DEPENDENCIES selects the index without enlarging the node header.
+  union {
+    // Arena-owned incoming dependencies attached after node construction.
+    iree_hal_streaming_graph_dependency_t* additional_dependencies;
+    // Host-allocated membership index containing the same incoming list.
+    iree_hal_streaming_graph_dependency_index_t* dependency_index;
+  };
   // Dense index used by graph analysis while the node is active.
   uint32_t node_index;
   // Stable source node index used to find original nodes in cloned graphs.
@@ -392,6 +417,52 @@ typedef struct iree_hal_streaming_graph_node_t {
   // backing node blocks.
   iree_hal_streaming_graph_node_t* dependencies[];
 } iree_hal_streaming_graph_node_t;
+
+// Publication assigns the owner; removal and rollback clear it while leaving
+// the handle's arena storage alive until graph destruction.
+static inline bool iree_hal_streaming_graph_node_is_active_in_graph(
+    const iree_hal_streaming_graph_t* graph,
+    const iree_hal_streaming_graph_node_t* node) {
+  return node && node->graph == graph;
+}
+
+static inline iree_hal_streaming_graph_dependency_t*
+iree_hal_streaming_graph_additional_dependencies(
+    const iree_hal_streaming_graph_node_t* node) {
+  return node->flags & IREE_HAL_STREAMING_GRAPH_NODE_FLAG_INDEXED_DEPENDENCIES
+             ? node->dependency_index->head
+             : node->additional_dependencies;
+}
+
+// Mutable head used by construction and removal, with graph access serialized.
+static inline iree_hal_streaming_graph_dependency_t**
+iree_hal_streaming_graph_additional_dependency_head(
+    iree_hal_streaming_graph_node_t* node) {
+  return node->flags & IREE_HAL_STREAMING_GRAPH_NODE_FLAG_INDEXED_DEPENDENCIES
+             ? &node->dependency_index->head
+             : &node->additional_dependencies;
+}
+
+// Validates an external predecessor array without retaining scratch or changing
+// its order. Caller serialization also covers temporary predecessor flags.
+iree_status_t iree_hal_streaming_graph_validate_dependencies(
+    const iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count);
+
+// Releases only the optional index, preserving the authoritative incoming list.
+void iree_hal_streaming_graph_release_dependency_index(
+    iree_hal_streaming_graph_node_t* node);
+
+// Detaches every incoming and outgoing reference before retiring a known node.
+void iree_hal_streaming_graph_remove_dependency_refs(
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_graph_node_t* node);
+
+// Validates all requested removals before publishing any topology changes.
+iree_status_t iree_hal_streaming_graph_remove_dependencies(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** from_nodes,
+    iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count);
 
 //===----------------------------------------------------------------------===//
 // Graph management

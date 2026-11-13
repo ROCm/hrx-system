@@ -12,6 +12,11 @@
 #include "benchmark/benchmark.h"
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
+#include "iree/base/tooling/flags.h"
+
+IREE_FLAG(bool, hip_native_runtime, false,
+          "Benchmark native HIP selected by HRX_TEST_LIBAMDHIP64, without "
+          "requiring HRX's private hipHALDeinit entry point.");
 
 namespace {
 
@@ -38,19 +43,37 @@ struct GraphApi {
       Require(false, library.error().c_str());
     }
     Check(Resolve<decltype(&hipInit)>("hipInit")(0));
+    if (!FLAG_hip_native_runtime) {
+      deinitialize = Resolve<decltype(deinitialize)>("hipHALDeinit");
+    }
+    int runtime_version = 0;
+    Check(Resolve<decltype(&hipRuntimeGetVersion)>("hipRuntimeGetVersion")(
+        &runtime_version));
+    std::fprintf(stderr, "HIP runtime: %s, version: %d\n",
+                 FLAG_hip_native_runtime ? "native" : "HRX", runtime_version);
     create = Resolve<decltype(create)>("hipGraphCreate");
     destroy = Resolve<decltype(destroy)>("hipGraphDestroy");
     add_empty = Resolve<decltype(add_empty)>("hipGraphAddEmptyNode");
     add_dependencies =
         Resolve<decltype(add_dependencies)>("hipGraphAddDependencies");
+    remove_dependencies =
+        Resolve<decltype(remove_dependencies)>("hipGraphRemoveDependencies");
+    add_host = Resolve<decltype(add_host)>("hipGraphAddHostNode");
     clone = Resolve<decltype(clone)>("hipGraphClone");
+    instantiate =
+        Resolve<decltype(instantiate)>("hipGraphInstantiateWithFlags");
+    destroy_executable =
+        Resolve<decltype(destroy_executable)>("hipGraphExecDestroy");
+    update = Resolve<decltype(update)>("hipGraphExecUpdate");
     get_nodes = Resolve<decltype(get_nodes)>("hipGraphGetNodes");
     get_edges = Resolve<decltype(get_edges)>("hipGraphGetEdges");
     get_roots = Resolve<decltype(get_roots)>("hipGraphGetRootNodes");
   }
 
   ~GraphApi() {
-    Check(Resolve<decltype(&hipHALDeinit)>("hipHALDeinit")());
+    if (deinitialize) {
+      Check(deinitialize());
+    }
     if (!library.Close()) {
       Require(false, library.error().c_str());
     }
@@ -65,6 +88,8 @@ struct GraphApi {
 
   // Exact build-selected frontend; symbol lookup stays outside timing.
   hrx::hip::testing::HipDso library;
+  // HRX-specific teardown; native HIP uses its ordinary library teardown.
+  decltype(&hipHALDeinit) deinitialize = nullptr;
   // Allocates one empty template in the current context.
   decltype(&hipGraphCreate) create = nullptr;
   // Releases a template outside the measured construction/clone interval.
@@ -73,8 +98,18 @@ struct GraphApi {
   decltype(&hipGraphAddEmptyNode) add_empty = nullptr;
   // Attaches edges after their endpoint nodes exist.
   decltype(&hipGraphAddDependencies) add_dependencies = nullptr;
+  // Removes a final dependency to form a late-rejected update.
+  decltype(&hipGraphRemoveDependencies) remove_dependencies = nullptr;
+  // Publishes a host node whose parameters differ between replacements.
+  decltype(&hipGraphAddHostNode) add_host = nullptr;
   // Creates an independently mutable template from the supplied source.
   decltype(&hipGraphClone) clone = nullptr;
+  // Compiles the source before measuring executable replacement.
+  decltype(&hipGraphInstantiateWithFlags) instantiate = nullptr;
+  // Releases the final executable outside the update interval.
+  decltype(&hipGraphExecDestroy) destroy_executable = nullptr;
+  // Validates, compiles, and publishes a whole-graph replacement.
+  decltype(&hipGraphExecUpdate) update = nullptr;
   // Queries public node count for untimed fixture verification.
   decltype(&hipGraphGetNodes) get_nodes = nullptr;
   // Queries public edge count for untimed fixture verification.
@@ -89,23 +124,35 @@ GraphApi& Api() {
 }
 
 enum class Topology { kIndependent, kChain, kFanIn, kFanOut };
-enum class Edges { kEmbedded, kBatch, kBatchReverse, kBatchShuffled, kSingle };
+enum class Edges {
+  kEmbedded,
+  kBatch,
+  kBatchReverse,
+  kBatchShuffled,
+  kSingle,
+  kSingleReverse,
+  kSingleShuffled,
+  kChunks,
+};
 enum class Operation { kConstruct, kClone, kRoots };
 
 class GraphInput {
  public:
-  GraphInput(size_t count, Topology topology, Edges edges)
+  GraphInput(size_t count, Topology topology, Edges edges,
+             uint32_t* terminal_host_value = nullptr)
       : topology_(topology),
         edges_(edges),
+        terminal_host_value_(terminal_host_value),
         nodes_(count),
         from_(topology == Topology::kIndependent ? 0 : count - 1),
         to_(from_.size()),
         roots_(count),
         edge_order_(from_.size()) {
     std::iota(edge_order_.begin(), edge_order_.end(), size_t{0});
-    if (edges == Edges::kBatchReverse) {
+    if (edges == Edges::kBatchReverse || edges == Edges::kSingleReverse) {
       std::reverse(edge_order_.begin(), edge_order_.end());
-    } else if (edges == Edges::kBatchShuffled) {
+    } else if (edges == Edges::kBatchShuffled ||
+               edges == Edges::kSingleShuffled) {
       std::mt19937 random(0);
       std::shuffle(edge_order_.begin(), edge_order_.end(), random);
     }
@@ -130,7 +177,16 @@ class GraphInput {
           dependency_count = 1;
         }
       }
-      Check(api.add_empty(&nodes_[i], graph, dependencies, dependency_count));
+      if (terminal_host_value_ && i + 1 == nodes_.size()) {
+        hipHostNodeParams parameters = {
+            .fn = +[](void* value) { ++*static_cast<uint32_t*>(value); },
+            .userData = terminal_host_value_,
+        };
+        Check(api.add_host(&nodes_[i], graph, dependencies, dependency_count,
+                           &parameters));
+      } else {
+        Check(api.add_empty(&nodes_[i], graph, dependencies, dependency_count));
+      }
     }
     if (edges_ != Edges::kEmbedded) {
       for (size_t i = 0; i < from_.size(); ++i) {
@@ -140,12 +196,15 @@ class GraphInput {
         to_[i] = topology_ == Topology::kFanIn ? nodes_.back()
                                                : nodes_[edge_index + 1];
       }
-      if (edges_ != Edges::kSingle) {
+      if (edges_ == Edges::kBatch || edges_ == Edges::kBatchReverse ||
+          edges_ == Edges::kBatchShuffled) {
         Check(api.add_dependencies(graph, from_.data(), to_.data(),
                                    from_.size()));
       } else {
-        for (size_t i = 0; i < from_.size(); ++i) {
-          Check(api.add_dependencies(graph, &from_[i], &to_[i], 1));
+        const size_t batch_size = edges_ == Edges::kChunks ? 16 : 1;
+        for (size_t i = 0; i < from_.size(); i += batch_size) {
+          Check(api.add_dependencies(graph, &from_[i], &to_[i],
+                                     std::min(batch_size, from_.size() - i)));
         }
       }
     }
@@ -174,11 +233,27 @@ class GraphInput {
 
   size_t edge_count() const { return from_.size(); }
 
+  // Changes only the final node's predecessor set and returns its error handle.
+  hipGraphNode_t ChangeLastDependency(hipGraph_t graph) {
+    hipGraphNode_t from = topology_ == Topology::kFanOut
+                              ? nodes_.front()
+                              : nodes_[nodes_.size() - 2];
+    hipGraphNode_t to = nodes_.back();
+    if (topology_ == Topology::kIndependent) {
+      Check(Api().add_dependencies(graph, &from, &to, 1));
+    } else {
+      Check(Api().remove_dependencies(graph, &from, &to, 1));
+    }
+    return to;
+  }
+
  private:
   // Dependency shape shared by the construction, clone, and query rows.
   Topology topology_;
   // Public insertion form; all forms construct the same topology.
   Edges edges_;
+  // Optional caller-owned value giving the final host node distinct parameters.
+  uint32_t* terminal_host_value_;
   // Caller-owned node handles, reused across timed template constructions.
   std::vector<hipGraphNode_t> nodes_;
   // Caller-owned predecessor array supplied to additional-edge insertion.
@@ -262,10 +337,134 @@ GRAPH_TEMPLATE_BATCH_ORDER(FanIn, BatchReverse);
 GRAPH_TEMPLATE_BATCH_ORDER(FanIn, BatchShuffled);
 GRAPH_TEMPLATE_BATCH_ORDER(FanOut, BatchReverse);
 GRAPH_TEMPLATE_BATCH_ORDER(FanOut, BatchShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(Chain, SingleReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(Chain, SingleShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(Chain, Chunks);
+GRAPH_TEMPLATE_BATCH_ORDER(FanIn, SingleReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(FanIn, SingleShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(FanIn, Chunks);
+GRAPH_TEMPLATE_BATCH_ORDER(FanOut, SingleReverse);
+GRAPH_TEMPLATE_BATCH_ORDER(FanOut, SingleShuffled);
+GRAPH_TEMPLATE_BATCH_ORDER(FanOut, Chunks);
 
 #undef GRAPH_TEMPLATE_BATCH_ORDER
 
 #undef GRAPH_TEMPLATE_OPERATIONS
 #undef GRAPH_TEMPLATE_BENCHMARK
+
+template <bool accepted, Topology topology, Edges edges,
+          bool reorder_edges = true>
+void GraphUpdate(benchmark::State& state) {
+  auto& api = Api();
+  uint32_t values[3] = {};
+  GraphInput original(state.range(0), topology, Edges::kBatch, &values[0]);
+  GraphInput first(state.range(0), topology, edges, &values[1]);
+  // Embedded predecessors and reverse batch insertion both produce ascending
+  // lists. Reordered rows alternate with the opposite order to compare sets,
+  // including transitions between embedded and separately attached edges.
+  // Ordered rows keep construction order identical across all three templates.
+  constexpr Edges alternate_edges =
+      !reorder_edges
+          ? edges
+          : (edges == Edges::kEmbedded || edges == Edges::kBatchReverse
+                 ? Edges::kBatch
+                 : Edges::kBatchReverse);
+  GraphInput second(state.range(0), topology, alternate_edges, &values[2]);
+  hipGraph_t source = original.Build();
+  hipGraph_t replacements[] = {first.Build(), second.Build()};
+  original.Verify(source);
+  first.Verify(replacements[0]);
+  second.Verify(replacements[1]);
+  hipGraphNode_t expected_errors[2] = {};
+  if constexpr (!accepted) {
+    expected_errors[0] = first.ChangeLastDependency(replacements[0]);
+    expected_errors[1] = second.ChangeLastDependency(replacements[1]);
+  }
+  hipGraphExec_t executable = nullptr;
+  Check(api.instantiate(&executable, source, 0));
+  const auto update = [&](size_t index) {
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult result = hipGraphExecUpdateError;
+    hipError_t error =
+        api.update(executable, replacements[index], &error_node, &result);
+    if constexpr (accepted) {
+      Check(error);
+      Require(result == hipGraphExecUpdateSuccess && error_node == nullptr,
+              "compatible update rejected");
+    } else {
+      Require(error == hipErrorGraphExecUpdateFailure &&
+                  result == hipGraphExecUpdateErrorTopologyChanged &&
+                  error_node == expected_errors[index],
+              "incompatible update lost its failure boundary");
+    }
+  };
+  update(0);
+  update(1);
+  size_t index = 0;
+  for (auto _ : state) {
+    // Alternate real parameter changes, including replacement and old-state
+    // release in timing. No graph is launched by these rows.
+    update(index);
+    index ^= 1;
+  }
+  Check(api.destroy_executable(executable));
+  for (hipGraph_t graph : replacements) {
+    Check(api.destroy(graph));
+  }
+  Check(api.destroy(source));
+  state.counters["nodes"] = state.range(0);
+  state.counters["edges"] = original.edge_count();
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
+#define GRAPH_UPDATE_BENCHMARK(accepted, name, topology, edges)    \
+  BENCHMARK_TEMPLATE(GraphUpdate, accepted, Topology::k##topology, \
+                     Edges::k##edges)                              \
+      ->Name("GraphUpdate/" name "/" #topology "/" #edges)         \
+      ->ArgName("nodes")                                           \
+      ->Arg(16)                                                    \
+      ->Arg(256)                                                   \
+      ->Arg(1024)                                                  \
+      ->Arg(4096)                                                  \
+      ->Unit(benchmark::kMicrosecond)
+
+#define GRAPH_UPDATE_SHAPE(topology, edges)                  \
+  GRAPH_UPDATE_BENCHMARK(true, "Accepted", topology, edges); \
+  GRAPH_UPDATE_BENCHMARK(false, "Rejected", topology, edges)
+
+GRAPH_UPDATE_SHAPE(Independent, Embedded);
+GRAPH_UPDATE_SHAPE(Chain, Embedded);
+GRAPH_UPDATE_SHAPE(Chain, Batch);
+GRAPH_UPDATE_SHAPE(Chain, BatchReverse);
+GRAPH_UPDATE_SHAPE(Chain, BatchShuffled);
+GRAPH_UPDATE_SHAPE(FanIn, Embedded);
+GRAPH_UPDATE_SHAPE(FanIn, Batch);
+GRAPH_UPDATE_SHAPE(FanIn, BatchReverse);
+GRAPH_UPDATE_SHAPE(FanIn, BatchShuffled);
+GRAPH_UPDATE_SHAPE(FanOut, Embedded);
+GRAPH_UPDATE_SHAPE(FanOut, Batch);
+GRAPH_UPDATE_SHAPE(FanOut, BatchReverse);
+GRAPH_UPDATE_SHAPE(FanOut, BatchShuffled);
+
+#undef GRAPH_UPDATE_SHAPE
+#undef GRAPH_UPDATE_BENCHMARK
+
+#define GRAPH_ORDERED_UPDATE_BENCHMARK(topology)                              \
+  BENCHMARK_TEMPLATE(GraphUpdate, true, Topology::k##topology, Edges::kBatch, \
+                     false)                                                   \
+      ->Name("GraphUpdate/AcceptedOrdered/" #topology "/Batch")               \
+      ->ArgName("nodes")                                                      \
+      ->Arg(16)                                                               \
+      ->Arg(256)                                                              \
+      ->Arg(1024)                                                             \
+      ->Arg(4096)                                                             \
+      ->Unit(benchmark::kMicrosecond)
+
+GRAPH_ORDERED_UPDATE_BENCHMARK(Independent);
+GRAPH_ORDERED_UPDATE_BENCHMARK(Chain);
+GRAPH_ORDERED_UPDATE_BENCHMARK(FanIn);
+GRAPH_ORDERED_UPDATE_BENCHMARK(FanOut);
+
+#undef GRAPH_ORDERED_UPDATE_BENCHMARK
 
 }  // namespace

@@ -19574,57 +19574,6 @@ HIPAPI hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
   HIP_RETURN_ERROR(hipSuccess);
 }
 
-// Updates an executable graph with a modified source graph.
-//
-// Parameters:
-//  - hGraphExec: [IN/OUT] Executable graph to update.
-//  - hGraph: [IN] Modified source graph with updates.
-//  - hErrorNode_out: [OUT] Pointer for the first incompatible node.
-//  - updateResult_out: [OUT] Detailed update compatibility result.
-//
-// Returns:
-//  - hipSuccess: Update successful.
-//  - hipErrorInvalidValue: Invalid parameters.
-//  - hipErrorGraphExecUpdateFailure: Update not possible.
-//
-// Synchronization: This operation is synchronous.
-//
-// Update behavior:
-// - Attempts to update executable without full re-instantiation.
-// - Preserves optimizations when possible.
-// - Faster than destroy + re-instantiate.
-// - May fail if topology changed significantly.
-//
-// Supported updates:
-// - Kernel parameters and launch configuration.
-// - Memory copy parameters (source/dest/size).
-// - Host callback function pointers.
-// - Node enable/disable state.
-//
-// Unsupported updates:
-// - Adding or removing nodes.
-// - Changing node types.
-// - Modifying graph topology/dependencies.
-// - Changing device assignments.
-//
-// Update strategy:
-// - Try update first for performance.
-// - Fall back to re-instantiation if update fails.
-// - Check hErrorNode_out for failure location.
-//
-// Performance optimization:
-// - Update is much faster than re-instantiation.
-// - Preserves device-side optimizations.
-// - Ideal for parameter-only changes.
-//
-// Multi-GPU: Updates must preserve device assignments.
-// Cannot move operations between devices.
-//
-// Warning: Updated executable must not be executing during update.
-// Ensure stream synchronization before updating.
-//
-// See also: hipGraphInstantiate, hipGraphLaunch,
-//           hipGraphExecDestroy.
 static hipGraphExecUpdateResult iree_hip_graph_exec_update_result(
     iree_hal_streaming_graph_exec_update_result_t result) {
   switch (result) {
@@ -19648,6 +19597,29 @@ static hipGraphExecUpdateResult iree_hip_graph_exec_update_result(
   }
 }
 
+// Updates an executable graph with a modified source graph.
+//
+// Parameters:
+//  - hGraphExec: [IN/OUT] Executable graph to update.
+//  - hGraph: [IN] Modified source graph with updates.
+//  - hErrorNode_out: [OUT] Pointer for the first incompatible node.
+//  - updateResult_out: [OUT] Detailed update compatibility result.
+//
+// Returns:
+//  - hipSuccess: Update successful.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorGraphExecUpdateFailure: Update not possible.
+//
+// Synchronization: This operation is synchronous.
+//
+// Updates preserve visible node creation order, dependency sets, node types,
+// device assignments, and copy shapes. Dependency insertion order may differ.
+// Accepted updates rebuild private executable state and preserve original node
+// handles and enable states; rejection leaves the previous executable intact.
+// Pending launches retain their captured parameters and resources, so updating
+// does not require joining their streams. Caller-owned pointer lifetimes remain
+// the application's responsibility.
+//
 HIPAPI hipError_t
 hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
                    hipGraphNode_t* hErrorNode_out,
@@ -21652,52 +21624,6 @@ HIPAPI hipError_t hipGraphAddDependencies(hipGraph_t graph,
 }
 
 // Removes dependencies between nodes in a graph.
-static bool iree_hip_graph_dependency_pair_exists(
-    iree_hal_streaming_graph_node_t* from_node,
-    iree_hal_streaming_graph_node_t* to_node) {
-  for (uint32_t i = 0; i < to_node->dependency_count; ++i) {
-    if (to_node->dependencies[i] == from_node) {
-      return true;
-    }
-  }
-  for (const iree_hal_streaming_graph_dependency_t* edge =
-           to_node->additional_dependencies;
-       edge; edge = edge->next) {
-    if (edge->from == from_node) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static void iree_hip_graph_remove_dependency_pair(
-    iree_hal_streaming_graph_t* graph,
-    iree_hal_streaming_graph_node_t* from_node,
-    iree_hal_streaming_graph_node_t* to_node) {
-  for (uint32_t i = 0; i < to_node->dependency_count; ++i) {
-    if (to_node->dependencies[i] != from_node) {
-      continue;
-    }
-    for (uint32_t j = i + 1; j < to_node->dependency_count; ++j) {
-      to_node->dependencies[j - 1] = to_node->dependencies[j];
-    }
-    --to_node->dependency_count;
-    return;
-  }
-
-  iree_hal_streaming_graph_dependency_t** next_edge =
-      &to_node->additional_dependencies;
-  while (*next_edge) {
-    iree_hal_streaming_graph_dependency_t* edge = *next_edge;
-    if (edge->from == from_node) {
-      *next_edge = edge->next;
-      --graph->additional_edge_count;
-      return;
-    }
-    next_edge = &edge->next;
-  }
-}
-
 HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
                                              const hipGraphNode_t* from,
                                              const hipGraphNode_t* to,
@@ -21706,32 +21632,11 @@ HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
   if (!graph) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (numDependencies == 0) {
-    HIP_RETURN_ERROR(hipSuccess);
-  }
-  if (!from || !to) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
-  iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
-  for (size_t i = 0; i < numDependencies; ++i) {
-    iree_hal_streaming_graph_node_t* from_node =
-        (iree_hal_streaming_graph_node_t*)from[i];
-    iree_hal_streaming_graph_node_t* to_node =
-        (iree_hal_streaming_graph_node_t*)to[i];
-    if (!from_node || !to_node || from_node->graph != stream_graph ||
-        to_node->graph != stream_graph ||
-        !iree_hip_graph_dependency_pair_exists(from_node, to_node)) {
-      HIP_RETURN_ERROR(hipErrorInvalidValue);
-    }
-  }
-
-  for (size_t i = 0; i < numDependencies; ++i) {
-    iree_hip_graph_remove_dependency_pair(
-        stream_graph, (iree_hal_streaming_graph_node_t*)from[i],
-        (iree_hal_streaming_graph_node_t*)to[i]);
-  }
-
+  HIP_RETURN_STATUS(iree_hal_streaming_graph_remove_dependencies(
+                        (iree_hal_streaming_graph_t*)graph,
+                        (iree_hal_streaming_graph_node_t**)from,
+                        (iree_hal_streaming_graph_node_t**)to, numDependencies),
+                    hipErrorInvalidValue);
   HIP_RETURN_ERROR(hipSuccess);
 }
 
@@ -21768,7 +21673,7 @@ HIPAPI hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
       }
 
       for (const iree_hal_streaming_graph_dependency_t* edge =
-               node->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(node);
            edge; edge = edge->next) {
         if (iree_hip_graph_edge_is_hidden(edge->from, node)) {
           continue;
@@ -21811,7 +21716,7 @@ static bool iree_hip_graph_node_is_root(
     }
   }
   for (const iree_hal_streaming_graph_dependency_t* dependency =
-           node->additional_dependencies;
+           iree_hal_streaming_graph_additional_dependencies(node);
        dependency; dependency = dependency->next) {
     if (!iree_hip_graph_node_is_hidden(dependency->from)) {
       return false;
@@ -21897,7 +21802,7 @@ HIPAPI hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node,
     ++dependency_count;
   }
   for (const iree_hal_streaming_graph_dependency_t* edge =
-           stream_node->additional_dependencies;
+           iree_hal_streaming_graph_additional_dependencies(stream_node);
        edge; edge = edge->next) {
     if (iree_hip_graph_edge_is_hidden(edge->from, stream_node)) {
       continue;
@@ -21962,7 +21867,7 @@ HIPAPI hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
       }
 
       for (const iree_hal_streaming_graph_dependency_t* edge =
-               candidate->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(candidate);
            edge; edge = edge->next) {
         if (edge->from != stream_node) {
           continue;
@@ -22229,7 +22134,7 @@ static int iree_hip_graph_debug_write_dot_graph(
       }
 
       for (const iree_hal_streaming_graph_dependency_t* edge =
-               node->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(node);
            edge; edge = edge->next) {
         if (iree_hip_graph_edge_is_hidden(edge->from, node)) {
           continue;

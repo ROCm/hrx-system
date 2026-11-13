@@ -59,7 +59,7 @@ iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
             node->dependencies[j], node, arena, out_edges);
       }
       for (const iree_hal_streaming_graph_dependency_t* dependency =
-               node->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(node);
            dependency && iree_status_is_ok(status);
            dependency = dependency->next) {
         status = iree_hal_streaming_graph_extend_copy_dependency(
@@ -88,7 +88,7 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
       analysis.offsets[index + 1] = node->dependency_count;
       edge_count += node->dependency_count;
       for (const iree_hal_streaming_graph_dependency_t* dependency =
-               node->additional_dependencies;
+               iree_hal_streaming_graph_additional_dependencies(node);
            dependency; dependency = dependency->next) {
         ++analysis.offsets[index + 1];
         ++edge_count;
@@ -134,7 +134,7 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
       is_topologically_ordered &= node->dependencies[j]->node_index < i;
     }
     for (const iree_hal_streaming_graph_dependency_t* dependency =
-             node->additional_dependencies;
+             iree_hal_streaming_graph_additional_dependencies(node);
          dependency; dependency = dependency->next) {
       analysis.dependencies[analysis.order[i]++] = dependency->from->node_index;
       is_topologically_ordered &= dependency->from->node_index < i;

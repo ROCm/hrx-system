@@ -931,6 +931,58 @@ TEST(GraphTest, NodeCreationRejectsDuplicateDependenciesWithoutMutation) {
   EXPECT_EQ(count, state.graph()->node_count);
 }
 
+TEST(GraphTest, DependencyValidationRestoresPredecessorsBeforeRetry) {
+  CaptureTransactionTestState state;
+  std::array<iree_hal_streaming_graph_node_t*, 65> predecessors;
+  for (auto& predecessor : predecessors) {
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+        state.graph(), nullptr, 0, &predecessor));
+    predecessor->flags = IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED;
+  }
+  iree_hal_streaming_graph_node_t* foreign_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.second_graph(), nullptr, 0, &foreign_node));
+  iree_hal_streaming_graph_node_t* removed_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(state.graph(), nullptr,
+                                                         0, &removed_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_destroy_node(removed_node));
+
+  auto dependencies = predecessors;
+  const auto node_count = state.graph()->node_count;
+  const auto used_size = state.graph()->arena.used_allocation_size;
+  for (auto* invalid :
+       {predecessors.front(), predecessors[32], predecessors[63], foreign_node,
+        removed_node, static_cast<iree_hal_streaming_graph_node_t*>(nullptr)}) {
+    dependencies.back() = invalid;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_streaming_graph_add_empty_node(
+            state.graph(), dependencies.data(), dependencies.size(), nullptr));
+    EXPECT_EQ(node_count, state.graph()->node_count);
+    EXPECT_EQ(used_size, state.graph()->arena.used_allocation_size);
+    for (auto* predecessor : predecessors) {
+      EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED,
+                predecessor->flags);
+    }
+    EXPECT_EQ(0, foreign_node->flags);
+    EXPECT_EQ(nullptr, removed_node->graph);
+  }
+
+  // Reuse all the predecessors after every failed validation. Both successful
+  // construction and repeated construction must leave their flags unchanged.
+  for (size_t attempt = 0; attempt < 2; ++attempt) {
+    iree_hal_streaming_graph_node_t* join = nullptr;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+        state.graph(), predecessors.data(), predecessors.size(), &join));
+    ASSERT_EQ(predecessors.size(), join->dependency_count);
+    for (size_t i = 0; i < predecessors.size(); ++i) {
+      EXPECT_EQ(predecessors[i], join->dependencies[i]);
+      EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_NODE_FLAG_DISABLED,
+                predecessors[i]->flags);
+    }
+  }
+}
+
 TEST(GraphTest, DependencyBatchOrderPreservesDuplicateValidation) {
   // Each shape exercises both endpoint identities: a chain, fan-in, and
   // fan-out.
