@@ -187,6 +187,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/driver/amd/fabric:event",
         "//runtime/src/iree/hal/driver/amd/fabric:memory",
         "//runtime/src/iree/hal/driver/amd/gpu:code_queue",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/aql:packet",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

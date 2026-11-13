@@ -432,7 +432,7 @@ TEST_P(CodeTest, ReplacesCompletedInstructionsAtSameAddress) {
           "publish mapped code writes"));
     }
     IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_publish(
-        publisher_, &memory_,
+        publisher_, iree_infinite_timeout(), &memory_,
         upload ? iree_make_const_byte_span(contents, length)
                : iree_const_byte_span_empty()));
     std::fill_n(output, kCount + 1, 0xDEADBEEFu);

@@ -124,6 +124,15 @@ including the Windows native submission path, retain native events and status
 queries and do not use this budget. The setting does not alter process power
 policy, add a thread, or change submission and retirement ordering.
 
+`code_publication_timeout_ms` bounds each synchronous code publication
+(default 60,000 ms). The loader establishes one absolute deadline before host
+publication and carries it across every native upload chunk. While accepted
+work remains pending, native events are treated as wake hints and authoritative
+retirement is rechecked no later than every five milliseconds. Deadline expiry
+fails the device and preserves the target allocation until native execution is
+proven stopped; it never resubmits the accepted command. Setting zero permits
+only the immediate checked retirement observation after submission.
+
 Each materialized device retains the fabric independently. Releasing the
 registry and driver leaves those devices operational. The fabric owns the native
 instance and its discovery snapshot; engine contexts own their native children.

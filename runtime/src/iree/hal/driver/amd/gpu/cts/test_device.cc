@@ -95,7 +95,8 @@ void GpuNativeTest::PublishCode(uint32_t compute_family_ordinal,
       context_, compute_family_ordinal, mode, &control, iree_allocator_system(),
       &queue);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_code_publish(context_, queue, memory, upload);
+    status = iree_hal_amd_gpu_code_publish(
+        context_, queue, iree_infinite_timeout(), memory, upload);
   }
   IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
       iree_hal_amd_gpu_code_queue_free(queue), "join code upload queue"));

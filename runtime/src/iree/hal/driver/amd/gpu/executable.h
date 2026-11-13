@@ -35,6 +35,8 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   const iree_hal_amd_fabric_memory_options_t* memory;
   // Device-owned code publisher, present for unmapped code or AQL caches.
   iree_hal_amd_gpu_code_queue_t* code_queue;
+  // Relative synchronous publication budget, converted once by each load.
+  iree_timeout_t code_publication_timeout;
   // Group-local placement guarantee established with the native memory policy.
   iree_hal_pool_placement_t placement;
   // Borrowed device capacity notification, live through global buffer uses.

@@ -310,6 +310,9 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
                                       IREE_SV("completion_spin_ns"))) {
       value = &options.completion_spin_ns;
     } else if (iree_string_view_equal(params[i].key,
+                                      IREE_SV("code_publication_timeout_ms"))) {
+      value = &options.code_publication_timeout_ms;
+    } else if (iree_string_view_equal(params[i].key,
                                       IREE_SV("failure_timeout_ms"))) {
       value = &options.failure_timeout_ms;
     }

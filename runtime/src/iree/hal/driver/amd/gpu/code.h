@@ -40,10 +40,11 @@ iree_status_t iree_hal_amd_gpu_code_allocate(
 // temporary native allocation remains borrowed after failure. An accepted but
 // unretired failure transfers memory's existing handles into the code publisher
 // until proven native stop. Executable rollback cannot free that native
-// operand. Mapped code allocates no upload metadata.
+// operand. Mapped code allocates no upload metadata. |timeout| is converted to
+// an absolute deadline before any host flush or native publication begins.
 iree_status_t iree_hal_amd_gpu_code_publish(
     iree_hal_amd_gpu_context_t* context, iree_hal_amd_gpu_code_queue_t* queue,
-    iree_hal_amd_fabric_memory_t* memory,
+    iree_timeout_t timeout, iree_hal_amd_fabric_memory_t* memory,
     iree_hal_amd_gpu_code_upload_t** upload);
 
 // Releases ordinary temporary host bytes, never borrowed by native execution.

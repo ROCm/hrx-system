@@ -14,6 +14,7 @@
 
 #include "iree/hal/driver/amd/fabric/event.h"
 #include "iree/hal/driver/amd/gpu/code_queue.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/packet.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -34,6 +35,29 @@ class CodeTest : public ::testing::Test {
     bool mapped = false;
     // Calling thread that acquired this native backing.
     std::thread::id allocation_thread;
+  };
+
+  struct NativeCache {
+    // Host-only native dependency storage; no packet is executed.
+    alignas(64) std::array<uint8_t, 4096> ring = {};
+    // Native queue read frontier, left unconsumed until inactivation.
+    uint64_t read_index = 0;
+    // Host producer write frontier.
+    uint64_t write_index = 0;
+    // Host-only doorbell operand.
+    uint64_t doorbell = 0;
+    // USER completion predicate written while simulating a lost notification.
+    iree_hal_amd_gpu_aql_signal_t* signal = nullptr;
+    // Native event result returned after each simulated wait.
+    amdf_status_t event_wait_status = AMDF_STATUS_OK;
+    // Whether the first wait observes completion without a notification.
+    bool complete_during_wait = false;
+    // Relative native timeout received by the most recent event wait.
+    uint64_t wait_timeout_ns = 0;
+    // Number of native event waits.
+    uint32_t wait_count = 0;
+    // Number of native access-cessation operations.
+    uint32_t stops = 0;
   };
 
   static Memory& GetMemory(amdf_memory_t* memory) {
@@ -275,8 +299,106 @@ class CodeTest : public ::testing::Test {
     return status;
   }
 
-  iree_status_t Publish() {
-    return iree_hal_amd_gpu_code_publish(&context_, queue_, &code_, &upload_);
+  iree_status_t AllocateUserCache(amdf_status_t event_wait_status,
+                                  bool complete_during_wait,
+                                  iree_hal_amd_gpu_code_queue_t** out_cache) {
+    *out_cache = nullptr;
+    resident_.host_access = control_.host_access;
+    context_.target_info.gfx_ip.major = 9;
+    family_.command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
+    // Cache publication consumes opaque aligned device addresses. This fixture
+    // does not execute uploads through these independent native addresses.
+    api_.memory_query_address = [](amdf_memory_t* memory, uint32_t,
+                                   amdf_memory_address_kind_t,
+                                   uint64_t* address) {
+      *address = iree_align_uint64(
+          reinterpret_cast<uintptr_t>(GetMemory(memory).bytes.data()), 64);
+      return AMDF_STATUS_OK;
+    };
+    IREE_RETURN_IF_ERROR(Allocate());
+
+    native_cache_.event_wait_status = event_wait_status;
+    native_cache_.complete_during_wait = complete_during_wait;
+    context_.device = reinterpret_cast<amdf_device_t*>(&native_cache_);
+    gpu_.event_create = [](amdf_device_t* device,
+                           const amdf_gpu_event_create_info_t*,
+                           amdf_gpu_event_t** out_event) {
+      *out_event = reinterpret_cast<amdf_gpu_event_t*>(device);
+      return AMDF_STATUS_OK;
+    };
+    gpu_.event_query_info = [](amdf_gpu_event_t*, amdf_gpu_event_info_t* info) {
+      info->format = AMDF_GPU_EVENT_FORMAT_KFD_SIGNAL;
+      info->format_version = 1;
+      return AMDF_STATUS_OK;
+    };
+    gpu_.event_wait = [](amdf_gpu_event_t* event, uint64_t timeout_ns) {
+      auto* native = reinterpret_cast<NativeCache*>(event);
+      native->wait_timeout_ns = timeout_ns;
+      ++native->wait_count;
+      if (native->complete_during_wait) {
+        iree_atomic_store(
+            reinterpret_cast<iree_atomic_int64_t*>(&native->signal->value), 0,
+            iree_memory_order_release);
+        native->complete_during_wait = false;
+      }
+      return native->event_wait_status;
+    };
+    gpu_.event_signal = [](amdf_gpu_event_t*) { return AMDF_STATUS_OK; };
+    gpu_.event_destroy = [](amdf_gpu_event_t*) { return AMDF_STATUS_OK; };
+    gpu_.user_queue_create = [](amdf_device_t* device,
+                                const amdf_gpu_user_queue_create_info_t*,
+                                amdf_user_queue_t** out_queue) {
+      *out_queue = reinterpret_cast<amdf_user_queue_t*>(device);
+      return AMDF_STATUS_OK;
+    };
+    api_.user_queue_query_info = [](amdf_user_queue_t*,
+                                    amdf_user_queue_info_t*) {
+      return AMDF_STATUS_OK;
+    };
+    api_.user_queue_map = [](amdf_user_queue_t* queue, amdf_device_t*,
+                             amdf_user_queue_mapping_t** out_mapping) {
+      *out_mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(queue);
+      return AMDF_STATUS_OK;
+    };
+    api_.user_queue_mapping_query_info =
+        [](amdf_user_queue_mapping_t* mapping,
+           amdf_user_queue_mapping_info_t* info) {
+          auto* native = reinterpret_cast<NativeCache*>(mapping);
+          info->ring_address = reinterpret_cast<uintptr_t>(native->ring.data());
+          info->ring_byte_length = native->ring.size();
+          info->read_index_address =
+              reinterpret_cast<uintptr_t>(&native->read_index);
+          info->write_index_address =
+              reinterpret_cast<uintptr_t>(&native->write_index);
+          info->doorbell_address =
+              reinterpret_cast<uintptr_t>(&native->doorbell);
+          info->index_bits = info->doorbell_bits = 64;
+          return AMDF_STATUS_OK;
+        };
+    api_.user_queue_wait_consumed = [](amdf_user_queue_t*, uint64_t, uint64_t,
+                                       uint64_t) {
+      ADD_FAILURE() << "inactivated cache queue must not wait for firmware";
+      return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+    };
+    api_.user_queue_mapping_destroy = [](amdf_user_queue_mapping_t*) {
+      return AMDF_STATUS_OK;
+    };
+    api_.user_queue_destroy = [](amdf_user_queue_t*) { return AMDF_STATUS_OK; };
+    gpu_.user_queue_inactivate = [](amdf_user_queue_t* queue) {
+      ++reinterpret_cast<NativeCache*>(queue)->stops;
+      return AMDF_STATUS_OK;
+    };
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_code_queue_allocate(
+        &context_, 0, AMDF_QUEUE_PUBLICATION_MODE_USER, &control_,
+        iree_allocator_system(), out_cache));
+    native_cache_.signal = reinterpret_cast<iree_hal_amd_gpu_aql_signal_t*>(
+        memories_[2].bytes.data());
+    return iree_ok_status();
+  }
+
+  iree_status_t Publish(iree_timeout_t timeout = iree_infinite_timeout()) {
+    return iree_hal_amd_gpu_code_publish(&context_, queue_, timeout, &code_,
+                                         &upload_);
   }
 
   void Stop() {
@@ -335,6 +457,8 @@ class CodeTest : public ::testing::Test {
   iree_byte_span_t contents_ = {};
   // Production compute bootstrap and instruction-cache publisher.
   iree_hal_amd_gpu_code_queue_t* queue_ = nullptr;
+  // USER publication dependencies used to model native event outcomes.
+  NativeCache native_cache_;
 };
 
 TEST_F(CodeTest, MappedLocalCodeNeedsNoUpload) {
@@ -346,8 +470,8 @@ TEST_F(CodeTest, MappedLocalCodeNeedsNoUpload) {
   EXPECT_EQ(acquisitions_, 2u);
   EXPECT_EQ(memories_[1].flags, AMDF_MEMORY_FLAG_DEVICE_LOCAL);
   EXPECT_EQ(memories_[1].allocation_thread, std::this_thread::get_id());
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_code_publish(&context_, nullptr, &code_, &upload_));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_code_publish(
+      &context_, nullptr, iree_infinite_timeout(), &code_, &upload_));
   EXPECT_EQ(submitted_, 0u);
 }
 
@@ -420,6 +544,22 @@ TEST_F(CodeTest, AcceptedFailureKeepsTargetUntilNativeStop) {
   EXPECT_FALSE(memories_[1].allocated);
 }
 
+TEST_F(CodeTest, PublicationDeadlineKeepsTargetUntilNativeStop) {
+  IREE_ASSERT_OK(Allocate());
+  auto_retire_ = false;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEADLINE_EXCEEDED,
+                        Publish(iree_immediate_timeout()));
+  EXPECT_EQ(upload_, nullptr);
+  EXPECT_EQ(code_.handle, nullptr);
+  EXPECT_EQ(code_.mapping, nullptr);
+  EXPECT_EQ(code_.contents.data, nullptr);
+  EXPECT_EQ(code_.info.byte_length, 12352u);
+  EXPECT_EQ(submitted_, 1u);
+  EXPECT_EQ(retired_, 0u);
+  EXPECT_TRUE(memories_[1].allocated);
+  Stop();
+}
+
 TEST_F(CodeTest, CheckedNativeFailureOverridesRetirementPosition) {
   IREE_ASSERT_OK(Allocate());
   retirement_status_ = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
@@ -454,106 +594,44 @@ TEST_F(CodeTest, ClosingWakesPendingLoaderBeforeNativeStop) {
 }
 
 TEST_F(CodeTest, FailedCachePublicationKeepsItsTargetUntilNativeStop) {
-  resident_.host_access = control_.host_access;
-  context_.target_info.gfx_ip.major = 9;
-  family_.command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
-  // Cache publication consumes opaque aligned device addresses. This fixture
-  // does not execute uploads through these independent native addresses.
-  api_.memory_query_address = [](amdf_memory_t* memory, uint32_t,
-                                 amdf_memory_address_kind_t,
-                                 uint64_t* address) {
-    *address = iree_align_uint64(
-        reinterpret_cast<uintptr_t>(GetMemory(memory).bytes.data()), 64);
-    return AMDF_STATUS_OK;
-  };
-  IREE_ASSERT_OK(Allocate());
-  struct NativeCache {
-    // Host-only native dependency storage; no packet is executed.
-    alignas(64) std::array<uint8_t, 4096> ring = {};
-    // Native queue read frontier, left unconsumed across failure.
-    uint64_t read_index = 0;
-    // Host producer write frontier.
-    uint64_t write_index = 0;
-    // Host-only doorbell operand.
-    uint64_t doorbell = 0;
-    // Number of native access-cessation operations.
-    uint32_t stops = 0;
-  } native;
-  context_.device = reinterpret_cast<amdf_device_t*>(&native);
-  gpu_.event_create = [](amdf_device_t* device,
-                         const amdf_gpu_event_create_info_t*,
-                         amdf_gpu_event_t** out_event) {
-    *out_event = reinterpret_cast<amdf_gpu_event_t*>(device);
-    return AMDF_STATUS_OK;
-  };
-  gpu_.event_query_info = [](amdf_gpu_event_t*, amdf_gpu_event_info_t* info) {
-    info->format = AMDF_GPU_EVENT_FORMAT_KFD_SIGNAL;
-    info->format_version = 1;
-    return AMDF_STATUS_OK;
-  };
-  gpu_.event_wait = [](amdf_gpu_event_t*, uint64_t) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-  };
-  gpu_.event_signal = [](amdf_gpu_event_t*) { return AMDF_STATUS_OK; };
-  gpu_.event_destroy = [](amdf_gpu_event_t*) { return AMDF_STATUS_OK; };
-  gpu_.user_queue_create = [](amdf_device_t* device,
-                              const amdf_gpu_user_queue_create_info_t*,
-                              amdf_user_queue_t** out_queue) {
-    *out_queue = reinterpret_cast<amdf_user_queue_t*>(device);
-    return AMDF_STATUS_OK;
-  };
-  api_.user_queue_query_info = [](amdf_user_queue_t*, amdf_user_queue_info_t*) {
-    return AMDF_STATUS_OK;
-  };
-  api_.user_queue_map = [](amdf_user_queue_t* queue, amdf_device_t*,
-                           amdf_user_queue_mapping_t** out_mapping) {
-    *out_mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(queue);
-    return AMDF_STATUS_OK;
-  };
-  api_.user_queue_mapping_query_info =
-      [](amdf_user_queue_mapping_t* mapping,
-         amdf_user_queue_mapping_info_t* info) {
-        auto* native = reinterpret_cast<NativeCache*>(mapping);
-        info->ring_address = reinterpret_cast<uintptr_t>(native->ring.data());
-        info->ring_byte_length = native->ring.size();
-        info->read_index_address =
-            reinterpret_cast<uintptr_t>(&native->read_index);
-        info->write_index_address =
-            reinterpret_cast<uintptr_t>(&native->write_index);
-        info->doorbell_address = reinterpret_cast<uintptr_t>(&native->doorbell);
-        info->index_bits = info->doorbell_bits = 64;
-        return AMDF_STATUS_OK;
-      };
-  api_.user_queue_wait_consumed = [](amdf_user_queue_t*, uint64_t, uint64_t,
-                                     uint64_t) {
-    ADD_FAILURE() << "inactivated cache queue must not wait for firmware";
-    return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-  };
-  api_.user_queue_mapping_destroy = [](amdf_user_queue_mapping_t*) {
-    return AMDF_STATUS_OK;
-  };
-  api_.user_queue_destroy = [](amdf_user_queue_t*) { return AMDF_STATUS_OK; };
-  gpu_.user_queue_inactivate = [](amdf_user_queue_t* queue) {
-    ++reinterpret_cast<NativeCache*>(queue)->stops;
-    return AMDF_STATUS_OK;
-  };
   iree_hal_amd_gpu_code_queue_t* cache = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_allocate(
-      &context_, 0, AMDF_QUEUE_PUBLICATION_MODE_USER, &control_,
-      iree_allocator_system(), &cache));
+  IREE_ASSERT_OK(AllocateUserCache(
+      amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST), false, &cache));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
                         iree_hal_amd_gpu_code_queue_publish(
-                            cache, &code_, iree_const_byte_span_empty()));
+                            cache, iree_infinite_timeout(), &code_,
+                            iree_const_byte_span_empty()));
   EXPECT_EQ(code_.handle, nullptr);
   EXPECT_TRUE(memories_[1].allocated);
   amdf_status_t native_status = AMDF_STATUS_OK;
   EXPECT_TRUE(
       iree_hal_amd_gpu_code_queue_try_inactivate(cache, &native_status));
   EXPECT_EQ(native_status, AMDF_STATUS_OK);
-  EXPECT_EQ(native.stops, 1u);
+  EXPECT_EQ(native_cache_.stops, 1u);
   EXPECT_TRUE(memories_[1].allocated);
   EXPECT_EQ(iree_hal_amd_gpu_code_queue_free(cache), AMDF_STATUS_OK);
   EXPECT_FALSE(memories_[1].allocated);
+  EXPECT_FALSE(memories_[2].allocated);
+}
+
+TEST_F(CodeTest, UserPublicationRechecksAfterNativeEventExpiry) {
+  iree_hal_amd_gpu_code_queue_t* cache = nullptr;
+  IREE_ASSERT_OK(AllocateUserCache(
+      amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED), true, &cache));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_publish(
+      cache, iree_infinite_timeout(), &code_, iree_const_byte_span_empty()));
+  EXPECT_EQ(native_cache_.wait_count, 1u);
+  EXPECT_EQ(native_cache_.write_index, 1u);
+  EXPECT_GT(native_cache_.wait_timeout_ns, 0u);
+  EXPECT_LE(native_cache_.wait_timeout_ns, 5000000u);
+  EXPECT_NE(code_.handle, nullptr);
+  EXPECT_TRUE(memories_[1].allocated);
+  amdf_status_t native_status = AMDF_STATUS_OK;
+  EXPECT_TRUE(
+      iree_hal_amd_gpu_code_queue_try_inactivate(cache, &native_status));
+  EXPECT_EQ(native_status, AMDF_STATUS_OK);
+  EXPECT_EQ(native_cache_.stops, 1u);
+  EXPECT_EQ(iree_hal_amd_gpu_code_queue_free(cache), AMDF_STATUS_OK);
   EXPECT_FALSE(memories_[2].allocated);
 }
 
