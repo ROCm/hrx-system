@@ -196,6 +196,7 @@ void iree_hal_amd_gpu_aql_queue_destroy(iree_hal_queue_t* base) {
   iree_slim_mutex_deinitialize(&queue->pending.completion_mutex);
   iree_async_semaphore_wait_context_deinitialize(&queue->wait_context);
   iree_hal_amd_gpu_capture_pool_deinitialize(&queue->captures);
+  iree_allocator_free(queue->host_allocator, queue->producer.preparation.data);
   uint64_t* frontier = queue->producer.frontier;
   if (frontier != (void*)(queue->issued + queue->options.retirement_capacity)) {
     iree_allocator_free(queue->host_allocator, frontier);

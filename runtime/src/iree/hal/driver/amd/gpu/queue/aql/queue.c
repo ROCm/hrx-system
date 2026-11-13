@@ -694,6 +694,8 @@ static void iree_hal_amd_gpu_aql_trim_storage(
   iree_hal_amd_gpu_byte_storage_pool_trim(queue->context, &queue->values);
   iree_hal_amd_gpu_signal_cache_trim(queue->context, 1, queue->options.signals);
   iree_hal_amd_gpu_capture_pool_trim(&queue->captures);
+  iree_allocator_free(queue->host_allocator, queue->producer.preparation.data);
+  queue->producer.preparation = iree_byte_span_empty();
 }
 
 static void iree_hal_amd_gpu_aql_expand_frontiers(

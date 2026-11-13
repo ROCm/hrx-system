@@ -129,6 +129,9 @@ struct iree_hal_amd_gpu_aql_queue_t {
     uint32_t queue_count;
     // Host-complete publication prefix, released before terminal headers.
     iree_atomic_int64_t count;
+    // CPU-only replay workspace, reused under exclusive publication. Its
+    // capacity is independent of all GPU-visible storage and execution credit.
+    iree_byte_span_t preparation;
   } producer;
   // Completion credit is isolated from ordinary publisher writes.
   struct {
