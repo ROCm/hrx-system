@@ -175,3 +175,21 @@ static_assert(__is_same(decltype(__LDBL_NORM_MAX__), long double));
 static_assert(__is_same(decltype(__LDBL_MIN__), long double));
 static_assert(__is_same(decltype(__LDBL_DENORM_MIN__), long double));
 static_assert(__is_same(decltype(__LDBL_EPSILON__), long double));
+
+// ====
+// RUN: verify
+// Presence checks do not expand a predefine; undefinition still masks it.
+#if !defined(__loom__) || !defined(__LDBL_MANT_DIG__) || !defined(__LDBL_MAX__)
+#error missing source model definitions
+#endif
+#undef __LDBL_MAX__
+#if defined(__LDBL_MAX__)
+#error undefined source predefine was restored
+#endif
+#define __LDBL_MAX__ 7
+static_assert(__LDBL_MAX__ == 7);
+static_assert(__LDBL_MANT_DIG__ == 53);
+#undef __LDBL_MANT_DIG__
+#if defined(__LDBL_MANT_DIG__)
+#error expanded source predefine was restored
+#endif
