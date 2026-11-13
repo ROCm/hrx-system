@@ -264,11 +264,17 @@ class CiTest(unittest.TestCase):
                         "Test", ("//suite:test",), bazel_options=(option,)
                     )
 
-    def test_bazel_test_builds_only_selected_test_rules(self):
+    def test_bazel_test_selects_requested_build_scope(self):
         test_step = ci.bazel_test_step("Test", ("//suite/...",))
+        integration_step = ci.bazel_test_step(
+            "Integrate",
+            ("//suite/...",),
+            build_all_requested_targets=True,
+        )
         build_step = ci.bazel_build_step("Build", ("//suite/...",))
 
         self.assertIn("--build_tests_only", test_step.argv)
+        self.assertNotIn("--build_tests_only", integration_step.argv)
         self.assertNotIn("--build_tests_only", build_step.argv)
 
     def test_platform_selection_applies_to_each_build_phase(self):
@@ -331,6 +337,65 @@ class CiTest(unittest.TestCase):
                     self.assertEqual(
                         ci.platform_coverage_build_steps(step), expected_steps
                     )
+
+    def test_bazel_platform_coverage_builds_and_tests_one_graph_without_xfails(self):
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"IREE_CI_PLATFORM_COVERAGE": "1"},
+                clear=True,
+            ),
+            mock.patch.object(ci.sys, "platform", "linux"),
+        ):
+            profiles = {
+                "xdna": ci.xdna_steps(("//selected/...",), None),
+                "amd-client": ci.amd_client_steps(("//selected/...",), None),
+                "vulkan": ci.vulkan_steps(("//selected/...",)),
+            }
+
+        for profile, steps in profiles.items():
+            with self.subTest(profile=profile):
+                self.assertFalse(
+                    any(step.argv[2:4] == ("bazel", "build") for step in steps)
+                )
+                test_steps = [
+                    step for step in steps if step.argv[2:4] == ("bazel", "test")
+                ]
+                self.assertEqual(len(test_steps), 1)
+                self.assertNotIn("--build_tests_only", test_steps[0].argv)
+
+    def test_bazel_platform_coverage_preserves_compile_only_xfails(self):
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"IREE_CI_PLATFORM_COVERAGE": "1"},
+                clear=True,
+            ),
+            mock.patch.object(ci.sys, "platform", "linux"),
+            mock.patch.object(
+                ci_config,
+                "VULKAN_XFAIL_TARGETS",
+                ("-//selected:xfail",),
+            ),
+        ):
+            profiles = {
+                "cpu": ci.cpu_steps(("//selected/...",)),
+                "cpu-asan": ci.cpu_config_steps(("//selected/...",), "asan"),
+                "amdgpu": ci.amdgpu_steps(("//selected/...",), "gfx11-generic"),
+                "vulkan": ci.vulkan_steps(("//selected/...",)),
+            }
+
+        for profile, steps in profiles.items():
+            with self.subTest(profile=profile):
+                build_steps = [
+                    step for step in steps if step.argv[2:4] == ("bazel", "build")
+                ]
+                test_steps = [
+                    step for step in steps if step.argv[2:4] == ("bazel", "test")
+                ]
+                self.assertEqual(len(build_steps), 1)
+                self.assertEqual(len(test_steps), 1)
+                self.assertIn("--build_tests_only", test_steps[0].argv)
 
     def test_native_amd_engine_composition_matches_between_build_systems(self):
         for drivers, gpu, xdna in (
@@ -1047,7 +1112,7 @@ class CiTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "repository-wide"):
             ci.steps_from_args(args)
 
-    def test_bazel_repository_integration_tests_then_builds_complete_graph(self):
+    def test_bazel_repository_integration_builds_and_tests_one_complete_graph(self):
         args = ci.parse_arguments(["iree-bazel-repository-integration"])
         for platform_coverage in ("0", "1"):
             with (
@@ -1058,31 +1123,30 @@ class CiTest(unittest.TestCase):
                     clear=True,
                 ),
             ):
-                configure, test, build = ci.steps_from_args(args)
+                configure, test = ci.steps_from_args(args)
                 self.assertEqual(configure.argv[2:4], ("bazel", "configure"))
                 self.assertEqual(test.argv[2:4], ("bazel", "test"))
-                self.assertIn("--build_tests_only", test.argv)
+                self.assertNotIn("--build_tests_only", test.argv)
                 self.assertNotIn("--//loom/config:shared_tools", test.argv)
                 self.assertEqual(
                     "--test_lang_filters=-py" in test.argv, platform_coverage == "0"
                 )
-                self.assertEqual(build.argv[2:4], ("bazel", "build"))
-                self.assertIn("//...", build.argv)
-                self.assertIn("--nobuild_runfile_links", build.argv)
+                self.assertIn("//...", test.argv)
+                self.assertIn("--nobuild_runfile_links", test.argv)
 
     def test_bazel_repository_integration_isolates_device_probe(self):
         args = ci.parse_arguments(
             ["iree-bazel-repository-integration", "--amdgpu-target", "gfx11-generic"]
         )
         with mock.patch.dict(ci.os.environ, {"HRX_ROCM_ROOT": "/tmp/rocm-root"}):
-            configure, _test, build, device_build = ci.steps_from_args(args)
+            configure, test, device_build = ci.steps_from_args(args)
 
         self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure.argv)
-        self.assertIn("//...", build.argv)
+        self.assertIn("//...", test.argv)
         self.assertFalse(
             any(
                 arg.startswith("--//runtime/src/iree/hal/driver/amd/gpu:targets=")
-                for arg in build.argv
+                for arg in test.argv
             )
         )
         self.assertNotIn("//...", device_build.argv)
