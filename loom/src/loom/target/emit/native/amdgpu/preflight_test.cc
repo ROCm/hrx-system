@@ -51,7 +51,6 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &table_arena_);
-    loom_low_storage_layout_builder_initialize(&storage_layout_builder_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -156,17 +155,6 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     };
   }
 
-  loom_value_id_t Reserve(loom_storage_space_t space, int64_t byte_length,
-                          int64_t byte_alignment) {
-    loom_op_t* op = nullptr;
-    IREE_CHECK_OK(loom_low_storage_reserve_build(
-        &body_builder_, byte_length, byte_alignment, loom_type_storage(space),
-        LOOM_LOCATION_UNKNOWN, &op));
-    IREE_CHECK_OK(loom_low_storage_layout_builder_append(
-        module_, op, &table_arena_, &storage_layout_builder_));
-    return loom_low_storage_reserve_storage(op);
-  }
-
   loom_low_schedule_table_t Schedule(
       const loom_low_descriptor_set_t* descriptor_set) {
     loom_low_schedule_table_t schedule = {
@@ -174,9 +162,6 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
         .function_op = function_op_,
         .target = ResolvedTarget(descriptor_set),
     };
-    IREE_CHECK_OK(loom_low_storage_layout_builder_finish(
-        &storage_layout_builder_, &table_arena_,
-        &schedule.requirements.storage_layout));
     return schedule;
   }
 
@@ -195,7 +180,6 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t table_arena_;
-  loom_low_storage_layout_builder_t storage_layout_builder_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
   loom_op_t* function_op_ = nullptr;
@@ -279,53 +263,6 @@ TEST_F(AmdgpuNativePreflightTest, UsesCompleteRetainedRegisterExtents) {
   EXPECT_EQ(preflight.error_count, 0u);
   EXPECT_EQ(preflight.next_free_sgpr, 6u);
   EXPECT_EQ(preflight.next_free_vgpr, 9u);
-}
-
-TEST_F(AmdgpuNativePreflightTest, StackStorageUnsupportedEmitsDiagnostic) {
-  const loom_low_descriptor_set_t* descriptor_set =
-      LookupAmdgpuCdna3DescriptorSet();
-  if (descriptor_set == nullptr) {
-    GTEST_SKIP() << "amdgpu.cdna3.core is not linked in this build";
-  }
-  BuildLowFunction(descriptor_set);
-  const loom_value_id_t stack_storage = Reserve(LOOM_STORAGE_SPACE_STACK, 8, 4);
-
-  const loom_low_schedule_table_t schedule = Schedule(descriptor_set);
-  const loom_low_allocation_table_t allocation = Allocation(descriptor_set);
-
-  DiagnosticEmissionCapture capture;
-  loom_amdgpu_native_preflight_options_t options = {
-      .emitter = capture.emitter(),
-  };
-  loom_amdgpu_native_preflight_t preflight = {};
-  IREE_ASSERT_OK(loom_amdgpu_native_preflight_analyze(&schedule, &allocation,
-                                                      &options, &preflight));
-
-  EXPECT_EQ(preflight.error_count, 1u);
-  ASSERT_EQ(capture.emissions.size(), 1u);
-  const testing::CapturedDiagnosticEmission& emission = capture.emissions[0];
-  EXPECT_EQ(emission.error, LOOM_ERR_AMDGPU_036);
-  ASSERT_EQ(emission.string_params.size(), 6u);
-  EXPECT_EQ(emission.string_params[0], "gfx942");
-  EXPECT_EQ(emission.string_params[3], "preflight");
-  const iree_string_view_t storage_name =
-      loom_low_diagnostic_value_name(module_, stack_storage);
-  EXPECT_EQ(emission.string_params[4],
-            std::string(storage_name.data, storage_name.size));
-  EXPECT_EQ(emission.string_params[5], "stack");
-  ASSERT_EQ(emission.string_list_params.size(), 1u);
-  EXPECT_THAT(emission.string_list_params[0],
-              ::testing::ElementsAre("scratch", "private", "workgroup"));
-
-  // Rejection is independent of whether a caller collects its explanation.
-  options.emitter = {};
-  const loom_amdgpu_native_preflight_options_t* optional_options[] = {&options,
-                                                                      nullptr};
-  for (const auto* option : optional_options) {
-    IREE_ASSERT_OK(loom_amdgpu_native_preflight_analyze(&schedule, &allocation,
-                                                        option, &preflight));
-    EXPECT_EQ(preflight.error_count, 1u);
-  }
 }
 
 }  // namespace

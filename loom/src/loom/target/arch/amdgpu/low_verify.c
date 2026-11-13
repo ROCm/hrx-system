@@ -220,6 +220,38 @@ static iree_status_t loom_amdgpu_low_verify_dpp_control(
                                       params, IREE_ARRAYSIZE(params));
 }
 
+static iree_status_t loom_amdgpu_low_verify_storage_reservation(
+    loom_low_verify_context_t* context,
+    const loom_amdgpu_low_verify_state_t* state, const loom_op_t* op) {
+  if (!loom_low_storage_reserve_isa(op)) {
+    return iree_ok_status();
+  }
+  const loom_module_t* module = loom_low_verify_context_module(context);
+  const loom_value_id_t storage = loom_low_storage_reserve_storage(op);
+  const loom_storage_space_t space =
+      loom_type_storage_space(loom_module_value_type(module, storage));
+  if (space != LOOM_STORAGE_SPACE_STACK) {
+    return iree_ok_status();
+  }
+  const iree_string_view_t supported_spaces[] = {
+      IREE_SV("scratch"),
+      IREE_SV("private"),
+      IREE_SV("workgroup"),
+  };
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_target_key(state->target)),
+      loom_param_string(loom_low_diagnostic_export_name(state->target)),
+      loom_param_string(loom_low_diagnostic_config_key(state->target)),
+      loom_param_string(state->function_name),
+      loom_param_string(loom_low_diagnostic_value_name(module, storage)),
+      loom_param_string(IREE_SV("stack")),
+      loom_param_string_list(supported_spaces,
+                             IREE_ARRAYSIZE(supported_spaces)),
+  };
+  return loom_low_verify_context_emit(context, op, LOOM_ERR_AMDGPU_036, params,
+                                      IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_amdgpu_low_verify_storage_address(
     loom_low_verify_context_t* context,
     const loom_amdgpu_low_verify_state_t* state, const loom_op_t* op) {
@@ -332,6 +364,8 @@ static iree_status_t loom_amdgpu_low_verify_op(
   if (state == NULL || loom_low_verify_context_should_stop(context)) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_low_verify_storage_reservation(context, state, packet->op));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_low_verify_storage_address(context, state, packet->op));
   IREE_RETURN_IF_ERROR(

@@ -53,7 +53,8 @@ iree_status_t loom_aie2p_spill_plan(
     const loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t spill_plan_count,
     const loom_low_spill_materialization_plan_t* materialization_plan,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted,
     loom_low_spill_materialization_traffic_plan_t* out_plan);
 
 #ifdef __cplusplus

@@ -24,6 +24,7 @@
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/artifact_diagnostics.h"
 #include "loom/target/emit/native/amdgpu/branch_layout.h"
 #include "loom/target/emit/native/amdgpu/register_class.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
@@ -1928,23 +1929,18 @@ static iree_status_t loom_amdgpu_encode_storage_address_packet(
       state->inputs.storage_layout, loom_low_storage_address_storage(op),
       &reference);
   const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
-  uint64_t byte_offset = reference.reservation.byte_offset;
-  if (byte_offset > UINT32_MAX ||
-      reference.byte_offset > UINT32_MAX - byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU native encoding low.storage.address byte offset exceeds u32");
-  }
-  byte_offset += reference.byte_offset;
-  if (offset > UINT32_MAX - byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU native encoding low.storage.address byte offset exceeds u32");
+  const uint64_t byte_offset =
+      reference.reservation.byte_offset + reference.byte_offset + offset;
+  if (state->stream.data == NULL && byte_offset > UINT32_MAX) {
+    state->accepted = false;
+    return loom_target_artifact_emit_limit(
+        state->inputs.emitter, op, IREE_SV("AMDGPU"),
+        IREE_SV("storage byte offset"), byte_offset, UINT32_MAX);
   }
   const loom_low_allocation_assignment_t* assignment =
       loom_low_packet_result_assignment(state->inputs.allocation, packet, 0);
   return loom_amdgpu_encode_vgpr_move_immediate(
-      state, assignment->location_base, (uint32_t)(byte_offset + offset));
+      state, assignment->location_base, (uint32_t)byte_offset);
 }
 
 static bool loom_amdgpu_wait_packet_matches_packet(
@@ -2405,9 +2401,13 @@ iree_status_t loom_amdgpu_encode_instruction_stream(
       options ? options->storage_layout : NULL;
   if (storage_layout == NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
+        schedule->module, schedule->function_op,
         &schedule->requirements.storage_layout,
-        (loom_amdgpu_storage_layout_segment_sizes_t){0}, arena,
-        &derived_storage_layout));
+        (loom_amdgpu_storage_layout_segment_sizes_t){0}, arena, emitter,
+        out_accepted, &derived_storage_layout));
+    if (!*out_accepted) {
+      return iree_ok_status();
+    }
     storage_layout = &derived_storage_layout;
   }
   const loom_amdgpu_native_descriptor_refs_t descriptors = {

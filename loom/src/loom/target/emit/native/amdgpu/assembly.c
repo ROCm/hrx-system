@@ -2147,19 +2147,8 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
       emit_state->storage_layout, loom_low_storage_address_storage(op),
       &reference);
   const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
-  uint64_t byte_offset = reference.reservation.byte_offset;
-  if (byte_offset > UINT32_MAX ||
-      reference.byte_offset > UINT32_MAX - byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly low.storage.address byte offset exceeds u32");
-  }
-  byte_offset += reference.byte_offset;
-  if (offset > UINT32_MAX - byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly low.storage.address byte offset exceeds u32");
-  }
+  const uint64_t byte_offset =
+      reference.reservation.byte_offset + reference.byte_offset + offset;
 
   const loom_low_allocation_assignment_t* assignment =
       loom_low_packet_result_assignment(context->allocation, context->packet,
@@ -2185,7 +2174,7 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
       context->builder, "v%" PRIu32, assignment->location_base % window));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      context->builder, "%" PRIu32, (uint32_t)(byte_offset + offset)));
+      context->builder, "%" PRIu32, (uint32_t)byte_offset));
   ++move_state.emitted_count;
   return loom_amdgpu_append_vgpr_msb_mode(&move_state, saved_mode);
 }
@@ -3296,9 +3285,13 @@ iree_status_t loom_amdgpu_emit_assembly_fragment(
       options ? options->storage_layout : NULL;
   if (storage_layout == NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
+        schedule->module, schedule->function_op,
         &schedule->requirements.storage_layout,
-        (loom_amdgpu_storage_layout_segment_sizes_t){0}, scratch_arena,
-        &derived_storage_layout));
+        (loom_amdgpu_storage_layout_segment_sizes_t){0}, scratch_arena, emitter,
+        out_accepted, &derived_storage_layout));
+    if (!*out_accepted) {
+      return iree_ok_status();
+    }
     storage_layout = &derived_storage_layout;
   }
   const loom_amdgpu_packet_plan_t* packet_plan =

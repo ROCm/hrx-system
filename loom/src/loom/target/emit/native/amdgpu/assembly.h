@@ -34,13 +34,14 @@ typedef struct loom_amdgpu_assembly_fragment_options_t {
   loom_amdgpu_function_return_mode_t return_mode;
 } loom_amdgpu_assembly_fragment_options_t;
 
-// Emits an AMDGPU assembly fragment from an addressability-accepted frame and
-// the target-owned insertion plans built from that frame. Values are physically
-// allocated and unspilled. NULL options select no inserted packets or envelope.
-// Unsupported syntax emits a source-backed diagnostic and sets |out_accepted|
-// to false, including when |emitter| has no callback. Statuses transport only
-// infrastructure failures. The fragment contains no kernel metadata or object
-// envelope.
+// Emits an AMDGPU assembly fragment from a binary-encoding-accepted frame and
+// the target-owned insertion plans built from that frame. Binary encoding
+// admits storage offsets and native representational limits before listing.
+// Values are physically allocated and unspilled. NULL options select no
+// inserted packets or envelope. Unsupported syntax emits a source-backed
+// diagnostic and sets |out_accepted| to false, including when |emitter| has no
+// callback. Statuses transport only infrastructure failures. The fragment
+// contains no kernel metadata or object envelope.
 iree_status_t loom_amdgpu_emit_assembly_fragment(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

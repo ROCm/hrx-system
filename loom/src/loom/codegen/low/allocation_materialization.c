@@ -1083,9 +1083,17 @@ iree_status_t loom_low_allocation_materialize_spills(
 
   loom_low_spill_materialization_traffic_plan_t traffic_plan = {0};
   if (options && options->plan_traffic != NULL) {
+    bool accepted = false;
     IREE_RETURN_IF_ERROR(options->plan_traffic(
         options->plan_traffic_user_data, table, spill_plans, spill_plan_count,
-        &materialization_plan, arena, &traffic_plan));
+        &materialization_plan, arena, emitter, &accepted, &traffic_plan));
+    if (!accepted) {
+      ++result.error_count;
+      if (out_result) {
+        *out_result = result;
+      }
+      return iree_ok_status();
+    }
     IREE_ASSERT(traffic_plan.emit != NULL);
   }
   if (traffic_plan.emit == NULL) {

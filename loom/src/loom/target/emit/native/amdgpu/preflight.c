@@ -7,16 +7,11 @@
 #include "loom/target/emit/native/amdgpu/preflight.h"
 
 #include "loom/codegen/low/diagnostics.h"
-#include "loom/codegen/low/storage_layout.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/type_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/emit/native/amdgpu/register_class.h"
-
-static const loom_low_storage_space_set_t kLoomAmdgpuNativeStorageSpaces =
-    LOOM_LOW_STORAGE_SPACE_SET_SCRATCH | LOOM_LOW_STORAGE_SPACE_SET_PRIVATE |
-    LOOM_LOW_STORAGE_SPACE_SET_WORKGROUP;
 
 // AMDGPU unspillable physical classes model singleton architectural state such
 // as SCC, EXEC, and M0. They constrain scheduling/allocation but do not
@@ -31,66 +26,6 @@ static bool loom_amdgpu_native_preflight_metadata_free_register_class(
       &descriptor_set->reg_classes[reg_class_id];
   return iree_all_bits_set(reg_class->flags,
                            LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
-}
-
-static iree_status_t
-loom_amdgpu_native_preflight_emit_unsupported_storage_space(
-    const loom_low_schedule_table_t* schedule, loom_value_id_t storage_value_id,
-    const loom_low_storage_layout_reservation_t* reservation,
-    const loom_amdgpu_native_preflight_options_t* options,
-    loom_amdgpu_native_preflight_t* preflight) {
-  const iree_string_view_t storage_space =
-      loom_low_storage_type_space_name(reservation->space);
-  iree_string_view_t supported_storage_space_names[LOOM_STORAGE_SPACE_COUNT_];
-  const iree_host_size_t supported_storage_space_count =
-      loom_low_storage_space_set_names(
-          kLoomAmdgpuNativeStorageSpaces,
-          IREE_ARRAYSIZE(supported_storage_space_names),
-          supported_storage_space_names);
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_diagnostic_target_key(&schedule->target)),
-      loom_param_string(loom_low_diagnostic_export_name(&schedule->target)),
-      loom_param_string(loom_low_diagnostic_config_key(&schedule->target)),
-      loom_param_string(loom_low_diagnostic_function_name(
-          schedule->module, schedule->function_op)),
-      loom_param_string(
-          loom_low_diagnostic_value_name(schedule->module, storage_value_id)),
-      loom_param_string(storage_space),
-      loom_param_string_list(supported_storage_space_names,
-                             supported_storage_space_count),
-  };
-  const loom_diagnostic_emission_t emission = {
-      .op = loom_low_diagnostic_value_origin_op(
-          schedule->module, storage_value_id, schedule->function_op),
-      .error = LOOM_ERR_AMDGPU_036,
-      .params = params,
-      .param_count = IREE_ARRAYSIZE(params),
-  };
-  IREE_RETURN_IF_ERROR(iree_diagnostic_emit(
-      options != NULL ? options->emitter : (iree_diagnostic_emitter_t){0},
-      &emission));
-  ++preflight->error_count;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_native_preflight_collect_storage_usage(
-    const loom_low_schedule_table_t* schedule,
-    const loom_amdgpu_native_preflight_options_t* options,
-    loom_amdgpu_native_preflight_t* preflight) {
-  const loom_low_storage_layout_t* layout =
-      &schedule->requirements.storage_layout;
-  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
-    const loom_low_storage_layout_record_t* record = &layout->records[i];
-    if (loom_low_storage_space_set_contains(kLoomAmdgpuNativeStorageSpaces,
-                                            record->reservation.space)) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_native_preflight_emit_unsupported_storage_space(
-            schedule, record->storage_value_id, &record->reservation, options,
-            preflight));
-  }
-  return iree_ok_status();
 }
 
 static iree_string_view_t
@@ -200,8 +135,6 @@ iree_status_t loom_amdgpu_native_preflight_analyze(
       .schedule = schedule,
       .allocation = allocation,
   };
-  IREE_RETURN_IF_ERROR(loom_amdgpu_native_preflight_collect_storage_usage(
-      schedule, options, out_preflight));
   return loom_amdgpu_native_preflight_collect_register_usage(
       allocation, options, out_preflight);
 }

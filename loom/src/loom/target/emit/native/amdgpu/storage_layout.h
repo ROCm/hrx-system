@@ -18,6 +18,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/storage_layout.h"
+#include "loom/error/emitter.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,20 +58,33 @@ typedef struct loom_amdgpu_storage_layout_t {
 } loom_amdgpu_storage_layout_t;
 
 // Projects one generic reservation into the current AMDGPU segment layout and
-// advances |sizes|. The reservation need not have an SSA storage handle.
-iree_status_t loom_amdgpu_storage_layout_project_reservation(
+// advances |sizes|. Verification admits workgroup, private, or scratch storage.
+// Returns false on u64 overflow without modifying either output. The
+// reservation need not have an SSA storage handle; its owner emits a diagnostic
+// on rejection.
+bool loom_amdgpu_storage_layout_try_project_reservation(
     const loom_low_storage_layout_reservation_t* source_reservation,
     loom_amdgpu_storage_layout_segment_sizes_t* sizes,
     loom_amdgpu_storage_layout_reservation_t* out_reservation);
 
+// Diagnoses aggregate segment overflow at the reservation or spilled value that
+// caused it. Block arguments use their owning function as the source location.
+iree_status_t loom_amdgpu_storage_layout_emit_overflow(
+    const loom_module_t* module, const loom_op_t* function_op,
+    loom_value_id_t value_id, loom_storage_space_t space,
+    iree_diagnostic_emitter_t emitter);
+
 // Projects a generic function-local layout into AMDGPU fixed segments in one
 // reservation-record traversal, placing reservations after |segment_prefix|.
 // The prefix is fixed before spill recipes select concrete packet offsets.
-// Records are arena-owned and stay valid for the arena lifetime.
+// Records are arena-owned and stay valid for the arena lifetime. Overflow emits
+// a source diagnostic and leaves |out_accepted| false and |out_layout| empty.
 iree_status_t loom_amdgpu_storage_layout_build(
+    const loom_module_t* module, const loom_op_t* function_op,
     const loom_low_storage_layout_t* source_layout,
     loom_amdgpu_storage_layout_segment_sizes_t segment_prefix,
-    iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout);
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, loom_amdgpu_storage_layout_t* out_layout);
 
 // Resolves a verified low.storage.reserve or low.storage.view handle against a
 // previously built AMDGPU fixed-segment layout.

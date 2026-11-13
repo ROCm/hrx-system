@@ -1,0 +1,60 @@
+// RUN: emit amdgpu-assembly @entry
+amdgpu.target<gfx1100> @target
+
+// Unsupported spaces are rejected before authored spill lowering consumes them.
+low.func.def target<amdgpu.rdna3.core>(@target) @entry(%value: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: AMDGPU/036 {storage_space="stack"}
+  %slot = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  low.spill %value, %slot : reg<amdgpu.vgpr>, low.storage<stack>
+  return
+}
+
+// ====
+amdgpu.target<gfx1100> @target
+
+// Each generic space fits independently. Their shared physical segment does not.
+low.func.def target<amdgpu.rdna3.core>(@target) @entry() asm {
+  %first = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<private>
+  %second = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<scratch>
+  // ERROR@+1: TARGET/096 {function_name="entry", storage_space="AMDGPU private/scratch"}
+  %third = storage {byte_alignment = 1, byte_length = 3} : low.storage<private>
+  return
+}
+
+// ====
+amdgpu.target<gfx1100> @target
+
+// Alignment can overflow the combined segment before a spill is rewritten.
+low.func.def target<amdgpu.rdna3.core>(@target) @entry(%value: reg<amdgpu.vgpr>) asm {
+  %first = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<private>
+  %second = storage {byte_alignment = 1, byte_length = 9223372036854775807} : low.storage<scratch>
+  // ERROR@+1: TARGET/096 {function_name="entry", storage_space="AMDGPU private/scratch"}
+  %third = storage {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  low.spill %value, %third : reg<amdgpu.vgpr>, low.storage<private>
+  return
+}
+
+// ====
+amdgpu.target<gfx1100> @target
+
+// A valid storage view can place an otherwise valid address beyond u32.
+low.func.def target<amdgpu.rdna3.core>(@target) @entry() -> (reg<amdgpu.vgpr>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4294967300} : low.storage<private>
+  %view = storage_view %storage {byte_length = 4, offset = 4294967296} : low.storage<private> -> low.storage<private>
+  // ERROR@+1: BACKEND/060 {format="AMDGPU", quantity="storage byte offset", actual="4294967296", maximum="4294967295"}
+  %address = storage_address %view : low.storage<private> -> reg<amdgpu.vgpr>
+  return %address
+}
+
+// ====
+amdgpu.target<gfx1100> @target
+
+// The admitted address includes all three offsets: reservation, view, and op.
+low.func.def target<amdgpu.rdna3.core>(@target) @entry() -> (reg<amdgpu.vgpr>) asm {
+  %prefix = storage {byte_alignment = 4, byte_length = 4294967292} : low.storage<private>
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<scratch>
+  %view = storage_view %storage {byte_length = 12, offset = 4} : low.storage<scratch> -> low.storage<scratch>
+  // ERROR@+1: BACKEND/060 {format="AMDGPU", quantity="storage byte offset", actual="4294967300", maximum="4294967295"}
+  %address = storage_address %view {offset = 4} : low.storage<scratch> -> reg<amdgpu.vgpr>
+  return %address
+}
