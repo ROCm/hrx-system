@@ -11,15 +11,23 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/relocation.h"
 #include "loom/util/adaptive_sort.h"
 
-static bool loom_aie2p_program_object_is_code_section(
-    const loom_native_section_contribution_t* section) {
-  return section->storage == LOOM_NATIVE_SECTION_STORAGE_CONTENTS &&
-         section->access == (LOOM_NATIVE_SECTION_ACCESS_READ |
-                             LOOM_NATIVE_SECTION_ACCESS_EXECUTE);
+static bool loom_aie2p_program_object_function_less(
+    const loom_native_object_symbol_t* symbols, const iree_host_size_t* lhs,
+    const iree_host_size_t* rhs) {
+  return iree_string_view_compare(symbols[*lhs].name, symbols[*rhs].name) < 0;
 }
 
-static iree_status_t loom_aie2p_program_object_resolve_calls(
-    loom_native_object_symbol_t* symbols, iree_host_size_t symbol_count,
+LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(loom_aie2p_program_object_sort_functions,
+                                       iree_host_size_t,
+                                       const loom_native_object_symbol_t*,
+                                       loom_aie2p_program_object_function_less)
+
+// Every contribution has one admitted, uniquely named entry. Index those
+// entries once instead of searching all symbols for each call relocation.
+// Alias entries remain distinct even when their physical bodies are shared.
+static void loom_aie2p_program_object_resolve_calls(
+    const loom_native_object_symbol_t* symbols,
+    const iree_host_size_t* function_order, iree_host_size_t function_count,
     loom_native_object_fixup_t* fixups, iree_host_size_t fixup_count) {
   for (iree_host_size_t i = 0; i < fixup_count; ++i) {
     loom_native_object_fixup_t* fixup = &fixups[i];
@@ -27,37 +35,31 @@ static iree_status_t loom_aie2p_program_object_resolve_calls(
         LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE) {
       continue;
     }
-    loom_native_object_symbol_t* target = &symbols[fixup->target_symbol_index];
+    const loom_native_object_symbol_t* target =
+        &symbols[fixup->target_symbol_index];
     if (target->section_contribution_index != IREE_HOST_SIZE_MAX) {
       continue;
     }
-    iree_host_size_t definition_index = IREE_HOST_SIZE_MAX;
-    for (iree_host_size_t j = 0; j < symbol_count; ++j) {
-      const loom_native_object_symbol_t* candidate = &symbols[j];
-      if (candidate->section_contribution_index == IREE_HOST_SIZE_MAX ||
-          candidate->kind != target->kind ||
-          !iree_string_view_equal(candidate->name, target->name)) {
-        continue;
+    iree_host_size_t first = 0;
+    iree_host_size_t last = function_count;
+    while (first < last) {
+      const iree_host_size_t middle = first + (last - first) / 2;
+      const int comparison = iree_string_view_compare(
+          symbols[function_order[middle]].name, target->name);
+      if (comparison < 0) {
+        first = middle + 1;
+      } else {
+        last = middle;
       }
-      if (definition_index != IREE_HOST_SIZE_MAX) {
-        return iree_make_status(
-            IREE_STATUS_ALREADY_EXISTS,
-            "AIE2P direct call target `%.*s` has multiple definitions",
-            (int)target->name.size, target->name.data);
-      }
-      definition_index = j;
     }
-    if (definition_index == IREE_HOST_SIZE_MAX) {
-      return iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "AIE2P direct call target `%.*s` is undefined",
-                              (int)target->name.size, target->name.data);
-    }
-    fixup->target_symbol_index = definition_index;
+    IREE_ASSERT(first < function_count &&
+                iree_string_view_equal(symbols[function_order[first]].name,
+                                       target->name));
+    fixup->target_symbol_index = function_order[first];
   }
-  return iree_ok_status();
 }
 
-// Direct helpers are module-internal leaves whose addresses are used only by
+// Helpers are module-internal functions whose addresses are used only by
 // calls and their own branches. Distinct symbols can therefore share a physical
 // body when its bytes and relocations agree. Symbol names remain distinct;
 // imported and data names must agree because they identify distinct objects.
@@ -256,28 +258,11 @@ iree_status_t loom_aie2p_program_object_merge(
     iree_host_size_t data_count, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_object_t* out_program) {
-  IREE_ASSERT_ARGUMENT(contributions || contribution_count == 0);
-  IREE_ASSERT_ARGUMENT(arena);
-  IREE_ASSERT_ARGUMENT(out_program);
   *out_program = (loom_aie2p_program_object_t){0};
-  if (contribution_count == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AIE2P tile program requires an entry function");
-  }
 
   const loom_aie2p_leaf_contribution_t* entry = &contributions[0];
-  if (entry->realization.entry_symbol_index >= entry->object.symbol_count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AIE2P entry symbol is invalid");
-  }
   const loom_native_object_symbol_t* entry_symbol =
       &entry->object.symbols[entry->realization.entry_symbol_index];
-  if (entry_symbol->section_contribution_index >= entry->object.section_count ||
-      !loom_aie2p_program_object_is_code_section(
-          &entry->object.sections[entry_symbol->section_contribution_index])) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AIE2P entry symbol must name executable code");
-  }
   const iree_string_view_t code_section_name =
       entry->object.sections[entry_symbol->section_contribution_index]
           .section_name;
@@ -285,18 +270,6 @@ iree_status_t loom_aie2p_program_object_merge(
       iree_max((uint64_t)1,
                entry->object.sections[entry_symbol->section_contribution_index]
                    .contribution_alignment);
-
-  for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    const loom_aie2p_leaf_contribution_t* contribution = &contributions[i];
-    if (!iree_string_view_equal(contribution->realization.target_identity,
-                                entry->realization.target_identity) ||
-        !iree_string_view_equal(contribution->realization.abi_identity,
-                                entry->realization.abi_identity)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AIE2P tile program contributions disagree on target or ABI");
-    }
-  }
 
   iree_host_size_t* helper_order = NULL;
   iree_host_size_t* canonical_indices = NULL;
@@ -515,8 +488,17 @@ iree_status_t loom_aie2p_program_object_merge(
     }
     capability_flags |= contribution->realization.capability_flags;
   }
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_object_resolve_calls(
-      symbols, symbol_count, fixups, fixup_count));
+  // Body equivalence has consumed its order projection. Reuse that scratch for
+  // the complete function directory; neither step changes symbol identity.
+  iree_host_size_t* function_order = helper_order;
+  for (iree_host_size_t i = 0; i < contribution_count; ++i) {
+    function_order[i] = placements[i].symbol_start +
+                        contributions[i].realization.entry_symbol_index;
+  }
+  loom_aie2p_program_object_sort_functions(symbols, function_order,
+                                           contribution_count);
+  loom_aie2p_program_object_resolve_calls(
+      symbols, function_order, contribution_count, fixups, fixup_count);
 
   out_program->canonical_indices = canonical_indices;
   out_program->contribution = *entry;

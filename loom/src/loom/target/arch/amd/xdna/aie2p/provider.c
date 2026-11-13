@@ -170,7 +170,7 @@ static loom_target_call_policy_t loom_aie2p_select_call_policy(
       return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
     }
   }
-  return LOOM_TARGET_CALL_POLICY_REQUIRE_LEAF |
+  return LOOM_TARGET_CALL_POLICY_DIRECT |
          (kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL
               ? LOOM_TARGET_CALL_POLICY_NO_RESOURCES |
                     LOOM_TARGET_CALL_POLICY_NO_STORAGE

@@ -484,17 +484,19 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
         .diagnostic_emitter = request->diagnostic_emitter,
         .compile_report = worker_report_ptr,
     };
-    loom_aie2p_program_helper_t* direct_helpers = NULL;
-    if (resident->direct_helper_count != 0) {
+    loom_aie2p_program_helper_t* helpers = NULL;
+    if (resident->helper_count != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          request->scratch_arena, resident->direct_helper_count,
-          sizeof(*direct_helpers), (void**)&direct_helpers));
+          request->scratch_arena, resident->helper_count, sizeof(*helpers),
+          (void**)&helpers));
       for (iree_host_size_t helper_index = 0;
-           helper_index < resident->direct_helper_count; ++helper_index) {
+           helper_index < resident->helper_count; ++helper_index) {
         const loom_aie2p_program_clone_function_t* resident_helper =
-            &resident->direct_helpers[helper_index];
-        direct_helpers[helper_index] = (loom_aie2p_program_helper_t){
+            &resident->helpers[helper_index];
+        helpers[helper_index] = (loom_aie2p_program_helper_t){
             .function = resident_helper->entry,
+            .direct_callees = resident_helper->direct_callees,
+            .may_return = resident_helper->may_return,
             .function_target_facts = resident_helper->function_target_facts,
             .memory_accesses = resident_helper->memory_accesses,
             .loop_execution = resident_helper->loop_execution,
@@ -505,8 +507,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     iree_status_t status = loom_aie2p_program_compile(
         compiler, resident->function_op, /*may_return=*/false,
         (loom_aie2p_program_helper_list_t){
-            .values = direct_helpers,
-            .count = resident->direct_helper_count,
+            .values = helpers,
+            .count = resident->helper_count,
         },
         &resident->program_data, &worker_compile_options, &program_compiled,
         contribution);

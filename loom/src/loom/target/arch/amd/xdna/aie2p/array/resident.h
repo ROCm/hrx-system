@@ -35,12 +35,12 @@ typedef struct loom_aie2p_array_resident_program_t {
   // Module-owned loop facts translated into the resident invocation.
   loom_low_loop_execution_map_t* loop_execution;
   // Complete immutable inventory for helper composition, translated to resident
-  // symbols in physical-plan order. Empty when there are no direct helpers.
+  // symbols in physical-plan order. Empty when there are no helpers.
   loom_low_read_only_data_set_t program_data;
-  // Direct helpers remapped into the resident module in source call order.
-  const loom_aie2p_program_clone_function_t* direct_helpers;
-  // Number of records in |direct_helpers|.
-  iree_host_size_t direct_helper_count;
+  // Reachable helpers remapped into the resident module in callee-first order.
+  const loom_aie2p_program_clone_function_t* helpers;
+  // Number of records in |helpers|.
+  iree_host_size_t helper_count;
 } loom_aie2p_array_resident_program_t;
 
 // Materialized resident core program set for one physical array plan.

@@ -959,24 +959,18 @@ ERR_XDNA_062 = ErrorDef(
     fix_hint="Select a device profile provided by the AIE2P target family.",
 )
 
-# ERR_XDNA_063: A retained AIE2P helper directly calls another function.
+# ERR_XDNA_063: A retained AIE2P call cycle has no finite stack bound.
 ERR_XDNA_063 = ErrorDef(
     domain=ErrorDomain.XDNA,
     code=63,
     severity=Severity.ERROR,
-    summary="Nested retained AIE2P helper calls are unsupported.",
+    summary="Recursive AIE2P calls have no finite stack bound.",
     message=(
-        "AIE2P retained helper '@{helper_name}' directly calls "
-        "'@{callee_name}', but the current native call contract requires "
-        "helpers to be leaves"
+        "AIE2P function '@{function_name}' participates in a retained call "
+        "cycle with no finite stack bound"
     ),
-    params=(
-        ErrorParam("helper_name", ParamKind.STRING),
-        ErrorParam("callee_name", ParamKind.STRING),
-    ),
-    fix_hint=(
-        "Inline calls within the helper while retaining the entry-to-helper boundary."
-    ),
+    params=(ErrorParam("function_name", ParamKind.STRING),),
+    fix_hint="Express bounded repetition with a loop instead of recursive calls.",
 )
 
 # ERR_XDNA_064: A function frame cannot be represented by native stack setup.

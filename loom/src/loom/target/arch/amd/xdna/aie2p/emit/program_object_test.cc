@@ -262,6 +262,79 @@ TEST(Aie2pProgramObjectTest, PreservesFirstIdentityAcrossInterleavedBodies) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(Aie2pProgramObjectTest, BindsNestedCallsBeforeAndAfterBodySharing) {
+  // Equal phase instructions call different math entries. The phases must
+  // remain distinct even though the two math entries share their native body.
+  // Names deliberately disagree with contribution order, and the root repeats
+  // one call using the same imported symbol.
+  const iree_string_view_t names[] = {
+      IREE_SV("root"),   IREE_SV("phase_z"), IREE_SV("phase_a"),
+      IREE_SV("math_z"), IREE_SV("math_a"),
+  };
+  const std::array<uint8_t, 24> code = {};
+  loom_native_section_contribution_t sections[5];
+  loom_native_object_symbol_t symbols[5][3];
+  loom_native_object_fixup_t fixups[5][3];
+  loom_aie2p_leaf_contribution_t contributions[5];
+  const size_t call_counts[] = {3, 1, 1, 0, 0};
+  const size_t callees[3][3] = {{1, 2, 1}, {3}, {4}};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(contributions); ++i) {
+    const size_t code_length = i == 0 ? 24 : i < 3 ? 8 : 2;
+    contributions[i] = MakeHelper(names[i], code.data(), code_length,
+                                  &sections[i], &symbols[i][0]);
+    for (size_t j = 0; j < call_counts[i]; ++j) {
+      const size_t import_index = i == 0 && j == 1 ? 2 : 1;
+      symbols[i][import_index] = {
+          .name = names[callees[i][j]],
+          .section_contribution_index = IREE_HOST_SIZE_MAX,
+          .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+          .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      };
+      fixups[i][j] = {
+          .section_contribution_index = 0,
+          .section_offset = j * 8,
+          .relocation_kind =
+              LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE,
+          .target_symbol_index = import_index,
+      };
+    }
+    contributions[i].object.symbol_count = i == 0 ? 3 : i < 3 ? 2 : 1;
+    contributions[i].object.fixups = fixups[i];
+    contributions[i].object.fixup_count = call_counts[i];
+  }
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_aie2p_program_object_t program = {};
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
+      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
+      /*data_count=*/0, &arena, &arena, &program));
+  EXPECT_EQ(program.canonical_indices[1], 1u);
+  EXPECT_EQ(program.canonical_indices[2], 2u);
+  EXPECT_EQ(program.canonical_indices[3], 3u);
+  EXPECT_EQ(program.canonical_indices[4], 3u);
+  const auto& object = program.contribution.object;
+  ASSERT_EQ(object.section_count, 4u);
+  ASSERT_EQ(object.symbol_count, 9u);
+  ASSERT_EQ(object.fixup_count, 5u);
+  const size_t expected_targets[] = {3, 5, 3, 7, 8};
+  const size_t expected_sections[] = {1, 2, 1, 3, 3};
+  for (size_t i = 0; i < object.fixup_count; ++i) {
+    EXPECT_EQ(object.fixups[i].target_symbol_index, expected_targets[i]);
+    EXPECT_EQ(object.symbols[expected_targets[i]].section_contribution_index,
+              expected_sections[i]);
+  }
+  // Relinking into another program never mutates the detached input imports.
+  EXPECT_EQ(symbols[0][1].section_contribution_index, IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(fixups[0][0].target_symbol_index, 1u);
+  EXPECT_EQ(fixups[1][0].target_symbol_index, 1u);
+  EXPECT_EQ(fixups[2][0].target_symbol_index, 1u);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
 TEST(Aie2pProgramObjectTest, PreservesDifferentInstructionsAndRelocations) {
   const std::array<uint8_t, 8> code = {};
   loom_native_section_contribution_t sections[3];

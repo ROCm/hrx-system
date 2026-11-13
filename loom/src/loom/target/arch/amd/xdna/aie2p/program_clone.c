@@ -242,8 +242,20 @@ iree_status_t loom_aie2p_program_clone_function(
   loom_aie2p_program_clone_function_t* function = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(clone->arena, sizeof(*function), (void**)&function));
+  const loom_low_direct_callee_requirement_list_t calls =
+      source->requirements.direct_callees;
+  loom_symbol_ref_t* direct_callees = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(clone->arena, calls.count,
+                                                 sizeof(*direct_callees),
+                                                 (void**)&direct_callees));
+  for (iree_host_size_t i = 0; i < calls.count; ++i) {
+    direct_callees[i] =
+        clone->symbols_by_source[calls.values[i].symbol.symbol_id];
+  }
   *function = (loom_aie2p_program_clone_function_t){
       .entry = clone->symbols_by_source[source_id],
+      .direct_callees = loom_make_symbol_ref_array(direct_callees, calls.count),
+      .may_return = source->requirements.return_count != 0,
       .function_target_facts = source->target.target_facts,
   };
   loom_aie2p_program_clone_products_t products;

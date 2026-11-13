@@ -120,8 +120,8 @@ entry 0: 0 bindings, 0 dynamic relocations
 // ====
 // RUN: emit aie2p-xdna
 
-// Array planning rejects a nested native call at the helper call site before
-// resident cloning or native allocation begins.
+// Array planning rejects self-recursion before materialization because the
+// native stack has a finite statically admitted extent.
 aie2p.target<array> @nested_array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
 aie2p.target<core> @nested_array_core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
@@ -141,21 +141,17 @@ low.func.def target<amd.xdna.aie2p.core>(@nested_array_core_target) abi(object_f
   return
 }
 
+// ERROR@+1: XDNA/063 {function_name="nested_array_helper"}
 low.func.def target<amd.xdna.aie2p.core>(@nested_array_core_target) @nested_array_helper() asm {
-  // ERROR@+1: XDNA/063 {helper_name="nested_array_helper", callee_name="nested_array_leaf"}
-  low.func.call @nested_array_leaf() : ()
-  return
-}
-
-low.func.def target<amd.xdna.aie2p.core>(@nested_array_core_target) @nested_array_leaf() asm {
+  low.func.call @nested_array_helper() : ()
   return
 }
 
 // ====
 // RUN: emit aie2p-xdna
 
-// Configuration planning applies the same admission contract while resolving
-// program.load, before it compiles or links the worker.
+// Configuration planning applies the same finite-stack admission to mutual
+// recursion while resolving program.load, before native compilation.
 aie2p.target<configuration> @nested_configuration_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
 aie2p.target<core> @nested_configuration_core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
@@ -183,11 +179,12 @@ low.func.def target<amd.xdna.aie2p.core>(@nested_configuration_core_target) abi(
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@nested_configuration_core_target) @nested_configuration_helper() asm {
-  // ERROR@+1: XDNA/063 {helper_name="nested_configuration_helper", callee_name="nested_configuration_leaf"}
   low.func.call @nested_configuration_leaf() : ()
   return
 }
 
+// ERROR@+1: XDNA/063 {function_name="nested_configuration_leaf"}
 low.func.def target<amd.xdna.aie2p.core>(@nested_configuration_core_target) @nested_configuration_leaf() asm {
+  low.func.call @nested_configuration_helper() : ()
   return
 }

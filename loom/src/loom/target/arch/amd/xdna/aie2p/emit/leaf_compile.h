@@ -16,6 +16,7 @@
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/ir/ir.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/function_envelope.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
 #include "loom/target/reporting/report.h"
 
@@ -57,12 +58,10 @@ typedef struct loom_aie2p_leaf_compile_options_t {
   iree_host_size_t allocation_reserved_range_count;
   // Whether this function borrows the caller's stack rather than owning it.
   bool is_helper;
-  // Largest admitted direct-helper frame, charged to the entry's stack domain.
+  // Maximum live descendant stack bytes, excluding this function's own frame.
   uint64_t callee_stack_byte_length;
-  // Whether the entry program preserves its incoming link across calls.
-  bool preserve_link_register;
-  // Reserved scalar register holding that incoming link.
-  loom_aie2p_physical_register_id_t link_shadow_register;
+  // Incoming-link and caller-shadow preservation across nested native calls.
+  loom_aie2p_return_address_t return_address;
   // Optional structured allocation and repair feedback to emit.
   loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags;
   // Diagnostic emitter receiving scheduling and allocation failures.

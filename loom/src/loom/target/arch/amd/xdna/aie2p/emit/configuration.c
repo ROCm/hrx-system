@@ -211,7 +211,7 @@ static iree_status_t loom_aie2p_configuration_plan_load(
     return iree_ok_status();
   }
   bool helpers_admitted = false;
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_direct_helpers(
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_helpers(
       emitter->program_sources, source, &helpers_admitted));
   if (!helpers_admitted) {
     ++emitter->error_count;
@@ -249,19 +249,20 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
             .defining_op;
     const loom_low_function_requirements_t* requirements =
         &source->requirements;
-    loom_aie2p_program_helper_t* direct_helpers = NULL;
-    if (requirements->direct_callees.count != 0) {
+    loom_aie2p_program_helper_t* helpers = NULL;
+    if (source->helpers.count != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          request->scratch_arena, requirements->direct_callees.count,
-          sizeof(*direct_helpers), (void**)&direct_helpers));
+          request->scratch_arena, source->helpers.count, sizeof(*helpers),
+          (void**)&helpers));
     }
-    for (iree_host_size_t i = 0; i < requirements->direct_callees.count; ++i) {
-      const loom_symbol_ref_t helper_ref =
-          requirements->direct_callees.values[i].symbol;
+    for (iree_host_size_t i = 0; i < source->helpers.count; ++i) {
+      const loom_symbol_ref_t helper_ref = source->helpers.values[i];
       const loom_aie2p_program_clone_function_t* helper =
           worker_set->clone.functions_by_source[helper_ref.symbol_id];
-      direct_helpers[i] = (loom_aie2p_program_helper_t){
+      helpers[i] = (loom_aie2p_program_helper_t){
           .function = helper->entry,
+          .direct_callees = helper->direct_callees,
+          .may_return = helper->may_return,
           .function_target_facts = helper->function_target_facts,
           .memory_accesses = helper->memory_accesses,
           .loop_execution = helper->loop_execution,
@@ -291,8 +292,8 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     iree_status_t status = loom_aie2p_program_compile(
         compiler, function, requirements->return_count != 0,
         (loom_aie2p_program_helper_list_t){
-            .values = direct_helpers,
-            .count = requirements->direct_callees.count,
+            .values = helpers,
+            .count = source->helpers.count,
         },
         &program_data, &options, &compiled, worker);
     if (report_ptr) {
@@ -946,13 +947,12 @@ iree_status_t loom_aie2p_configuration_workers_initialize(
         status =
             loom_aie2p_program_clone_reserve_data(clone, source->program_data);
       }
-      const loom_low_direct_callee_requirement_list_t* helpers =
-          &source->requirements.direct_callees;
+      const loom_symbol_ref_array_t* helpers = &source->helpers;
       for (iree_host_size_t k = 0;
            k < helpers->count && iree_status_is_ok(status); ++k) {
         status = loom_aie2p_program_clone_reserve_function(
-            clone, loom_aie2p_program_source_table_lookup(
-                       plan->program_sources, helpers->values[k].symbol));
+            clone, loom_aie2p_program_source_table_lookup(plan->program_sources,
+                                                          helpers->values[k]));
       }
     }
   }
@@ -967,13 +967,12 @@ iree_status_t loom_aie2p_configuration_workers_initialize(
       const loom_aie2p_program_source_function_t* source =
           plan->loads[j].source;
       status = loom_aie2p_program_clone_data(clone, source->program_data);
-      const loom_low_direct_callee_requirement_list_t* helpers =
-          &source->requirements.direct_callees;
+      const loom_symbol_ref_array_t* helpers = &source->helpers;
       for (iree_host_size_t k = 0;
            k < helpers->count && iree_status_is_ok(status); ++k) {
         status = loom_aie2p_program_clone_function(
-            clone, loom_aie2p_program_source_table_lookup(
-                       plan->program_sources, helpers->values[k].symbol));
+            clone, loom_aie2p_program_source_table_lookup(plan->program_sources,
+                                                          helpers->values[k]));
       }
       if (iree_status_is_ok(status)) {
         status = loom_aie2p_program_clone_function(clone, source);

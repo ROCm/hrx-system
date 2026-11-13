@@ -140,7 +140,13 @@ iree_status_t loom_aie2p_leaf_compile(
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   iree_arena_allocator_t stack_arena;
   iree_arena_initialize(arena->block_pool, &stack_arena);
-  loom_aie2p_stack_layout_t stack_layout = {.arena = &stack_arena};
+  loom_aie2p_stack_layout_t stack_layout = {
+      .arena = &stack_arena,
+      .byte_length =
+          options->return_address.kind == LOOM_AIE2P_RETURN_ADDRESS_FRAME
+              ? LOOM_AIE2P_RETURN_ADDRESS_FRAME_BYTES
+              : 0,
+  };
   loom_low_emission_frame_t frame = {0};
   bool frame_accepted = false;
   iree_status_t status =
@@ -160,8 +166,7 @@ iree_status_t loom_aie2p_leaf_compile(
     const loom_aie2p_bundle_plan_options_t plan_options = {
         .stack = stack,
         .diagnostic_emitter = options->diagnostic_emitter,
-        .preserve_link_register = options->preserve_link_register,
-        .link_shadow_register = options->link_shadow_register,
+        .return_address = options->return_address,
     };
     status = loom_aie2p_bundle_plan_build(&frame, &plan_options, &scratch_arena,
                                           &program_planned, &program_plan);

@@ -50,6 +50,7 @@ loom_check_test_suite(
         "program_data.loom-test",
         "program_link_lifetime.loom-test",
         "program_report.loom-test",
+        "program_stack.loom-test",
     ],
     target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
 )
@@ -146,6 +147,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "function_envelope",
+    srcs = ["function_envelope.c"],
+    hdrs = ["function_envelope.h"],
+    deps = [
+        ":bundle_alignment",
+        ":bundle_encoding",
+        ":stack_frame",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+    ],
+)
+
+loom_cc_library(
     name = "bundle_plan",
     srcs = ["bundle_plan.c"],
     hdrs = ["bundle_plan.h"],
@@ -153,6 +166,7 @@ loom_cc_library(
         ":bundle_alignment",
         ":bundle_analysis",
         ":bundle_encoding",
+        ":function_envelope",
         ":leaf_plan_metadata",
         ":leaf_program",
         ":stack_frame",
@@ -266,6 +280,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
         ":bundle_plan",
+        ":function_envelope",
         ":leaf_object",
         ":program_capacity",
         ":spill",
@@ -303,11 +318,40 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "call_clobbers",
+    srcs = ["call_clobbers.c"],
+    hdrs = ["call_clobbers.h"],
+    deps = [
+        "//loom/src/loom/codegen/low/allocation:call",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "callable_compile",
+    srcs = ["callable_compile.c"],
+    hdrs = ["callable_compile.h"],
+    deps = [
+        ":call_clobbers",
+        ":leaf_compile",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:call_abi",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "program_compile",
     srcs = ["program_compile.c"],
     hdrs = ["program_compile.h"],
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
+        ":callable_compile",
         ":leaf_compile",
         ":program_capacity",
         ":program_object",
@@ -315,11 +359,11 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
-        "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:call_abi",
-        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -519,9 +563,23 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "function_envelope_test",
+    srcs = ["function_envelope_test.cc"],
+    deps = [
+        ":function_envelope",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "stack_frame_test",
     srcs = ["stack_frame_test.cc"],
     deps = [
+        ":function_envelope",
         ":stack_frame",
         "//loom/src/loom/codegen/low:storage_layout",
         "//runtime/src/iree/base/internal:arena",
@@ -538,6 +596,17 @@ loom_cc_test(
         ":relocation",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "call_clobbers_test",
+    srcs = ["call_clobbers_test.cc"],
+    deps = [
+        ":call_clobbers",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
