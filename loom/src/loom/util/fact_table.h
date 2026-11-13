@@ -666,7 +666,7 @@ iree_status_t loom_value_fact_table_define_uniform_scope(
 // facts. The ordinary value-only lookup remains valid for every observation.
 // The verified SSA value must be visible at observer. Stronger proofs apply
 // inside the definition's block or natural loop, without crossing loop exits.
-// Cross-region and irreducible observations retain conservative global facts.
+// Cross-region and irreducible cross-block observations retain global facts.
 loom_value_facts_t loom_value_fact_table_lookup_at(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t value_id, const loom_op_t* observer);

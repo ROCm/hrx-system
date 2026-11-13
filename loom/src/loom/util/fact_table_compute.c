@@ -1375,8 +1375,14 @@ static iree_status_t loom_value_fact_table_define_observation_results(
   }
   loom_value_fact_uniform_scope_t operand_scope =
       LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE;
+  // Pure elementwise operations preserve agreement on the whole vector even
+  // when their inference also tracks differences between its element lanes.
+  const bool transfers_agreement =
+      loom_traits_have_distribution_transfer(op->traits) ||
+      (!observes_execution &&
+       iree_all_bits_set(op->traits, LOOM_TRAIT_PURE | LOOM_TRAIT_ELEMENTWISE));
   if (table->definition_distributions && op->operand_count != 0 &&
-      loom_traits_have_distribution_transfer(op->traits)) {
+      transfers_agreement) {
     operand_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_CLUSTER;
     const loom_value_id_t* operands = loom_op_const_operands(op);
     for (uint16_t i = 0; i < op->operand_count; ++i) {

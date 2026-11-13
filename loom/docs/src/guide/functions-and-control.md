@@ -197,6 +197,38 @@ result for every lane that observes it: a scalar native result produced inside
 a divergent loop is saved before retiring lanes stop participating, so later
 iterations cannot overwrite their results.
 
+A subgroup broadcast can feed a scalar helper within the same loop iteration,
+including from a nested branch. Arithmetic derived from that broadcast retains
+the same guarantee. The value collected after a divergent loop can differ
+between lanes, so a later scalar call needs its own proof of agreement.
+
+For example, with the target above, this helper increments one shared value.
+In the source fragment, `%word` is each lane’s `i32` payload, `%lane` is its
+index, and `%zero` and `%one` are index constants:
+
+```loom
+low.func.def target<amdgpu.gfx11.generic.core>(@schedule_target) @increment(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %one = s_mov_b32 1
+  %result = s_add_u32 %value, %one
+  return %result
+}
+
+%counter, %result = scf.while(%counter = %zero : index) -> (index, i32) {
+  %observed = kernel.subgroup.broadcast.first %word : i32
+  %incremented = low.invoke @increment(%observed) : (i32) -> (i32)
+  %more = index.cmp ult, %counter, %lane : index
+  scf.condition %more, %counter, %incremented : i1, index, i32
+} do(%position: index, %unused: i32) {
+  %next = index.add %position, %one : index
+  scf.yield %next : index
+}
+```
+
+The broadcast proves agreement at `@increment`, and each lane retains its
+result when it leaves the loop. `%result` is not generally a valid argument to
+another scalar helper after the loop. A pure helper called with inputs that
+remain uniform across all iterations keeps its invariant result uniform.
+
 Inlined helpers use virtual register allocation and receive inputs through
 arguments rather than `low.resource` or `low.live_in`. They may contain
 multiple control-flow blocks and nested Low calls. Each nested call must

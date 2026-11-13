@@ -345,7 +345,9 @@ kernel.def target(@temporal_broadcast_gfx11_wave64) @native_local_observation() 
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %word = index.cast %lane : index to i32
+  %pair_increment = vector.splati 1 : vector<2xi32>
   %low_bit = scalar.constant 1 : i32
+  %pair = vector.iota %word step %low_bit : vector<2xi32>
   %even_bits = scalar.constant 0 : i32
   %low_lane_bit = scalar.andi %word, %low_bit : i32
   %odd = scalar.cmpi ne, %low_lane_bit, %even_bits : i32
@@ -354,11 +356,15 @@ kernel.def target(@temporal_broadcast_gfx11_wave64) @native_local_observation() 
     %counter, %last = scf.while(%counter = %begin : index) -> (index, i32) {
       %observed = kernel.subgroup.broadcast.first %word : i32
       %incremented = low.invoke @native_increment(%observed) : (i32) -> (i32)
+      %observed_pair = kernel.subgroup.broadcast.first %pair : vector<2xi32>
+      %pair_sum = vector.addi %observed_pair, %pair_increment : vector<2xi32>
+      %native_pair_sum = low.invoke @native_same_pair(%pair_sum) : (vector<2xi32>) -> (vector<2xi32>)
+      %vector_increment = vector.extract %native_pair_sum[0] : vector<2xi32> -> i32
       %adjusted = scf.if %odd -> (i32) {
         %again = low.invoke @native_increment(%incremented) : (i32) -> (i32)
         scf.yield %again : i32
       } else {
-        scf.yield %incremented : i32
+        scf.yield %vector_increment : i32
       }
       %more = index.cmp ult, %counter, %lane : index
       scf.condition %more, %counter, %adjusted : i1, index, i32

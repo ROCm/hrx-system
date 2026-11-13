@@ -309,19 +309,33 @@ kernel.def target(@target) @structured_shapes() {
   %lane = kernel.subgroup.lane.id : index
   %word = index.cast %lane : index to i32
   %wide = scalar.extui %word : i32 to i64
-  %packed = vector.splat %word : vector<3xi32>
+  %element_step = scalar.constant 1 : i32
+  %packed = vector.iota %word step %element_step : vector<3xi32>
+  %bias = vector.splati 1 : vector<3xi32>
   %boundary = index.constant 32 : index
   %lane_predicate = index.cmp ult, %lane, %boundary : index
   %counter, %final_predicate, %final_wide, %final_packed = scf.while(%counter = %begin : index) -> (index, i1, i64, vector<3xi32>) {
     %predicate = kernel.subgroup.broadcast.first %lane_predicate : i1
     %wide_value = kernel.subgroup.broadcast.first %wide : i64
     %packed_value = kernel.subgroup.broadcast.first %packed : vector<3xi32>
+    %sum = vector.addi %packed_value, %bias : vector<3xi32>
+    %mixed = vector.addi %packed_value, %packed : vector<3xi32>
+    %mixed_scope = test.fact_observation_scope %mixed : vector<3xi32> -> i32
+    test.use %mixed_scope : i32
+    %widened = vector.extsi %sum : vector<3xi32> to vector<3xi64>
+    %floating = vector.sitofp %sum : vector<3xi32> to vector<3xf32>
+    %negated = vector.negf %floating : vector<3xf32>
+    %sum_scope = test.fact_observation_scope %sum : vector<3xi32> -> i32
+    %widened_scope = test.fact_observation_scope %widened : vector<3xi64> -> i32
+    %floating_scope = test.fact_observation_scope %floating : vector<3xf32> -> i32
+    %negated_scope = test.fact_observation_scope %negated : vector<3xf32> -> i32
+    test.use %sum_scope, %widened_scope, %floating_scope, %negated_scope : i32, i32, i32, i32
     %predicate_scope = test.fact_observation_scope %predicate : i1 -> i32
     %wide_scope = test.fact_observation_scope %wide_value : i64 -> i32
     %packed_scope = test.fact_observation_scope %packed_value : vector<3xi32> -> i32
     test.use %predicate_scope, %wide_scope, %packed_scope : i32, i32, i32
     %more = index.cmp ult, %counter, %lane : index
-    scf.condition %more, %counter, %predicate, %wide_value, %packed_value : i1, index, i1, i64, vector<3xi32>
+    scf.condition %more, %counter, %predicate, %wide_value, %sum : i1, index, i1, i64, vector<3xi32>
   } do(%position: index, %unused_predicate: i1, %unused_wide: i64, %unused_packed: vector<3xi32>) {
     %next = index.add %position, %step : index
     scf.yield %next : index
@@ -346,19 +360,29 @@ kernel.def target(@target) @structured_shapes() {
   %lane = kernel.subgroup.lane.id : index
   %word = index.cast %lane : index to i32
   %wide = scalar.extui %word : i32 to i64
-  %packed = vector.splat %word : vector<3xi32>
+  %element_step = scalar.constant 1 : i32
+  %packed = vector.iota %word step %element_step : vector<3xi32>
+  %bias = vector.splati 1 : vector<3xi32>
   %boundary = index.constant 32 : index
   %lane_predicate = index.cmp ult, %lane, %boundary : index
   %counter, %final_predicate, %final_wide, %final_packed = scf.while(%counter = %begin : index) -> (index, i1, i64, vector<3xi32>) {
     %predicate = kernel.subgroup.broadcast.first %lane_predicate : i1
     %wide_value = kernel.subgroup.broadcast.first %wide : i64
     %packed_value = kernel.subgroup.broadcast.first %packed : vector<3xi32>
+    %sum = vector.addi %packed_value, %bias : vector<3xi32>
+    %mixed_scope = scalar.constant 0 : i32
+    test.use %mixed_scope : i32
+    %sum_scope = scalar.constant 1 : i32
+    %widened_scope = scalar.constant 1 : i32
+    %floating_scope = scalar.constant 1 : i32
+    %negated_scope = scalar.constant 1 : i32
+    test.use %sum_scope, %widened_scope, %floating_scope, %negated_scope : i32, i32, i32, i32
     %predicate_scope = scalar.constant 1 : i32
     %wide_scope = scalar.constant 1 : i32
     %packed_scope = scalar.constant 1 : i32
     test.use %predicate_scope, %wide_scope, %packed_scope : i32, i32, i32
     %more = index.cmp ult, %counter, %lane : index
-    scf.condition %more, %counter, %predicate, %wide_value, %packed_value : i1, index, i1, i64, vector<3xi32>
+    scf.condition %more, %counter, %predicate, %wide_value, %sum : i1, index, i1, i64, vector<3xi32>
   } do(%position: index, %unused_predicate: i1, %unused_wide: i64, %unused_packed: vector<3xi32>) {
     %next = index.add %position, %step : index
     scf.yield %next : index
