@@ -566,99 +566,6 @@ static void iree_hal_streaming_dropped_graph_list_deinitialize(
   }
 }
 
-// Signals from actually accepted graph blocks. Failure recovery waits on this
-// prefix because rejected blocks cannot signal the reserved final stream value.
-#define IREE_HAL_STREAMING_ACCEPTED_SIGNAL_INLINE_CAPACITY 16
-
-typedef struct iree_hal_streaming_accepted_signal_t {
-  // Borrowed semaphore kept alive by the locked stream or executable tree.
-  iree_hal_semaphore_t* semaphore;
-  // Payload the accepted block will signal or permanently fail.
-  uint64_t value;
-} iree_hal_streaming_accepted_signal_t;
-
-typedef struct iree_hal_streaming_accepted_signal_list_t {
-  // Allocator used only if |inline_signals| fills.
-  iree_allocator_t host_allocator;
-  // Number of reserved cells; empty cells have a NULL semaphore.
-  iree_host_size_t count;
-  // Number of cells available through |signals|.
-  iree_host_size_t capacity;
-  // Active cell storage.
-  iree_hal_streaming_accepted_signal_t* signals;
-  // Common-case storage owned by the launching frame.
-  iree_hal_streaming_accepted_signal_t
-      inline_signals[IREE_HAL_STREAMING_ACCEPTED_SIGNAL_INLINE_CAPACITY];
-} iree_hal_streaming_accepted_signal_list_t;
-
-static void iree_hal_streaming_accepted_signal_list_initialize(
-    iree_allocator_t host_allocator,
-    iree_hal_streaming_accepted_signal_list_t* out_list) {
-  out_list->host_allocator = host_allocator;
-  out_list->count = 0;
-  out_list->capacity = IREE_ARRAYSIZE(out_list->inline_signals);
-  out_list->signals = out_list->inline_signals;
-}
-
-// Reserves a cell before a fallible queue call. A failed queue call leaves the
-// cell empty, so only actual acceptance contributes a drain obligation.
-static iree_status_t iree_hal_streaming_accepted_signal_list_push_empty(
-    iree_hal_streaming_accepted_signal_list_t* list,
-    iree_hal_streaming_accepted_signal_t** out_signal) {
-  *out_signal = NULL;
-  if (list->count == list->capacity) {
-    iree_host_size_t new_capacity = 0;
-    iree_host_size_t allocation_size = 0;
-    if (IREE_UNLIKELY(
-            !iree_host_size_checked_mul(list->capacity, 2, &new_capacity) ||
-            !iree_host_size_checked_mul(new_capacity, sizeof(list->signals[0]),
-                                        &allocation_size))) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "accepted graph signal list size overflow");
-    }
-    iree_hal_streaming_accepted_signal_t* new_signals = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        list->host_allocator, allocation_size, (void**)&new_signals));
-    memcpy(new_signals, list->signals, list->count * sizeof(list->signals[0]));
-    if (list->signals != list->inline_signals) {
-      iree_allocator_free(list->host_allocator, list->signals);
-    }
-    list->signals = new_signals;
-    list->capacity = new_capacity;
-  }
-
-  iree_hal_streaming_accepted_signal_t* signal = &list->signals[list->count++];
-  *signal = (iree_hal_streaming_accepted_signal_t){0};
-  *out_signal = signal;
-  return iree_ok_status();
-}
-
-static void iree_hal_streaming_accepted_signal_list_deinitialize(
-    iree_hal_streaming_accepted_signal_list_t* list) {
-  if (list->signals != list->inline_signals) {
-    iree_allocator_free(list->host_allocator, list->signals);
-  }
-}
-
-// Resolves accepted-block outcomes after a later block is rejected. A failed
-// semaphore does not prove retirement: submitted command buffers and callback
-// captures retain their own state, and the caller preserves any failed queue
-// lease until queue teardown.
-static iree_status_t iree_hal_streaming_accepted_signal_list_drain(
-    iree_hal_streaming_accepted_signal_list_t* list) {
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < list->count; ++i) {
-    if (!list->signals[i].semaphore) {
-      continue;
-    }
-    iree_status_t wait_status = iree_hal_semaphore_wait(
-        list->signals[i].semaphore, list->signals[i].value,
-        iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
-    status = iree_status_join(status, wait_status);
-  }
-  return status;
-}
-
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
     iree_hal_queue_t* queue, iree_hal_queue_t* cooperative_queue,
@@ -666,7 +573,7 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores,
     iree_hal_streaming_dropped_graph_list_t* dropped_graphs,
-    iree_hal_streaming_accepted_signal_list_t* accepted_signals);
+    bool* inout_retirement_failed);
 
 // Checks every cooperative dispatch in |exec| and its child executable tree
 // against the queue selected for |stream|. The caller holds the root
@@ -726,35 +633,44 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
     iree_hal_semaphore_list_t signal_semaphores,
     iree_hal_streaming_recorded_point_t* record_point,
     iree_hal_streaming_dropped_graph_list_t* dropped_graphs,
-    iree_hal_streaming_accepted_signal_list_t* accepted_signals) {
+    bool* inout_retirement_failed) {
   if (block->type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH) {
     iree_hal_streaming_graph_exec_t* child_exec = block->attrs.child_graph.exec;
-    // Every child entry block carries this block's waits, so the launch tail
-    // carries down unchanged. The shared accepted list includes every actual
-    // child submission if a later child block rejects.
+    // Every child entry carries this block's waits. A rejected child drains
+    // its partial prefix before the parent drains its own preceding blocks.
     return iree_hal_streaming_graph_exec_submit_blocks_locked(
         child_exec, stream, queue, cooperative_queue, launch_stream_tail_value,
-        wait_semaphores, signal_semaphores, dropped_graphs, accepted_signals);
+        wait_semaphores, signal_semaphores, dropped_graphs,
+        inout_retirement_failed);
   }
   // Compilation gives every block a completion, joining parallel exits before
   // publishing the external signal. Failure cleanup relies on that proof.
   IREE_ASSERT(signal_semaphores.count > 0);
 
-  // Claim storage before the queue call so an accepted operation always has a
-  // terminal signal the launch can drain if a later block rejects.
-  iree_hal_streaming_accepted_signal_t* accepted_signal = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_accepted_signal_list_push_empty(
-      accepted_signals, &accepted_signal));
-
   iree_status_t status = iree_ok_status();
   switch (block->type) {
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_MEMORY_ALLOCATE:
-    case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_MEMORY_FREE:
+    case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_MEMORY_FREE: {
+      iree_hal_semaphore_t* accepted_semaphore = NULL;
+      uint64_t accepted_value = 0;
       status = iree_hal_streaming_graph_allocation_enqueue(
           block->attrs.memory.allocation, queue, wait_semaphores,
-          signal_semaphores, block->attrs.memory.flags,
-          &accepted_signal->semaphore, &accepted_signal->value);
+          signal_semaphores, block->attrs.memory.flags, &accepted_semaphore,
+          &accepted_value);
+      if (!iree_status_is_ok(status) && accepted_semaphore) {
+        // An allocation block can accept an allocation/unmap before a later
+        // map rejects. Its private point covers that prefix; the compiled
+        // block's output was never accepted and must not be waited upon.
+        iree_status_t drain_status = iree_hal_semaphore_wait(
+            accepted_semaphore, accepted_value, iree_infinite_timeout(),
+            IREE_ASYNC_WAIT_FLAG_NONE);
+        if (!iree_status_is_ok(drain_status)) {
+          *inout_retirement_failed = true;
+        }
+        status = iree_status_join(status, drain_status);
+      }
       break;
+    }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD:
       status = iree_hal_streaming_event_enqueue_record(
           block->attrs.event.event, stream->context, queue, wait_semaphores,
@@ -818,10 +734,6 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
       break;
   }
 
-  if (iree_status_is_ok(status)) {
-    accepted_signal->semaphore = signal_semaphores.semaphores[0];
-    accepted_signal->value = signal_semaphores.payload_values[0];
-  }
   return status;
 }
 
@@ -836,24 +748,16 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores,
     iree_hal_streaming_dropped_graph_list_t* dropped_graphs,
-    iree_hal_streaming_accepted_signal_list_t* accepted_signals) {
+    bool* inout_retirement_failed) {
   if (exec->recording.block_count == 0) {
-    iree_hal_streaming_accepted_signal_t* accepted_signal = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_accepted_signal_list_push_empty(
-        accepted_signals, &accepted_signal));
-    iree_status_t status = iree_hal_queue_barrier(
+    return iree_hal_queue_barrier(
         queue, external_wait_semaphores, external_signal_semaphores,
         /*barriers=*/NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
-    if (iree_status_is_ok(status)) {
-      accepted_signal->semaphore = external_signal_semaphores.semaphores[0];
-      accepted_signal->value = external_signal_semaphores.payload_values[0];
-    }
-    return status;
   }
 
   // Every replay follows the prior launch's completion. Reserve values instead
   // of querying asynchronous progress: a later signal must never satisfy an
-  // earlier invocation's wait. Rejected prefixes are drained by the caller;
+  // earlier invocation's wait. Rejected prefixes are drained before return;
   // skipping their generation leaves all subsequent edge values unambiguous.
   const uint64_t generation = ++exec->launch_generation;
   uint64_t values[HRX_GRAPH_MAX_WORKSTREAMS];
@@ -863,8 +767,8 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     }
   }
   iree_status_t status = iree_ok_status();
-  for (uint32_t block_index = 0;
-       iree_status_is_ok(status) && block_index < exec->recording.block_count;
+  uint32_t block_index = 0;
+  for (; iree_status_is_ok(status) && block_index < exec->recording.block_count;
        ++block_index) {
     iree_hal_streaming_graph_block_t* block =
         exec->recording.blocks[block_index];
@@ -934,7 +838,7 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
       status = iree_hal_streaming_graph_submit_block(
           block, stream, queue, cooperative_queue, launch_stream_tail_value,
           wait_semaphores, signal_semaphores, &record_point, dropped_graphs,
-          accepted_signals);
+          inout_retirement_failed);
       if (iree_status_is_ok(status) && block_records_event) {
         // A rejected record keeps its old point. Later blocks in this launch
         // must observe the new point immediately after its acceptance.
@@ -943,6 +847,23 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
       }
     }
     iree_hal_streaming_event_release_recorded_point(&event_wait_point);
+  }
+  if (!iree_status_is_ok(status)) {
+    // The failed iteration has advanced block_index once. Every earlier block
+    // was accepted and signals its indexed internal semaphore at generation;
+    // only the final block signals externally, so no rejected tail enters this
+    // span. A completed child contributes its parent point, while a rejected
+    // child already drained its own partial prefix during recursive unwind.
+    const uint32_t accepted_count = block_index - 1;
+    for (uint32_t i = 0; i < accepted_count; ++i) {
+      iree_status_t drain_status = iree_hal_semaphore_wait(
+          exec->recording.semaphores[i], generation, iree_infinite_timeout(),
+          IREE_ASYNC_WAIT_FLAG_NONE);
+      if (!iree_status_is_ok(drain_status)) {
+        *inout_retirement_failed = true;
+      }
+      status = iree_status_join(status, drain_status);
+    }
   }
   return status;
 }
@@ -1007,9 +928,6 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   iree_hal_streaming_dropped_graph_list_t dropped_graphs;
   iree_hal_streaming_dropped_graph_list_initialize(exec->host_allocator,
                                                    &dropped_graphs);
-  iree_hal_streaming_accepted_signal_list_t accepted_signals;
-  iree_hal_streaming_accepted_signal_list_initialize(exec->host_allocator,
-                                                     &accepted_signals);
 
   iree_hal_queue_t* cooperative_queue = NULL;
   bool cooperative_launch_too_large = false;
@@ -1032,7 +950,6 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     iree_slim_mutex_unlock(&stream->mutex);
     iree_slim_mutex_unlock(&exec->launch_mutex);
     iree_hal_streaming_dropped_graph_list_deinitialize(&dropped_graphs);
-    iree_hal_streaming_accepted_signal_list_deinitialize(&accepted_signals);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -1084,29 +1001,20 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
             : IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE,
         &submission);
   }
+  bool retirement_failed = false;
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_graph_exec_submit_blocks_locked(
         exec, stream, submission.queue, cooperative_queue, stream_wait_value,
         wait_semaphores, submission.signals, &dropped_graphs,
-        &accepted_signals);
+        &retirement_failed);
   }
 
-  if (!iree_status_is_ok(status)) {
-    // No rejected block can signal |stream_signal_value|, so do not publish a
-    // phantom stream tail. Keep both locks held while resolving every actual
-    // accepted signal, preventing teardown or later same-stream work from
-    // overtaking the prefix. Join keeps the submission failure primary.
-    iree_status_t drain_status =
-        iree_hal_streaming_accepted_signal_list_drain(&accepted_signals);
-    if (!iree_status_is_ok(drain_status) && submission.completion) {
-      // A failed prefix signal cannot prove hardware retirement. The final
-      // graph signal was not accepted, so rejecting its prepared observer is
-      // insufficient: retain the lane for authoritative queue teardown.
-      iree_slim_mutex_lock(&stream->context->value_wait_lane_mutex);
-      submission.completion->lane->has_failed_submission = true;
-      iree_slim_mutex_unlock(&stream->context->value_wait_lane_mutex);
-    }
-    status = iree_status_join(status, drain_status);
+  if (retirement_failed && submission.completion) {
+    // A failed prefix signal cannot prove hardware retirement. The final graph
+    // signal was not accepted, so preserve the lane for queue teardown.
+    iree_slim_mutex_lock(&stream->context->value_wait_lane_mutex);
+    submission.completion->lane->has_failed_submission = true;
+    iree_slim_mutex_unlock(&stream->context->value_wait_lane_mutex);
   }
 
   iree_hal_streaming_submission_finish_locked(stream, &submission,
@@ -1128,7 +1036,6 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   // Release captured graph references outside admission locks. The records
   // ended these associations even if a later block was rejected.
   iree_hal_streaming_dropped_graph_list_deinitialize(&dropped_graphs);
-  iree_hal_streaming_accepted_signal_list_deinitialize(&accepted_signals);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

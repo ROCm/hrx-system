@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <memory>
 #include <semaphore>
 #include <thread>
 #include <vector>
@@ -374,6 +375,51 @@ TEST_F(GraphRecordingTest, DetachedResourceCanReenterLaunchAndEditing) {
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
   EXPECT_EQ(result_, 17u);
   Launch(0);
+}
+
+TEST_F(GraphRecordingTest, LargeReplayUsesNoExecutableHeapStorage) {
+  // Keep the executable allocator distinct from task work and host-callback
+  // captures. Replaying the compiled schedule itself needs no heap storage.
+  size_t allocations = 0;
+  const iree_allocator_t allocator = {
+      .self = &allocations,
+      .ctl =
+          +[](void* self, iree_allocator_command_t command,
+              const void* parameters, void** pointer) {
+            if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+              ++*static_cast<size_t*>(self);
+            }
+            const auto system = iree_allocator_system();
+            return system.ctl(system.self, command, parameters, pointer);
+          },
+  };
+  iree_hal_streaming_graph_t* graph = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, allocator, &graph));
+  std::unique_ptr<iree_hal_streaming_graph_t,
+                  decltype(&iree_hal_streaming_graph_release)>
+      graph_owner(graph, iree_hal_streaming_graph_release);
+  iree_hal_streaming_graph_node_t* tail = nullptr;
+  for (int i = 0; i < 64; ++i) {
+    IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+        graph, tail ? &tail : nullptr, tail ? 1 : 0,
+        +[](void* data) { ++*static_cast<uint32_t*>(data); }, &result_, &tail));
+  }
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  std::unique_ptr<iree_hal_streaming_graph_exec_t,
+                  decltype(&iree_hal_streaming_graph_exec_release)>
+      executable_owner(executable, iree_hal_streaming_graph_exec_release);
+  allocations = 0;
+  for (int replay = 0; replay < 3; ++replay) {
+    iree_hal_streaming_graph_exec_launch_result_t result;
+    IREE_EXPECT_OK(
+        iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  }
+  EXPECT_EQ(result_, 3u * 64);
+  EXPECT_EQ(allocations, 0u);
 }
 
 INSTANTIATE_TEST_SUITE_P(Edits, GraphRecordingTest,

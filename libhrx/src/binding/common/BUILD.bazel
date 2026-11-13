@@ -498,6 +498,20 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "graph_submission_test",
+    srcs = ["graph_submission_test.cc"],
+    deps = [
+        ":common",
+        ":host_callback",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "graph_update_test",
     srcs = ["graph_update_test.cc"],
     deps = [
