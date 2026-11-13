@@ -6,14 +6,14 @@
 
 #include "iree/hal/driver/amd/gpu/queue/signal.h"
 
-static_assert(sizeof(iree_hal_amd_gpu_signal_t) <= 32,
-              "two signal owners must fit in one cache line");
+static_assert(sizeof(iree_hal_amd_gpu_signal_t) <= 40,
+              "logical completion adds one independently retained owner");
 static_assert(offsetof(iree_hal_amd_gpu_signal_pool_t, returned) == 64,
               "publisher-local bookkeeping fits in one cache line");
 static_assert(sizeof(iree_hal_amd_gpu_signal_pool_t) == 128,
               "concurrent returns have their own cache line");
-static_assert(sizeof(iree_hal_amd_gpu_signal_block_t) <= 64,
-              "signal block bookkeeping fits in one cache line");
+static_assert(sizeof(iree_hal_amd_gpu_signal_block_t) <= 96,
+              "signal block includes one native operand geometry");
 
 static_assert(sizeof(iree_hal_amd_gpu_signal_frontiers_t) == 16,
               "frontier storage has two eight-byte header words");
@@ -121,6 +121,9 @@ void iree_hal_amd_gpu_signal_block_attach(
   block->pool = pool;
   block->free_head = capacity ? signals : NULL;
   block->domain = domain;
+  block->device_address = device_address;
+  block->host_values = (uint8_t*)storage + value_offset;
+  block->stride = stride;
   for (uint32_t i = 0; i < capacity; ++i) {
     const uint64_t offset = (uint64_t)i * stride;
     uint64_t* value = (uint64_t*)((uint8_t*)storage + offset + value_offset);
@@ -222,8 +225,8 @@ bool iree_hal_amd_gpu_signal_pool_has_available(
   return pool->recycled != NULL;
 }
 
-iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire(
-    iree_hal_amd_gpu_signal_pool_t* pool, uint64_t initial_value) {
+static iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire_slot(
+    iree_hal_amd_gpu_signal_pool_t* pool) {
   iree_hal_amd_gpu_signal_block_t* block = pool->available;
   iree_hal_amd_gpu_signal_t* signal = NULL;
   if (block) {
@@ -249,7 +252,31 @@ iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire(
     iree_atomic_ref_count_init(&signal->state.live.ref_count);
     iree_atomic_store(&signal->state.live.retirement, 0,
                       iree_memory_order_relaxed);
+    signal->completion = NULL;
+  }
+  return signal;
+}
+
+iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire(
+    iree_hal_amd_gpu_signal_pool_t* pool, uint64_t initial_value) {
+  iree_hal_amd_gpu_signal_t* signal =
+      iree_hal_amd_gpu_signal_pool_try_acquire_slot(pool);
+  if (signal) {
     *signal->host_value = initial_value;
+  }
+  return signal;
+}
+
+iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire_alias(
+    iree_hal_amd_gpu_signal_pool_t* pool,
+    iree_hal_amd_gpu_signal_t* completion) {
+  iree_hal_amd_gpu_signal_t* signal =
+      iree_hal_amd_gpu_signal_pool_try_acquire_slot(pool);
+  if (signal) {
+    signal->completion = completion;
+    iree_hal_amd_gpu_signal_retain(completion);
+    signal->device_address = completion->device_address;
+    signal->host_value = completion->host_value;
   }
   return signal;
 }
@@ -286,6 +313,15 @@ void iree_hal_amd_gpu_signal_retain(iree_hal_amd_gpu_signal_t* signal) {
 
 void iree_hal_amd_gpu_signal_release(iree_hal_amd_gpu_signal_t* signal) {
   if (signal && iree_atomic_ref_count_dec(&signal->state.live.ref_count) == 1) {
+    if (signal->completion) {
+      iree_hal_amd_gpu_signal_release(signal->completion);
+      const iree_hal_amd_gpu_signal_block_t* block = signal->block;
+      const uint64_t offset =
+          (uint64_t)(signal - block->signals) * block->stride;
+      signal->device_address = block->device_address + offset;
+      signal->host_value = (uint64_t*)(block->host_values + offset);
+      signal->completion = NULL;
+    }
     iree_hal_amd_gpu_signal_pool_t* pool = signal->block->pool;
     const iree_hal_amd_gpu_signal_pool_notification_t notification =
         pool->notification;

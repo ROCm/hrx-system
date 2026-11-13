@@ -722,6 +722,18 @@ static void iree_hal_amd_gpu_aql_process_entry(
   iree_hal_amd_gpu_aql_entry_t* typed =
       iree_containerof(entry, iree_hal_amd_gpu_aql_entry_t, publication);
   switch (typed->kind) {
+    case IREE_HAL_AMD_GPU_AQL_ENTRY_SEAL:
+      iree_atomic_exchange(&queue->run.pending, 0, iree_memory_order_acq_rel);
+      if (!iree_atomic_load(&queue->failure, iree_memory_order_acquire) &&
+          queue->run.completion &&
+          (uint64_t)iree_atomic_load(&queue->run.position,
+                                     iree_memory_order_relaxed) ==
+              (uint64_t)iree_atomic_load(&queue->completed.count,
+                                         iree_memory_order_acquire) +
+                  1) {
+        iree_hal_amd_gpu_aql_publish_run(queue);
+      }
+      break;
     case IREE_HAL_AMD_GPU_AQL_ENTRY_ALLOCATION:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER:
     case IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL:
@@ -942,6 +954,14 @@ static bool iree_hal_amd_gpu_aql_retire(
     iree_hal_amd_gpu_aql_submission_t* submission = action->submission;
     if (iree_atomic_load((iree_atomic_int64_t*)action->signal->host_value,
                          iree_memory_order_acquire) != 0) {
+      if ((uint64_t)iree_atomic_load(&queue->run.position,
+                                     iree_memory_order_acquire) ==
+              position + 1 &&
+          !iree_atomic_exchange(&queue->run.pending, 1,
+                                iree_memory_order_acq_rel)) {
+        iree_hal_amd_gpu_completion_scope_unlock(scope);
+        iree_hal_amd_gpu_aql_enqueue_entry(queue, &queue->run.entry);
+      }
       out_wait->address = action->signal->host_value;
       out_wait->value = 1;
       out_wait->signal = action->signal;
@@ -1845,6 +1865,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       .reuse.entry.kind = IREE_HAL_AMD_GPU_AQL_ENTRY_REUSE_SIGNALS};
   queue->capacity.entry.kind = IREE_HAL_AMD_GPU_AQL_ENTRY_CAPACITY;
   queue->trim.entry.kind = IREE_HAL_AMD_GPU_AQL_ENTRY_TRIM;
+  queue->run.entry.kind = IREE_HAL_AMD_GPU_AQL_ENTRY_SEAL;
   queue->host_executor = (iree_hal_amd_gpu_host_call_executor_t){
       .queue = &queue->base,
       .context = context,

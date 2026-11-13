@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/aql/publication.h"
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/state.h"
 
 static amdf_status_t iree_hal_amd_gpu_aql_write_packet(
@@ -27,6 +28,26 @@ static void iree_hal_amd_gpu_aql_publish_notify(
   } else {
     iree_hal_amd_gpu_aql_ring_notify(&queue->producer.ring);
   }
+}
+
+amdf_status_t iree_hal_amd_gpu_aql_publish_run(
+    iree_hal_amd_gpu_aql_queue_t* queue) {
+  iree_hal_amd_gpu_signal_t* completion = queue->run.completion;
+  if (!completion) {
+    return AMDF_STATUS_OK;
+  }
+  iree_hal_amd_gpu_aql_ring_t* ring = &queue->producer.ring;
+  uint32_t* words = ring->packets[queue->run.last & (ring->capacity - 1)].words;
+  iree_memcpy_write_only(words + 14, &completion->device_address,
+                         sizeof(completion->device_address));
+  queue->run.completion = NULL;
+  queue->run.count = 0;
+  iree_atomic_store(&queue->run.position, 0, iree_memory_order_release);
+  const amdf_status_t status = iree_hal_amd_gpu_aql_ring_publish_header(
+      ring, &queue->storage, queue->run.first, queue->run.header);
+  iree_hal_amd_gpu_aql_publish_notify(queue, status);
+  iree_hal_amd_gpu_signal_release(completion);
+  return status;
 }
 
 uint64_t iree_hal_amd_gpu_aql_argument_length(
@@ -263,6 +284,17 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       argument_length ? arguments->address + argument_offset : 0;
   const bool prefix = dispatch && (before & (3u << 11));
   const bool suffix = !dispatch || sampled || (after & (3u << 9));
+  const bool run_eligible = dispatch && !indirect && !indirect_arguments &&
+                            !cooperative && !prefix && !suffix &&
+                            !counts.native_count && !operation;
+  if (!run_eligible) {
+    const amdf_status_t seal_status = iree_hal_amd_gpu_aql_publish_run(queue);
+    if (!amdf_status_is_ok(seal_status)) {
+      *out_status = IREE_HAL_AMD_STATUS_FROM_AMDF(seal_status,
+                                                  "publish preceding AQL run");
+      return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
+    }
+  }
   const uint32_t packet_count = (counts.native_count + 4) / 5 + prefix +
                                 indirect + dispatch + suffix + cooperative;
   iree_hal_amd_gpu_aql_ring_t* ring = &queue->producer.ring;
@@ -303,8 +335,12 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     *out_status = status;
     return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
   }
-  iree_hal_amd_gpu_signal_t* signal = iree_hal_amd_gpu_signal_pool_try_acquire(
-      &queue->options.signals->pool, 1);
+  iree_hal_amd_gpu_signal_t* signal =
+      run_eligible && queue->run.completion
+          ? iree_hal_amd_gpu_signal_pool_try_acquire_alias(
+                &queue->options.signals->pool, queue->run.completion)
+          : iree_hal_amd_gpu_signal_pool_try_acquire(
+                &queue->options.signals->pool, 1);
   if (!signal) {
     return IREE_HAL_AMD_GPU_AQL_PUBLISH_SIGNALS;
   }
@@ -379,6 +415,16 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
     iree_hal_amd_gpu_byte_storage_pool_commit(queue->samples, sample_end,
                                               false);
   }
+  const bool grouped =
+      run_eligible && (queue->run.completion || position != completed);
+  const bool first_in_run = grouped && !queue->run.completion;
+  if (grouped) {
+    if (first_in_run) {
+      queue->run.completion = signal;
+      iree_hal_amd_gpu_signal_retain(signal);
+    }
+    ++queue->run.count;
+  }
   // Prepare the terminal packet before a retirement slot can be consumed.
   // A ready request may borrow the same capture which native retirement frees.
   const uint32_t dispatch_header = IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
@@ -388,9 +434,9 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       dispatch ? iree_hal_amd_gpu_aql_dispatch_packet(
                      request->function, &request->geometry, dispatch_header,
                      argument_address,
-                     sampled  ? sample_address
-                     : suffix ? 0
-                              : signal->device_address,
+                     sampled             ? sample_address
+                     : suffix || grouped ? 0
+                                         : signal->device_address,
                      request->flags)
                : iree_hal_amd_gpu_aql_packet_barrier(
                      IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
@@ -431,6 +477,35 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
       ring, &queue->storage, counts.native_count, waits, &packet_position);
   const uint64_t signal_address = signal->device_address;
   iree_hal_amd_gpu_aql_publish_retirement(queue, position);
+  if (grouped) {
+    if (first_in_run) {
+      queue->run.first = packet_position;
+      queue->run.header = payload.words[0];
+    }
+    queue->run.last = packet_position;
+    iree_hal_amd_gpu_aql_ring_write_body(ring, packet_position, &payload);
+    if (!first_in_run) {
+      iree_memcpy_write_only(
+          ring->packets[packet_position & (ring->capacity - 1)].words,
+          payload.words, sizeof(uint32_t));
+    } else {
+      iree_atomic_store(&queue->run.position, position + 1,
+                        iree_memory_order_release);
+    }
+    if (queue->run.count == 64) {
+      iree_hal_amd_gpu_aql_publish_run(queue);
+    } else if (first_in_run) {
+      // A predecessor can retire between admission and this handoff. This
+      // wake belongs to the new run and does not depend on another API call.
+      const amdf_status_t wake_status =
+          iree_hal_amd_gpu_context_signal(queue->context);
+      if (!amdf_status_is_ok(wake_status)) {
+        iree_hal_amd_gpu_aql_queue_fail_native(&queue->base, wake_status,
+                                               "wake AQL run publication");
+      }
+    }
+    return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
+  }
   if (prefix && amdf_status_is_ok(publication_status)) {
     publication_status = iree_hal_amd_gpu_aql_write_packet(
         ring, &queue->storage, packet_position++,
@@ -472,6 +547,12 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
 iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_control(
     iree_hal_amd_gpu_aql_queue_t* queue,
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t* out_status) {
+  const amdf_status_t seal_status = iree_hal_amd_gpu_aql_publish_run(queue);
+  if (!amdf_status_is_ok(seal_status)) {
+    *out_status =
+        IREE_HAL_AMD_STATUS_FROM_AMDF(seal_status, "publish preceding AQL run");
+    return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
+  }
   const uint64_t position = (uint64_t)iree_atomic_load(
       &queue->producer.count, iree_memory_order_relaxed);
   if (position - (uint64_t)iree_atomic_load(&queue->completed.count,
@@ -902,6 +983,12 @@ iree_hal_amd_gpu_aql_publish_execute_host(
 iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
     iree_hal_amd_gpu_aql_queue_t* queue,
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t* out_status) {
+  const amdf_status_t seal_status = iree_hal_amd_gpu_aql_publish_run(queue);
+  if (!amdf_status_is_ok(seal_status)) {
+    *out_status =
+        IREE_HAL_AMD_STATUS_FROM_AMDF(seal_status, "publish preceding AQL run");
+    return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
+  }
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
       submission->execute.program->host_template;
   return host_template && host_template->fixup_count
@@ -914,6 +1001,12 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_execute(
 iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish_transfer(
     iree_hal_amd_gpu_aql_queue_t* queue,
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t* out_status) {
+  const amdf_status_t seal_status = iree_hal_amd_gpu_aql_publish_run(queue);
+  if (!amdf_status_is_ok(seal_status)) {
+    *out_status =
+        IREE_HAL_AMD_STATUS_FROM_AMDF(seal_status, "publish preceding AQL run");
+    return IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE;
+  }
   if (!submission->transfer.capture.count) {
     const iree_hal_amd_gpu_aql_dispatch_request_t request = {0};
     return iree_hal_amd_gpu_aql_publish(

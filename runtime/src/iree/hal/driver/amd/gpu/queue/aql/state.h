@@ -133,6 +133,26 @@ struct iree_hal_amd_gpu_aql_queue_t {
     // capacity is independent of all GPU-visible storage and execution credit.
     iree_byte_span_t preparation;
   } producer;
+  // A finite packet run held behind its first INVALID header. Only the current
+  // publisher touches its packet coordinates and physical completion.
+  struct {
+    // Retained physical completion for the run, or NULL while none is open.
+    iree_hal_amd_gpu_signal_t* completion;
+    // First reserved packet, whose header is the run's publication gate.
+    uint64_t first;
+    // Last reserved packet, which receives the physical completion at sealing.
+    uint64_t last;
+    // Complete first header/setup word retained in ordinary CPU memory.
+    uint32_t header;
+    // Accepted dispatch count, bounded independently of argument byte sizes.
+    uint32_t count;
+    // First logical position plus one; zero means no open run.
+    iree_atomic_int64_t position;
+    // Coalesced request to seal when the run becomes oldest outstanding work.
+    iree_hal_amd_gpu_aql_entry_t entry;
+    // One while the seal request is queued or being consumed.
+    iree_atomic_int32_t pending;
+  } run;
   // Completion credit is isolated from ordinary publisher writes.
   struct {
     // Fully retired native prefix, including final resource release.

@@ -16,6 +16,11 @@ extern "C" {
 
 struct iree_hal_amd_gpu_aql_queue_t;
 
+// Seals a finite run under exclusive publication ownership. Every accepted
+// packet and argument remains retained until its real native completion.
+amdf_status_t iree_hal_amd_gpu_aql_publish_run(
+    struct iree_hal_amd_gpu_aql_queue_t* queue);
+
 // Every fallible preparation precedes native reservation. Native release can
 // only fail the queue terminally after acceptance. Once reserved, all
 // ownership is published before firmware can observe the first valid header.

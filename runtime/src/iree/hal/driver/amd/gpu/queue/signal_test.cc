@@ -108,7 +108,7 @@ TEST(SignalTest, EmptyPool) {
 
 TEST(SignalTest, ExhaustionAndIndependentReuse) {
   Storage<5> storage;
-  EXPECT_LE(sizeof(Signal), 32u);
+  EXPECT_LE(sizeof(Signal), 40u);
   std::array<Signal*, 5> acquired;
   for (size_t i = 0; i < acquired.size(); ++i) {
     auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 0);
@@ -130,6 +130,54 @@ TEST(SignalTest, ExhaustionAndIndependentReuse) {
   for (auto* signal : acquired) {
     iree_hal_amd_gpu_signal_release(signal);
   }
+}
+
+TEST(SignalTest, AliasesRetainPhysicalStorageAndIndependentFrontiers) {
+  Storage<2, 2> storage;
+  auto* physical = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 1);
+  ASSERT_NE(physical, nullptr);
+  const uint64_t first_frontier[] = {7, 3};
+  iree_hal_amd_gpu_signal_publish_frontier(physical, first_frontier);
+  storage.values[1] = 0xfeed;
+  auto* alias =
+      iree_hal_amd_gpu_signal_pool_try_acquire_alias(&storage.pool, physical);
+  ASSERT_NE(alias, nullptr);
+  const uint64_t second_frontier[] = {8, 3};
+  iree_hal_amd_gpu_signal_publish_frontier(alias, second_frontier);
+  EXPECT_EQ(alias->device_address, physical->device_address);
+  EXPECT_EQ(alias->host_value, physical->host_value);
+  EXPECT_EQ(storage.values[1], 0xfeedu);
+  std::array<uint64_t, 2> first = {}, second = {};
+  iree_hal_amd_gpu_signal_join_frontier(physical, first.size(), first.data());
+  iree_hal_amd_gpu_signal_join_frontier(alias, second.size(), second.data());
+  EXPECT_EQ(first, (std::array<uint64_t, 2>{7, 3}));
+  EXPECT_EQ(second, (std::array<uint64_t, 2>{8, 3}));
+  iree_hal_amd_gpu_signal_retain(alias);
+  iree_hal_amd_gpu_signal_retire(physical, IREE_STATUS_OK);
+  iree_hal_amd_gpu_signal_release(physical);
+  iree_status_code_t status = IREE_STATUS_UNKNOWN;
+  EXPECT_FALSE(iree_hal_amd_gpu_signal_query_retirement(alias, &status));
+  iree_hal_amd_gpu_signal_retire(alias, IREE_STATUS_OK);
+  iree_hal_amd_gpu_signal_release(alias);
+  EXPECT_EQ(iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 1),
+            nullptr);
+  EXPECT_FALSE(iree_hal_amd_gpu_signal_block_try_deinitialize(&storage.block));
+  iree_hal_amd_gpu_signal_release(alias);
+  auto* reused_alias =
+      iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 9);
+  auto* reused_physical =
+      iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 11);
+  ASSERT_NE(reused_alias, nullptr);
+  ASSERT_NE(reused_physical, nullptr);
+  EXPECT_EQ(reused_alias, alias);
+  EXPECT_EQ(reused_physical, physical);
+  EXPECT_EQ(reused_alias->completion, nullptr);
+  EXPECT_EQ(reused_alias->host_value, &storage.values[1]);
+  EXPECT_EQ(reused_alias->device_address, 0x123500000000u);
+  EXPECT_EQ(storage.values[0], 11u);
+  EXPECT_EQ(storage.values[1], 9u);
+  iree_hal_amd_gpu_signal_release(reused_alias);
+  iree_hal_amd_gpu_signal_release(reused_physical);
 }
 
 TEST(SignalTest, ReturnedOlderBlockIsImmediatelyAvailable) {

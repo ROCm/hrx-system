@@ -444,6 +444,29 @@ TEST_F(AqlLifecycleTest, NativeStopPrecedesSixBufferReleases) {
   EXPECT_EQ(destroyed_, 6u);
 }
 
+TEST_F(AqlLifecycleTest, NativeStopReleasesAnUnpublishedRun) {
+  Capture();
+  queue_.run.completion = issued_[0].signal;
+  iree_hal_amd_gpu_signal_retain(queue_.run.completion);
+  queue_.run.count = 1;
+  queue_.run.position = 1;
+  FailIssued();
+  EXPECT_NE(queue_.run.completion, nullptr);
+  EXPECT_FALSE(iree_hal_amd_gpu_signal_block_try_deinitialize(&signal_block_));
+  EXPECT_EQ(*issued_[0].signal->host_value, 1u);
+  StopAndRetire();
+  EXPECT_EQ(queue_.run.completion, nullptr);
+  EXPECT_EQ(queue_.run.count, 0u);
+  EXPECT_EQ(queue_.run.position, 0);
+  EXPECT_EQ(*readers_[0]->host_value, 1u);
+  EXPECT_EQ(destroyed_, 6u);
+  ExpectFailed();
+  EXPECT_FALSE(iree_hal_amd_gpu_signal_block_try_deinitialize(&signal_block_));
+  iree_hal_amd_gpu_signal_release(readers_[0]);
+  readers_[0] = nullptr;
+  EXPECT_TRUE(iree_hal_amd_gpu_signal_pool_has_available(&signal_pool_));
+}
+
 TEST_F(AqlLifecycleTest, UnpublishedSuffixRetainsItsIndependentHostOwnership) {
   Capture(true);
   FailIssued();
