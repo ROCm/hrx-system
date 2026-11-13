@@ -504,6 +504,9 @@ static void iree_hal_amd_gpu_aql_process_submission(
     iree_hal_amd_gpu_publisher_enqueue(&queue->publisher,
                                        &submission->entry.publication);
   } else if (result == IREE_HAL_AMD_GPU_AQL_PUBLISH_CAPACITY) {
+    // This run cannot extend without retirement. Publish its prepared prefix
+    // before waiting so the GPU can reach it without another host wakeup.
+    iree_hal_amd_gpu_aql_publish_run(queue);
     iree_hal_amd_gpu_aql_park_capacity(queue, submission, completed,
                                        consumed_arguments);
   } else if (result == IREE_HAL_AMD_GPU_AQL_PUBLISH_ARGUMENTS ||
