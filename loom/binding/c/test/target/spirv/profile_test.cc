@@ -68,8 +68,7 @@ void ExpectSucceededResult(const loomc_result_t* result) {
   EXPECT_TRUE(loomc_result_succeeded(result));
 }
 
-void ExpectFailedResult(const loomc_result_t* result,
-                        const char* code = "SPIRV/PROFILE") {
+void ExpectFailedResult(const loomc_result_t* result, const char* code) {
   ASSERT_NE(result, nullptr);
   EXPECT_FALSE(loomc_result_succeeded(result));
   EXPECT_EQ(loomc_result_state(result), LOOMC_RESULT_STATE_FAILED);
@@ -78,6 +77,17 @@ void ExpectFailedResult(const loomc_result_t* result,
   ASSERT_NE(diagnostic, nullptr);
   EXPECT_EQ(diagnostic->severity, LOOMC_DIAGNOSTIC_SEVERITY_ERROR);
   EXPECT_EQ(ToString(diagnostic->code), code);
+}
+
+void ExpectDiagnosticParameter(const loomc_diagnostic_t* diagnostic,
+                               const char* name, const char* value) {
+  for (loomc_host_size_t i = 0; i < diagnostic->parameter_count; ++i) {
+    if (ToString(diagnostic->parameters[i].name) == name) {
+      EXPECT_EQ(ToString(diagnostic->parameters[i].value), value) << name;
+      return;
+    }
+  }
+  ADD_FAILURE() << "Missing diagnostic parameter: " << name;
 }
 
 TargetEnvironmentPtr CreateSpirvTargetEnvironment() {
@@ -531,7 +541,7 @@ TEST(TargetSpirvProfileTest, NamedProfileRefinementReportsInheritedProvenance) {
   TargetProfilePtr refined(raw_refined);
   ResultPtr result(raw_result);
   EXPECT_EQ(refined, nullptr);
-  ExpectFailedResult(result.get());
+  ExpectFailedResult(result.get(), "SPIRV/037");
   const std::string message =
       ToString(loomc_result_diagnostic_at(result.get(), 0)->message);
   EXPECT_THAT(message, ::testing::HasSubstr("subgroup32+ballot+hal"));
@@ -1382,50 +1392,67 @@ TEST(TargetSpirvProfileTest, UnavailableCooperativeRowsSuppressModelRows) {
 TEST(TargetSpirvProfileTest,
      ReportsContradictoryCooperativeRowsWithProvenance) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  loomc_spirv_cooperative_matrix_row_t matrix_rows[] = {
-      MakeCustomMatrixRow(loomc_make_cstring_view("probe.matrix.conflict"),
-                          LOOMC_TARGET_FACT_STATE_TRUE,
-                          loomc_make_cstring_view("probe:matrix-true")),
-      MakeCustomMatrixRow(loomc_make_cstring_view("probe.matrix.conflict"),
-                          LOOMC_TARGET_FACT_STATE_FALSE,
-                          loomc_make_cstring_view("override:matrix-false")),
-  };
-  loomc_spirv_profile_options_t options = {
-      .type = LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
-      .structure_size = sizeof(options),
-      .next = nullptr,
-      .identifier = loomc_make_cstring_view("contradictory-matrix-rows"),
-      .preset = LOOMC_SPIRV_PROFILE_PRESET_NONE,
-      .feature_facts = nullptr,
-      .feature_fact_count = 0,
-      .limit_facts = nullptr,
-      .limit_fact_count = 0,
-      .environment_facts = nullptr,
-      .environment_fact_count = 0,
-      .cooperative_matrix_rows = matrix_rows,
-      .cooperative_matrix_row_count = 2,
-      .cooperative_vector_rows = nullptr,
-      .cooperative_vector_row_count = 0,
-  };
-  loomc_target_profile_t* profile = nullptr;
-  loomc_result_t* result = nullptr;
-  loomc_status_t status = loomc_target_profile_create_spirv(
-      target_environment.get(), &options, loomc_allocator_system(), &profile,
-      &result);
-  LOOMC_EXPECT_OK(status);
-  TargetProfilePtr profile_ptr(profile);
-  ResultPtr result_ptr(result);
-  EXPECT_EQ(profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
-  const loomc_diagnostic_t* diagnostic =
-      loomc_result_diagnostic_at(result_ptr.get(), 0);
-  ASSERT_NE(diagnostic, nullptr);
-  EXPECT_THAT(ToString(diagnostic->message),
-              ::testing::HasSubstr("contradictory cooperative matrix row"));
-  EXPECT_THAT(ToString(diagnostic->message),
-              ::testing::HasSubstr("probe:matrix-true"));
-  EXPECT_THAT(ToString(diagnostic->message),
-              ::testing::HasSubstr("override:matrix-false"));
+  for (bool matrix : {false, true}) {
+    for (bool different_key : {false, true}) {
+      SCOPED_TRACE(matrix ? "matrix" : "vector");
+      SCOPED_TRACE(different_key ? "same name, different key"
+                                 : "opposite state");
+      const auto name = loomc_make_cstring_view("probe.row.conflict");
+      const auto first_provenance = loomc_make_cstring_view("probe:row");
+      const auto second_provenance = loomc_make_cstring_view("override:row");
+      const auto second_state = different_key ? LOOMC_TARGET_FACT_STATE_TRUE
+                                              : LOOMC_TARGET_FACT_STATE_FALSE;
+      loomc_spirv_cooperative_matrix_row_t matrix_rows[] = {
+          MakeCustomMatrixRow(name, LOOMC_TARGET_FACT_STATE_TRUE,
+                              first_provenance),
+          MakeCustomMatrixRow(name, second_state, second_provenance),
+      };
+      loomc_spirv_cooperative_vector_row_t vector_rows[] = {
+          MakeCustomVectorRow(name, LOOMC_TARGET_FACT_STATE_TRUE,
+                              first_provenance),
+          MakeCustomVectorRow(name, second_state, second_provenance),
+      };
+      if (different_key) {
+        matrix_rows[1].m_size *= 2;
+        vector_rows[1].m_size *= 2;
+      }
+      loomc_spirv_profile_options_t options = {
+          .type = LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
+          .structure_size = sizeof(options),
+          .identifier = loomc_make_cstring_view("contradictory-rows"),
+      };
+      if (matrix) {
+        options.cooperative_matrix_rows = matrix_rows;
+        options.cooperative_matrix_row_count = 2;
+      } else {
+        options.cooperative_vector_rows = vector_rows;
+        options.cooperative_vector_row_count = 2;
+      }
+      loomc_target_profile_t* profile = nullptr;
+      loomc_result_t* result = nullptr;
+      LOOMC_EXPECT_OK(loomc_target_profile_create_spirv(
+          target_environment.get(), &options, loomc_allocator_system(),
+          &profile, &result));
+      TargetProfilePtr owned_profile(profile);
+      ResultPtr owned_result(result);
+      EXPECT_EQ(profile, nullptr);
+      ExpectFailedResult(result, different_key ? "SPIRV/042" : "SPIRV/041");
+      const loomc_diagnostic_t* diagnostic =
+          loomc_result_diagnostic_at(result, 0);
+      ASSERT_NE(diagnostic, nullptr);
+      ExpectDiagnosticParameter(diagnostic, "row_kind",
+                                matrix ? "matrix" : "vector");
+      ExpectDiagnosticParameter(diagnostic, "first_provenance", "probe:row");
+      ExpectDiagnosticParameter(diagnostic, "second_provenance",
+                                "override:row");
+      if (different_key) {
+        ExpectDiagnosticParameter(diagnostic, "name", "probe.row.conflict");
+      } else {
+        ExpectDiagnosticParameter(diagnostic, "first_state", "true");
+        ExpectDiagnosticParameter(diagnostic, "second_state", "false");
+      }
+    }
+  }
 }
 
 TEST(TargetSpirvProfileTest, RefinesCooperativeRowsWithOwnedProvenance) {
@@ -1572,7 +1599,7 @@ TEST(TargetSpirvProfileTest, ReportsContradictoryFactsWithProvenance) {
   TargetProfilePtr profile_ptr(profile);
   ResultPtr result_ptr(result);
   EXPECT_EQ(profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
+  ExpectFailedResult(result_ptr.get(), "SPIRV/035");
   const loomc_diagnostic_t* diagnostic =
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);
@@ -1623,7 +1650,7 @@ TEST(TargetSpirvProfileTest, ReportsContradictoryLimitFactsWithProvenance) {
   TargetProfilePtr profile_ptr(profile);
   ResultPtr result_ptr(result);
   EXPECT_EQ(profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
+  ExpectFailedResult(result_ptr.get(), "SPIRV/037");
   const loomc_diagnostic_t* diagnostic =
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);
@@ -1700,7 +1727,7 @@ TEST(TargetSpirvProfileTest,
   TargetProfilePtr refined_profile_ptr(refined_profile);
   ResultPtr result_ptr(result);
   EXPECT_EQ(refined_profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
+  ExpectFailedResult(result_ptr.get(), "SPIRV/037");
   const loomc_diagnostic_t* diagnostic =
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);
@@ -1751,7 +1778,7 @@ TEST(TargetSpirvProfileTest,
   TargetProfilePtr profile_ptr(profile);
   ResultPtr result_ptr(result);
   EXPECT_EQ(profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
+  ExpectFailedResult(result_ptr.get(), "SPIRV/037");
   const loomc_diagnostic_t* diagnostic =
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);
@@ -1793,7 +1820,7 @@ TEST(TargetSpirvProfileTest, ValidatesSubgroupWidthFamily) {
       ResultPtr owned_result(result);
       if (width == 0 || width == 48) {
         EXPECT_EQ(profile, nullptr);
-        ExpectFailedResult(result);
+        ExpectFailedResult(result, width == 0 ? "SPIRV/036" : "SPIRV/039");
       } else {
         ASSERT_NE(profile, nullptr);
         ExpectSucceededResult(result);
@@ -1842,7 +1869,7 @@ TEST(TargetSpirvProfileTest, ValidatesSubgroupRangeRelationships) {
       ResultPtr owned_result(result);
       if (width < 32 || width > 64) {
         EXPECT_EQ(profile, nullptr);
-        ExpectFailedResult(result);
+        ExpectFailedResult(result, "SPIRV/040");
       } else {
         ASSERT_NE(profile, nullptr);
         ExpectSucceededResult(result);
@@ -1873,7 +1900,7 @@ TEST(TargetSpirvProfileTest, ValidatesSubgroupRangeRelationships) {
   TargetProfilePtr owned_profile(profile);
   ResultPtr owned_result(result);
   EXPECT_EQ(profile, nullptr);
-  ExpectFailedResult(result);
+  ExpectFailedResult(result, "SPIRV/040");
 }
 
 TEST(TargetSpirvProfileTest, ReportsInvalidZeroLimitValuesAsResult) {
@@ -1908,12 +1935,11 @@ TEST(TargetSpirvProfileTest, ReportsInvalidZeroLimitValuesAsResult) {
   TargetProfilePtr profile_ptr(profile);
   ResultPtr result_ptr(result);
   EXPECT_EQ(profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
+  ExpectFailedResult(result_ptr.get(), "SPIRV/036");
   const loomc_diagnostic_t* diagnostic =
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);
-  EXPECT_THAT(ToString(diagnostic->message),
-              ::testing::HasSubstr("invalid zero value"));
+  EXPECT_THAT(ToString(diagnostic->message), ::testing::HasSubstr("value 0"));
   EXPECT_THAT(ToString(diagnostic->message),
               ::testing::HasSubstr("spirv.max_workgroup_size_x"));
   EXPECT_THAT(ToString(diagnostic->message),
@@ -1952,12 +1978,13 @@ TEST(TargetSpirvProfileTest, ReportsOutOfRangeLimitValuesAsResult) {
   TargetProfilePtr profile_ptr(profile);
   ResultPtr result_ptr(result);
   EXPECT_EQ(profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
+  ExpectFailedResult(result_ptr.get(), "SPIRV/036");
   const loomc_diagnostic_t* diagnostic =
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);
-  EXPECT_THAT(ToString(diagnostic->message),
-              ::testing::HasSubstr("exceeds uint32_t range"));
+  EXPECT_THAT(
+      ToString(diagnostic->message),
+      ::testing::HasSubstr("outside the supported range [1, 4294967295]"));
   EXPECT_THAT(ToString(diagnostic->message),
               ::testing::HasSubstr("spirv.max_workgroup_count_x"));
   EXPECT_THAT(ToString(diagnostic->message),
@@ -2003,7 +2030,7 @@ TEST(TargetSpirvProfileTest, NumericLimitRangesMatchIRRepresentation) {
     TargetProfilePtr profile_ptr(profile);
     ResultPtr result_ptr(result);
     EXPECT_EQ(profile, nullptr);
-    ExpectFailedResult(result);
+    ExpectFailedResult(result, "SPIRV/036");
     EXPECT_THAT(ToString(loomc_result_diagnostic_at(result, 0)->message),
                 ::testing::HasSubstr("range"));
   }
@@ -2041,7 +2068,7 @@ TEST(TargetSpirvProfileTest, ReportsEnvironmentVersionTooLowAsResult) {
   TargetProfilePtr profile_ptr(profile);
   ResultPtr result_ptr(result);
   EXPECT_EQ(profile_ptr.get(), nullptr);
-  ExpectFailedResult(result_ptr.get());
+  ExpectFailedResult(result_ptr.get(), "SPIRV/038");
   const loomc_diagnostic_t* diagnostic =
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);

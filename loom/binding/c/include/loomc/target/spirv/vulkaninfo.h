@@ -25,7 +25,8 @@
 /// not a separate target model. Unknown JSON fields are ignored. Recognized
 /// malformed fields produce `SPIRV/VULKANINFO` diagnostics on the returned
 /// result. Contradictory or unsupported normalized facts are then diagnosed by
-/// the SPIR-V profile layer using `SPIRV/PROFILE` diagnostics.
+/// the SPIR-V profile layer using catalog diagnostics with observed values and
+/// provenance.
 ///
 /// @par Example
 /// Import a saved profile from caller-owned bytes:
