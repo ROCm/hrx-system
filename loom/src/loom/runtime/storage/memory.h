@@ -393,7 +393,9 @@ void loom_runtime_memory_operation_set_observer(
 // readiness. The operation or its published directory reservation keeps the
 // source live. The caller excludes trim until consumers retire and keeps the
 // operation alive while querying it. Only successful readiness permits this
-// query; failure is distinct from operation retirement.
+// query; failure is distinct from operation retirement. Edits follow the first
+// occurrence of each missing slab in caller range order, ascending within each
+// range, independently of how native mapping runs are combined.
 iree_hal_buffer_binding_t loom_runtime_memory_operation_backing(
     const loom_runtime_memory_operation_t* operation,
     iree_host_size_t edit_index);

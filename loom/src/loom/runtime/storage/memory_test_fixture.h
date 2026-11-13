@@ -147,6 +147,9 @@ class MappingQueue : public iree_hal_queue_t {
                 }
                 EXPECT_EQ(signals.count, 1u);
                 observation.signal = signals.semaphores[0];
+                if (count) {
+                  observation.updates.assign(mappings, mappings + count);
+                }
               }
               iree_status_t status = iree_ok_status();
               if (self->fail_next_map.exchange(false)) {
@@ -192,6 +195,8 @@ class MappingQueue : public iree_hal_queue_t {
     std::vector<iree_hal_semaphore_t*> waits;
     // Borrowed mapping completion, retained by the observed operation.
     iree_hal_semaphore_t* signal = nullptr;
+    // Captured descriptors; buffer identities borrow the test's reservations.
+    std::vector<iree_hal_memory_mapping_t> updates;
   };
 
   std::vector<Observation> WaitForMappings(size_t count) {
