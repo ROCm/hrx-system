@@ -275,3 +275,34 @@ func.def public @discarded(%value$0: f32) -> (f32) {
   func.return %value$10 : f32
 }
 
+// ====
+// Parsing a builtin-backed library template must not introduce its C libcall
+// into source lookup and displace the visible template at a later call.
+namespace library {
+template <class = void> int abs(int value) { return __builtin_abs(value); }
+template <class = void> double sqrt(double value) { return __builtin_sqrt(value); }
+}
+using library::abs;
+using library::sqrt;
+int magnitude(int value) { return abs(value); }
+double root(double value) { return sqrt(value); }
+// ----
+func.def public @magnitude(%value: i32) -> (i32) {
+  %2 = func.call pure @library__abs_void(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @root(%value: f64) -> (f64) {
+  %5 = func.call pure @library__sqrt_void(%value) : (f64) -> (f64)
+  func.return %5 : f64
+}
+
+func.def @library__abs_void(%value: i32) -> (i32) {
+  %8 = scalar.absi %value : i32
+  func.return %8 : i32
+}
+
+func.def @library__sqrt_void(%value: f64) -> (f64) {
+  %11 = scalar.sqrtf %value : f64
+  func.return %11 : f64
+}
