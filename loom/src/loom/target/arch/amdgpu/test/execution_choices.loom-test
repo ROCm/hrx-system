@@ -207,13 +207,14 @@ kernel.def target(@device) @small_dense_workgroup() {
 // ====
 // RUN: pass canonicalize
 
-// A selected native width and dense packing establish an exact subgroup count.
+// Linear partitioning also establishes dense counts across logical row boundaries.
 amdgpu.target<gfx1151> @device {subgroup_size = 32}
 
-kernel.def target(@device) @dense_partial_final_subgroup() {
+kernel.def target(@device) @linear_multidimensional_partition() {
   %unit = index.constant 1 : index
-  %width = index.constant 65 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+  %x = index.constant 5 : index
+  %other = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%x, %other, %other) : index
 } launch() {
   %subgroup = kernel.subgroup.id : index
   %count = kernel.subgroup.count : index
@@ -225,13 +226,50 @@ kernel.def target(@device) @dense_partial_final_subgroup() {
 // ----
 amdgpu.target<gfx1151> @device {subgroup_size = 32}
 
-kernel.def target(@device) @dense_partial_final_subgroup() {
+kernel.def target(@device) @linear_multidimensional_partition() {
   %unit = index.constant 1 : index
-  %width = index.constant 65 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+  %x = index.constant 5 : index
+  %other = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%x, %other, %other) : index
 } launch() {
   %count = index.constant 3 : index
   %subgroup_hi = scalar.constant 2 : i64
+  test.use %subgroup_hi, %count : i64, index
+  kernel.return
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// Linear partitioning also establishes dense counts across logical row boundaries.
+amdgpu.target<gfx1151> @device {subgroup_size = 64}
+
+kernel.def target(@device) @linear_multidimensional_wave64() {
+  %unit = index.constant 1 : index
+  %x = index.constant 5 : index
+  %other = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%x, %other, %other) : index
+} launch() {
+  %subgroup = kernel.subgroup.id : index
+  %count = kernel.subgroup.count : index
+  %subgroup_hi = test.fact_range_hi %subgroup : index -> i64
+  test.use %subgroup_hi, %count : i64, index
+  kernel.return
+}
+
+
+// ----
+amdgpu.target<gfx1151> @device {subgroup_size = 64}
+
+kernel.def target(@device) @linear_multidimensional_wave64() {
+  %unit = index.constant 1 : index
+  %x = index.constant 5 : index
+  %other = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%x, %other, %other) : index
+} launch() {
+  %count = index.constant 2 : index
+  %subgroup_hi = scalar.constant 1 : i64
   test.use %subgroup_hi, %count : i64, index
   kernel.return
 }

@@ -202,7 +202,7 @@ typedef struct loom_target_dispatch_workgroup_count_t {
 } loom_target_dispatch_workgroup_count_t;
 
 // Guarantees about partitioning a workgroup into subgroups, ordered from
-// weakest to strongest. None specifies the mapping of workitem IDs to lanes.
+// weakest to strongest. Only LINEAR specifies the workitem-to-lane mapping.
 typedef uint8_t loom_target_subgroup_partition_t;
 typedef enum loom_target_subgroup_partition_e {
   // Subgroups may be partially populated with nonconsecutive active lanes.
@@ -213,6 +213,9 @@ typedef enum loom_target_subgroup_partition_e {
   // Invocations fill successive subgroups with consecutive lane IDs from zero,
   // leaving at most one partial subgroup, for every workgroup shape.
   LOOM_TARGET_SUBGROUP_PARTITION_DENSE = 2,
+  // Dense subgroups in flattened workitem order: x + size_x * (y + size_y * z)
+  // equals subgroup_id * subgroup_size + lane_id.
+  LOOM_TARGET_SUBGROUP_PARTITION_LINEAR = 3,
 } loom_target_subgroup_partition_e;
 
 typedef struct loom_target_snapshot_t {

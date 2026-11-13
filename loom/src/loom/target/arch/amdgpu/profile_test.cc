@@ -24,6 +24,19 @@ static const loom_amdgpu_target_info_t* LookupTarget(const char* name) {
   return target;
 }
 
+TEST(AmdgpuTargetProfileTest, PreservesLinearWorkitemPartitionAcrossFamilies) {
+  for (uint32_t selector = 0; selector < loom_amdgpu_target_bundles.count;
+       ++selector) {
+    const auto* bundle = loom_amdgpu_target_bundles.values[selector];
+    if (!bundle) {
+      continue;
+    }
+    SCOPED_TRACE(selector);
+    EXPECT_EQ(bundle->snapshot->subgroup_partition,
+              LOOM_TARGET_SUBGROUP_PARTITION_LINEAR);
+  }
+}
+
 TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
   const loom_amdgpu_target_info_t* target = LookupTarget("gfx942");
   const loom_amdgpu_target_identity_t identity = {
@@ -98,7 +111,7 @@ TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
   EXPECT_FALSE(facts->subgroup_size_explicit);
   EXPECT_EQ(facts->base.storage.snapshot.subgroup_size, 0u);
   EXPECT_EQ(facts->base.storage.snapshot.subgroup_partition,
-            LOOM_TARGET_SUBGROUP_PARTITION_DENSE);
+            LOOM_TARGET_SUBGROUP_PARTITION_LINEAR);
   EXPECT_FALSE(facts->contract_set_explicit);
 
   // A structured profile can override the preset without changing processor
@@ -129,7 +142,7 @@ TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
   EXPECT_TRUE(overridden->subgroup_size_explicit);
   EXPECT_EQ(overridden->base.storage.snapshot.subgroup_size, 64u);
   EXPECT_EQ(overridden->base.storage.snapshot.subgroup_partition,
-            LOOM_TARGET_SUBGROUP_PARTITION_DENSE);
+            LOOM_TARGET_SUBGROUP_PARTITION_LINEAR);
   EXPECT_TRUE(overridden->contract_set_explicit);
   EXPECT_TRUE(iree_string_view_equal(
       overridden->base.storage.config.contract_set.spelling,

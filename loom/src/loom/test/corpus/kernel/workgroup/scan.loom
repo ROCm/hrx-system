@@ -1,13 +1,21 @@
-// The irregular 80-workitem launch crosses physical subgroup boundaries and
-// leaves a partial final subgroup on current GPU execution profiles without
-// encoding any target's subgroup size in the source.
+// The irregular 5x4x4 launch crosses subgroup and row boundaries. The oracle
+// scans flattened logical workitem order, independently of physical lane IDs.
 kernel.def @workgroup_scan_i32() {
   %unit = index.constant 1 : index
-  %items = index.constant 80 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+  %x = index.constant 5 : index
+  %other = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%x, %other, %other) : index
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %item = kernel.workitem.id<x> : index
+  %x = kernel.workitem.id<x> : index
+  %y = kernel.workitem.id<y> : index
+  %z = kernel.workitem.id<z> : index
+  %size_x = index.constant 5 : index
+  %size_y = index.constant 4 : index
+  %plane = index.mul %z, %size_y : index
+  %row = index.add %plane, %y : index
+  %row_start = index.mul %row, %size_x : index
+  %item = index.add %row_start, %x : index
   %input_view = buffer.view %input[%base] : buffer -> view<80xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<80x4xi32>
   %value = view.load %input_view[%item] : view<80xi32> -> i32
