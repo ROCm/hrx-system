@@ -15,19 +15,20 @@
 extern "C" {
 #endif
 
-// Rewrites a workgroup reduction into subgroup reductions and typed workgroup
-// scratch communication. Hierarchical partials and final results occupy
-// disjoint slots across publication phases. A single-subgroup workgroup needs
-// no scratch.
+// Rewrites a workgroup reduction through dense subgroup partials when the
+// target guarantees that partition. Otherwise logical workitem groups publish
+// bounded component batches through workgroup scratch. Publication barriers
+// delimit ownership and allocation reuse independently of physical subgroup
+// membership.
 iree_status_t loom_kernel_target_legalize_workgroup_reduce(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result);
 
-// Rewrites a workgroup scan into subgroup scans/reductions and typed workgroup
-// scratch communication. Hierarchical partials and subgroup adjustments occupy
-// disjoint slots across publication phases. A single-subgroup workgroup needs
-// no scratch.
+// Rewrites a workgroup scan through subgroup partials only when the target maps
+// them in flattened workitem order. Otherwise logical workitem groups compose
+// ordered prefixes with bounded scratch, including partial groups and empty
+// exclusive prefixes. A single workitem needs no communication.
 iree_status_t loom_kernel_target_legalize_workgroup_scan(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,

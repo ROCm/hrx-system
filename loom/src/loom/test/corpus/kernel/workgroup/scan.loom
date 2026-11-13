@@ -783,3 +783,123 @@ check.scenario @workgroup_scan_extrema_bf16_values {
   }
   check.return
 }
+
+// Independent components span multiple shared-memory batches on portable
+// targets. The tail is partial in both the logical relay and physical subgroup
+// partitions. All four scans reuse their scratch without caller barriers.
+kernel.def @workgroup_scan_wide() {
+  %unit = index.constant 1 : index
+  %items = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<67x8xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<67x4x8xi32>
+  %value = vector.load %source[%item, 0] : view<67x8xi32> -> vector<8xi32>
+  %forward = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : vector<8xi32>
+  %before = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : vector<8xi32>
+  %reverse = kernel.workgroup.scan<addi> %value {direction = reverse, mode = inclusive} : vector<8xi32>
+  %after = kernel.workgroup.scan<addi> %value {direction = reverse, mode = exclusive} : vector<8xi32>
+  vector.store %forward, %destination[%item, 0, 0] : vector<8xi32>, view<67x4x8xi32>
+  vector.store %before, %destination[%item, 1, 0] : vector<8xi32>, view<67x4x8xi32>
+  vector.store %reverse, %destination[%item, 2, 0] : vector<8xi32>, view<67x4x8xi32>
+  vector.store %after, %destination[%item, 3, 0] : vector<8xi32>, view<67x4x8xi32>
+  kernel.return
+}
+
+func.def @workgroup_scan_wide_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %items = index.constant 67 : index
+  %last = index.constant 66 : index
+  %components = index.constant 8 : index
+  %identity = scalar.constant 0 : i32
+  %source = buffer.view %input[%base] : buffer -> view<67x8xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<67x4x8xi32>
+  scf.for %component = [%begin to %components step %unit] {
+    %forward_total, %reverse_total = scf.for %item = [%begin to %items step %unit](%forward = %identity : i32, %reverse = %identity : i32) -> (i32, i32) {
+      %reverse_item = index.sub %last, %item : index
+      %forward_value = view.load %source[%item, %component] : view<67x8xi32> -> i32
+      %reverse_value = view.load %source[%reverse_item, %component] : view<67x8xi32> -> i32
+      %next_forward = scalar.addi %forward, %forward_value : i32
+      %next_reverse = scalar.addi %reverse, %reverse_value : i32
+      view.store %next_forward, %destination[%item, 0, %component] : i32, view<67x4x8xi32>
+      view.store %forward, %destination[%item, 1, %component] : i32, view<67x4x8xi32>
+      view.store %next_reverse, %destination[%reverse_item, 2, %component] : i32, view<67x4x8xi32>
+      view.store %reverse, %destination[%reverse_item, 3, %component] : i32, view<67x4x8xi32>
+      scf.yield %next_forward, %next_reverse : i32, i32
+    }
+  }
+  func.return
+}
+
+check.scenario @workgroup_scan_wide_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-255 to 255) : tensor<67x8xi32>
+    %output = check.generate.fill value(-559038737) : tensor<67x4x8xi32>
+    check.compare<@workgroup_scan_wide, @workgroup_scan_wide_oracle>(%input, %output) : (tensor<67x8xi32>, tensor<67x4x8xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<67x8xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67x4x8xi32>
+    }
+  }
+  check.return
+}
+
+// Predicate addition is parity. The logical fallback stores predicates in
+// bytes; its exclusive endpoints and all published results stay normalized.
+kernel.def @workgroup_scan_predicate() {
+  %unit = index.constant 1 : index
+  %items = index.constant 80 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<80xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<80x4xi32>
+  %word = view.load %source[%item] : view<80xi32> -> i32
+  %value = scalar.trunci %word : i32 to i1
+  %forward = kernel.workgroup.scan<addi> %value {direction = forward, mode = inclusive} : i1
+  %before = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : i1
+  %reverse = kernel.workgroup.scan<addi> %value {direction = reverse, mode = inclusive} : i1
+  %after = kernel.workgroup.scan<addi> %value {direction = reverse, mode = exclusive} : i1
+  %forward_word = scalar.extui %forward : i1 to i32
+  %before_word = scalar.extui %before : i1 to i32
+  %reverse_word = scalar.extui %reverse : i1 to i32
+  %after_word = scalar.extui %after : i1 to i32
+  view.store %forward_word, %destination[%item, 0] : i32, view<80x4xi32>
+  view.store %before_word, %destination[%item, 1] : i32, view<80x4xi32>
+  view.store %reverse_word, %destination[%item, 2] : i32, view<80x4xi32>
+  view.store %after_word, %destination[%item, 3] : i32, view<80x4xi32>
+  kernel.return
+}
+
+func.def @workgroup_scan_predicate_oracle(%input: buffer, %output: buffer) {
+  func.call @workgroup_scan_i32_oracle(%input, %output) : (buffer, buffer)
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 320 : index
+  %unit = index.constant 1 : index
+  %mask = scalar.constant 1 : i32
+  %destination = buffer.view %output[%base] : buffer -> view<320xi32>
+  scf.for %position = [%begin to %end step %unit] {
+    %sum = view.load %destination[%position] : view<320xi32> -> i32
+    %parity = scalar.andi %sum, %mask : i32
+    view.store %parity, %destination[%position] : i32, view<320xi32>
+  }
+  func.return
+}
+
+check.scenario @workgroup_scan_predicate_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-255 to 255) : tensor<80xi32>
+    %output = check.generate.fill value(-1) : tensor<80x4xi32>
+    check.compare<@workgroup_scan_predicate, @workgroup_scan_predicate_oracle>(%input, %output) : (tensor<80xi32>, tensor<80x4xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<80x4xi32>
+    }
+  }
+  check.return
+}

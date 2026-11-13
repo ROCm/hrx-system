@@ -2,7 +2,7 @@
 
 // Three subgroups exceed the two-lane fold width. Empty local prefixes must
 // accept their first nonempty partial directly, then combine later partials.
-test.target<low_core> @target {subgroup_size = 2}
+test.target<linear_subgroups> @target {subgroup_size = 2}
 
 kernel.def target(@target) @partial_reverse() {
   %unit = index.constant 1 : index
@@ -15,7 +15,7 @@ kernel.def target(@target) @partial_reverse() {
 }
 
 // ----
-test.target<low_core> @target {subgroup_size = 2}
+test.target<linear_subgroups> @target {subgroup_size = 2}
 
 kernel.def target(@target) @partial_reverse() {
   %unit = index.constant 1 : index
@@ -24,114 +24,113 @@ kernel.def target(@target) @partial_reverse() {
 } launch(%value: f64) {
   %4 = index.constant 0 : index
   %5 = kernel.subgroup.id : index
-  %6 = index.assume %5 [range(%5, 0, 2)] : index
-  %7 = kernel.subgroup.lane.id : index
-  %8 = index.cmp eq, %7, %4 : index
-  %187 = scalar.constant 2 : i32
-  %220 = scalar.constant 1 : i32
-  %196 = index.cast %7 : index to i32
-  %219 = scalar.constant 0 : i32
-  %199 = scalar.addi %196, %220 : i32
-  %238 = scalar.shrui %199, %220 : i32
-  %201 = scalar.cmpi eq, %238, %219 : i32
-  %202 = scalar.cmpi ult, %199, %187 : i32
-  %204 = scalar.andi %201, %202 : i1
-  %205 = scf.select %204, %199, %196 : i32
-  %236 = scalar.andi %205, %220 : i32
-  %207, %208 = kernel.subgroup.shuffle<index> %value, %236, %187 : f64, i32, i32
-  %209 = scalar.andi %204, %208 : i1
-  %171 = scalar.bitcast %207 : f64 to i64
-  %172 = scalar.bitcast %value : f64 to i64
-  %173 = scalar.ori %171, %172 : i64
-  %174 = scalar.bitcast %173 : i64 to f64
-  %175 = scalar.cmpf olt, %207, %value : f64
-  %176 = scalar.cmpf olt, %value, %207 : f64
-  %177 = scf.select %176, %value, %174 : f64
-  %178 = scf.select %175, %207, %177 : f64
-  %179 = scalar.cmpf une, %207, %207 : f64
-  %180 = scalar.cmpf une, %value, %value : f64
-  %181 = scalar.constant nan : f64
-  %182 = scf.select %180, %181, %value : f64
-  %183 = scf.select %180, %207, %178 : f64
-  %184 = scf.select %179, %182, %183 : f64
-  %140 = scf.select %209, %184, %value : f64
-  %168, %169 = kernel.subgroup.shuffle<index> %140, %236, %187 : f64, i32, i32
-  %170 = scalar.andi %204, %169 : i1
-  %144 = scalar.constant inf : f64
-  %145 = scf.select %170, %168, %144 : f64
-  %86 = kernel.subgroup.active.mask : i32
-  %87 = scalar.ctpopi %86 : i32
-  %229 = scalar.constant -1 : i32
-  %230 = scalar.addi %196, %229 : i32
-  %228 = scalar.shrui %230, %220 : i32
-  %126 = scalar.cmpi eq, %228, %219 : i32
-  %127 = scalar.cmpi ult, %230, %187 : i32
-  %129 = scalar.andi %126, %127 : i1
-  %130 = scf.select %129, %230, %196 : i32
-  %226 = scalar.andi %130, %220 : i32
-  %132, %133 = kernel.subgroup.shuffle<index> %value, %226, %187 : f64, i32, i32
-  %134 = scalar.andi %129, %133 : i1
-  %96 = scalar.bitcast %132 : f64 to i64
-  %98 = scalar.ori %96, %172 : i64
-  %99 = scalar.bitcast %98 : i64 to f64
-  %100 = scalar.cmpf olt, %132, %value : f64
-  %101 = scalar.cmpf olt, %value, %132 : f64
-  %102 = scf.select %101, %value, %99 : f64
-  %103 = scf.select %100, %132, %102 : f64
-  %104 = scalar.cmpf une, %132, %132 : f64
-  %108 = scf.select %180, %132, %103 : f64
-  %109 = scf.select %104, %182, %108 : f64
-  %92 = scf.select %134, %109, %value : f64
-  %224 = scalar.addi %87, %229 : i32
-  %94, %95 = kernel.subgroup.shuffle<index> %92, %224, %187 : f64, i32, i32
-  %11 = index.constant 24 : offset
-  %12 = buffer.alloca<workgroup> align(8) %11 : buffer
-  %13 = index.constant 0 : offset
-  %14 = buffer.view %12[%13] : buffer -> view<3xf64>
-  scf.if %8 {
-    view.store %94, %14[%6] : f64, view<3xf64>
+  %6 = kernel.subgroup.lane.id : index
+  %7 = index.cmp eq, %6, %4 : index
+  %186 = scalar.constant 2 : i32
+  %219 = scalar.constant 1 : i32
+  %195 = index.cast %6 : index to i32
+  %218 = scalar.constant 0 : i32
+  %198 = scalar.addi %195, %219 : i32
+  %237 = scalar.shrui %198, %219 : i32
+  %200 = scalar.cmpi eq, %237, %218 : i32
+  %201 = scalar.cmpi ult, %198, %186 : i32
+  %203 = scalar.andi %200, %201 : i1
+  %204 = scf.select %203, %198, %195 : i32
+  %235 = scalar.andi %204, %219 : i32
+  %206, %207 = kernel.subgroup.shuffle<index> %value, %235, %186 : f64, i32, i32
+  %208 = scalar.andi %203, %207 : i1
+  %170 = scalar.bitcast %206 : f64 to i64
+  %171 = scalar.bitcast %value : f64 to i64
+  %172 = scalar.ori %170, %171 : i64
+  %173 = scalar.bitcast %172 : i64 to f64
+  %174 = scalar.cmpf olt, %206, %value : f64
+  %175 = scalar.cmpf olt, %value, %206 : f64
+  %176 = scf.select %175, %value, %173 : f64
+  %177 = scf.select %174, %206, %176 : f64
+  %178 = scalar.cmpf une, %206, %206 : f64
+  %179 = scalar.cmpf une, %value, %value : f64
+  %180 = scalar.constant nan : f64
+  %181 = scf.select %179, %180, %value : f64
+  %182 = scf.select %179, %206, %177 : f64
+  %183 = scf.select %178, %181, %182 : f64
+  %139 = scf.select %208, %183, %value : f64
+  %167, %168 = kernel.subgroup.shuffle<index> %139, %235, %186 : f64, i32, i32
+  %169 = scalar.andi %203, %168 : i1
+  %143 = scalar.constant inf : f64
+  %144 = scf.select %169, %167, %143 : f64
+  %85 = kernel.subgroup.active.mask : i32
+  %86 = scalar.ctpopi %85 : i32
+  %228 = scalar.constant -1 : i32
+  %229 = scalar.addi %195, %228 : i32
+  %227 = scalar.shrui %229, %219 : i32
+  %125 = scalar.cmpi eq, %227, %218 : i32
+  %126 = scalar.cmpi ult, %229, %186 : i32
+  %128 = scalar.andi %125, %126 : i1
+  %129 = scf.select %128, %229, %195 : i32
+  %225 = scalar.andi %129, %219 : i32
+  %131, %132 = kernel.subgroup.shuffle<index> %value, %225, %186 : f64, i32, i32
+  %133 = scalar.andi %128, %132 : i1
+  %95 = scalar.bitcast %131 : f64 to i64
+  %97 = scalar.ori %95, %171 : i64
+  %98 = scalar.bitcast %97 : i64 to f64
+  %99 = scalar.cmpf olt, %131, %value : f64
+  %100 = scalar.cmpf olt, %value, %131 : f64
+  %101 = scf.select %100, %value, %98 : f64
+  %102 = scf.select %99, %131, %101 : f64
+  %103 = scalar.cmpf une, %131, %131 : f64
+  %107 = scf.select %179, %131, %102 : f64
+  %108 = scf.select %103, %181, %107 : f64
+  %91 = scf.select %133, %108, %value : f64
+  %223 = scalar.addi %86, %228 : i32
+  %93, %94 = kernel.subgroup.shuffle<index> %91, %223, %186 : f64, i32, i32
+  %10 = index.constant 24 : offset
+  %11 = buffer.alloca<workgroup> align(8) %10 : buffer
+  %12 = index.constant 0 : offset
+  %13 = buffer.view %11[%12] : buffer -> view<3xf64>
+  scf.if %7 {
+    view.store %93, %13[%5] : f64, view<3xf64>
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %15 = index.constant 2 : index
-  %16 = index.cmp ne, %6, %15 : index
-  %17 = index.constant 1 : index
-  %19 = scf.select %16, %17, %4 : index
-  %20 = index.cmp ne, %7, %19 : index
-  %29 = index.cmp ugt, %17, %6 : index
-  %30 = view.load %14[%17] : view<3xf64> -> f64
-  %56 = scalar.bitcast %145 : f64 to i64
-  %57 = scalar.bitcast %30 : f64 to i64
-  %58 = scalar.ori %56, %57 : i64
-  %59 = scalar.bitcast %58 : i64 to f64
-  %60 = scalar.cmpf olt, %145, %30 : f64
-  %61 = scalar.cmpf olt, %30, %145 : f64
-  %62 = scf.select %61, %30, %59 : f64
-  %63 = scf.select %60, %145, %62 : f64
-  %64 = scalar.cmpf une, %145, %145 : f64
-  %65 = scalar.cmpf une, %30, %30 : f64
-  %67 = scf.select %65, %181, %30 : f64
-  %68 = scf.select %65, %145, %63 : f64
-  %69 = scf.select %64, %67, %68 : f64
-  %32 = scf.select %20, %69, %30 : f64
-  %33 = scalar.ori %20, %29 : i1
-  %34 = scf.select %29, %32, %145 : f64
-  %36 = index.cmp ugt, %15, %6 : index
-  %37 = view.load %14[%15] : view<3xf64> -> f64
-  %42 = scalar.bitcast %34 : f64 to i64
-  %43 = scalar.bitcast %37 : f64 to i64
-  %44 = scalar.ori %42, %43 : i64
-  %45 = scalar.bitcast %44 : i64 to f64
-  %46 = scalar.cmpf olt, %34, %37 : f64
-  %47 = scalar.cmpf olt, %37, %34 : f64
-  %48 = scf.select %47, %37, %45 : f64
-  %49 = scf.select %46, %34, %48 : f64
-  %50 = scalar.cmpf une, %34, %34 : f64
-  %51 = scalar.cmpf une, %37, %37 : f64
-  %53 = scf.select %51, %181, %37 : f64
-  %54 = scf.select %51, %34, %49 : f64
-  %55 = scf.select %50, %53, %54 : f64
-  %39 = scf.select %33, %55, %37 : f64
-  %result = scf.select %36, %39, %34 : f64
+  %14 = index.constant 2 : index
+  %15 = index.cmp ne, %5, %14 : index
+  %16 = index.constant 1 : index
+  %18 = scf.select %15, %16, %4 : index
+  %19 = index.cmp ne, %6, %18 : index
+  %28 = index.cmp ugt, %16, %5 : index
+  %29 = view.load %13[%16] : view<3xf64> -> f64
+  %55 = scalar.bitcast %144 : f64 to i64
+  %56 = scalar.bitcast %29 : f64 to i64
+  %57 = scalar.ori %55, %56 : i64
+  %58 = scalar.bitcast %57 : i64 to f64
+  %59 = scalar.cmpf olt, %144, %29 : f64
+  %60 = scalar.cmpf olt, %29, %144 : f64
+  %61 = scf.select %60, %29, %58 : f64
+  %62 = scf.select %59, %144, %61 : f64
+  %63 = scalar.cmpf une, %144, %144 : f64
+  %64 = scalar.cmpf une, %29, %29 : f64
+  %66 = scf.select %64, %180, %29 : f64
+  %67 = scf.select %64, %144, %62 : f64
+  %68 = scf.select %63, %66, %67 : f64
+  %31 = scf.select %19, %68, %29 : f64
+  %32 = scalar.ori %19, %28 : i1
+  %33 = scf.select %28, %31, %144 : f64
+  %35 = index.cmp ugt, %14, %5 : index
+  %36 = view.load %13[%14] : view<3xf64> -> f64
+  %41 = scalar.bitcast %33 : f64 to i64
+  %42 = scalar.bitcast %36 : f64 to i64
+  %43 = scalar.ori %41, %42 : i64
+  %44 = scalar.bitcast %43 : i64 to f64
+  %45 = scalar.cmpf olt, %33, %36 : f64
+  %46 = scalar.cmpf olt, %36, %33 : f64
+  %47 = scf.select %46, %36, %44 : f64
+  %48 = scf.select %45, %33, %47 : f64
+  %49 = scalar.cmpf une, %33, %33 : f64
+  %50 = scalar.cmpf une, %36, %36 : f64
+  %52 = scf.select %50, %180, %36 : f64
+  %53 = scf.select %50, %33, %48 : f64
+  %54 = scf.select %49, %52, %53 : f64
+  %38 = scf.select %32, %54, %36 : f64
+  %result = scf.select %35, %38, %33 : f64
   test.use %result : f64
   kernel.return
 }
@@ -141,7 +140,7 @@ kernel.def target(@target) @partial_reverse() {
 
 // Three subgroups exceed the two-lane fold width. Empty local prefixes must
 // accept their first nonempty partial directly, then combine later partials.
-test.target<low_core> @target {subgroup_size = 2}
+test.target<linear_subgroups> @target {subgroup_size = 2}
 
 kernel.def target(@target) @full_forward() {
   %unit = index.constant 1 : index
@@ -154,7 +153,7 @@ kernel.def target(@target) @full_forward() {
 }
 
 // ----
-test.target<low_core> @target {subgroup_size = 2}
+test.target<linear_subgroups> @target {subgroup_size = 2}
 
 kernel.def target(@target) @full_forward() {
   %unit = index.constant 1 : index
@@ -163,104 +162,103 @@ kernel.def target(@target) @full_forward() {
 } launch(%value: f32) {
   %4 = index.constant 0 : index
   %5 = kernel.subgroup.id : index
-  %6 = index.assume %5 [range(%5, 0, 2)] : index
-  %7 = kernel.subgroup.lane.id : index
-  %8 = index.cmp eq, %7, %4 : index
-  %183 = scalar.constant 2 : i32
-  %192 = index.cast %7 : index to i32
-  %215 = scalar.constant 0 : i32
-  %237 = scalar.constant -1 : i32
-  %238 = scalar.addi %192, %237 : i32
-  %235 = scalar.constant 1 : i32
-  %236 = scalar.shrui %238, %235 : i32
-  %197 = scalar.cmpi eq, %236, %215 : i32
-  %198 = scalar.cmpi ult, %238, %183 : i32
-  %200 = scalar.andi %197, %198 : i1
-  %201 = scf.select %200, %238, %192 : i32
-  %234 = scalar.andi %201, %235 : i32
-  %203, %204 = kernel.subgroup.shuffle<index> %value, %234, %183 : f32, i32, i32
-  %205 = scalar.andi %200, %204 : i1
-  %167 = scalar.bitcast %203 : f32 to i32
-  %168 = scalar.bitcast %value : f32 to i32
-  %169 = scalar.andi %167, %168 : i32
-  %170 = scalar.bitcast %169 : i32 to f32
-  %171 = scalar.cmpf ogt, %203, %value : f32
-  %172 = scalar.cmpf ogt, %value, %203 : f32
-  %173 = scf.select %172, %value, %170 : f32
-  %174 = scf.select %171, %203, %173 : f32
-  %175 = scalar.cmpf une, %203, %203 : f32
-  %176 = scalar.cmpf une, %value, %value : f32
-  %177 = scalar.constant nan : f32
-  %178 = scf.select %176, %177, %value : f32
-  %179 = scf.select %176, %203, %174 : f32
-  %180 = scf.select %175, %178, %179 : f32
-  %136 = scf.select %205, %180, %value : f32
-  %164, %165 = kernel.subgroup.shuffle<index> %136, %234, %183 : f32, i32, i32
-  %166 = scalar.andi %200, %165 : i1
-  %140 = scalar.constant -inf : f32
-  %141 = scf.select %166, %164, %140 : f32
-  %82 = kernel.subgroup.active.mask : i32
-  %83 = scalar.ctpopi %82 : i32
-  %128, %129 = kernel.subgroup.shuffle<index> %value, %234, %183 : f32, i32, i32
-  %130 = scalar.andi %200, %129 : i1
-  %92 = scalar.bitcast %128 : f32 to i32
-  %94 = scalar.andi %92, %168 : i32
-  %95 = scalar.bitcast %94 : i32 to f32
-  %96 = scalar.cmpf ogt, %128, %value : f32
-  %97 = scalar.cmpf ogt, %value, %128 : f32
-  %98 = scf.select %97, %value, %95 : f32
-  %99 = scf.select %96, %128, %98 : f32
-  %100 = scalar.cmpf une, %128, %128 : f32
-  %104 = scf.select %176, %128, %99 : f32
-  %105 = scf.select %100, %178, %104 : f32
-  %88 = scf.select %130, %105, %value : f32
-  %220 = scalar.addi %83, %237 : i32
-  %90, %91 = kernel.subgroup.shuffle<index> %88, %220, %183 : f32, i32, i32
-  %11 = index.constant 12 : offset
-  %12 = buffer.alloca<workgroup> align(4) %11 : buffer
-  %13 = index.constant 0 : offset
-  %14 = buffer.view %12[%13] : buffer -> view<3xf32>
-  scf.if %8 {
-    view.store %90, %14[%6] : f32, view<3xf32>
+  %6 = kernel.subgroup.lane.id : index
+  %7 = index.cmp eq, %6, %4 : index
+  %182 = scalar.constant 2 : i32
+  %191 = index.cast %6 : index to i32
+  %214 = scalar.constant 0 : i32
+  %236 = scalar.constant -1 : i32
+  %237 = scalar.addi %191, %236 : i32
+  %234 = scalar.constant 1 : i32
+  %235 = scalar.shrui %237, %234 : i32
+  %196 = scalar.cmpi eq, %235, %214 : i32
+  %197 = scalar.cmpi ult, %237, %182 : i32
+  %199 = scalar.andi %196, %197 : i1
+  %200 = scf.select %199, %237, %191 : i32
+  %233 = scalar.andi %200, %234 : i32
+  %202, %203 = kernel.subgroup.shuffle<index> %value, %233, %182 : f32, i32, i32
+  %204 = scalar.andi %199, %203 : i1
+  %166 = scalar.bitcast %202 : f32 to i32
+  %167 = scalar.bitcast %value : f32 to i32
+  %168 = scalar.andi %166, %167 : i32
+  %169 = scalar.bitcast %168 : i32 to f32
+  %170 = scalar.cmpf ogt, %202, %value : f32
+  %171 = scalar.cmpf ogt, %value, %202 : f32
+  %172 = scf.select %171, %value, %169 : f32
+  %173 = scf.select %170, %202, %172 : f32
+  %174 = scalar.cmpf une, %202, %202 : f32
+  %175 = scalar.cmpf une, %value, %value : f32
+  %176 = scalar.constant nan : f32
+  %177 = scf.select %175, %176, %value : f32
+  %178 = scf.select %175, %202, %173 : f32
+  %179 = scf.select %174, %177, %178 : f32
+  %135 = scf.select %204, %179, %value : f32
+  %163, %164 = kernel.subgroup.shuffle<index> %135, %233, %182 : f32, i32, i32
+  %165 = scalar.andi %199, %164 : i1
+  %139 = scalar.constant -inf : f32
+  %140 = scf.select %165, %163, %139 : f32
+  %81 = kernel.subgroup.active.mask : i32
+  %82 = scalar.ctpopi %81 : i32
+  %127, %128 = kernel.subgroup.shuffle<index> %value, %233, %182 : f32, i32, i32
+  %129 = scalar.andi %199, %128 : i1
+  %91 = scalar.bitcast %127 : f32 to i32
+  %93 = scalar.andi %91, %167 : i32
+  %94 = scalar.bitcast %93 : i32 to f32
+  %95 = scalar.cmpf ogt, %127, %value : f32
+  %96 = scalar.cmpf ogt, %value, %127 : f32
+  %97 = scf.select %96, %value, %94 : f32
+  %98 = scf.select %95, %127, %97 : f32
+  %99 = scalar.cmpf une, %127, %127 : f32
+  %103 = scf.select %175, %127, %98 : f32
+  %104 = scf.select %99, %177, %103 : f32
+  %87 = scf.select %129, %104, %value : f32
+  %219 = scalar.addi %82, %236 : i32
+  %89, %90 = kernel.subgroup.shuffle<index> %87, %219, %182 : f32, i32, i32
+  %10 = index.constant 12 : offset
+  %11 = buffer.alloca<workgroup> align(4) %10 : buffer
+  %12 = index.constant 0 : offset
+  %13 = buffer.view %11[%12] : buffer -> view<3xf32>
+  scf.if %7 {
+    view.store %89, %13[%5] : f32, view<3xf32>
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %16 = index.cmp ne, %7, %4 : index
-  %18 = index.cmp ult, %4, %6 : index
-  %19 = view.load %14[%4] : view<3xf32> -> f32
-  %66 = scalar.bitcast %19 : f32 to i32
-  %67 = scalar.bitcast %141 : f32 to i32
-  %68 = scalar.andi %66, %67 : i32
-  %69 = scalar.bitcast %68 : i32 to f32
-  %70 = scalar.cmpf ogt, %19, %141 : f32
-  %71 = scalar.cmpf ogt, %141, %19 : f32
-  %72 = scf.select %71, %141, %69 : f32
-  %73 = scf.select %70, %19, %72 : f32
-  %74 = scalar.cmpf une, %19, %19 : f32
-  %75 = scalar.cmpf une, %141, %141 : f32
-  %77 = scf.select %75, %177, %141 : f32
-  %78 = scf.select %75, %19, %73 : f32
-  %79 = scf.select %74, %77, %78 : f32
-  %21 = scf.select %16, %79, %19 : f32
-  %22 = scalar.ori %16, %18 : i1
-  %23 = scf.select %18, %21, %141 : f32
-  %24 = index.constant 1 : index
-  %25 = index.cmp ult, %24, %6 : index
-  %26 = view.load %14[%24] : view<3xf32> -> f32
-  %52 = scalar.bitcast %26 : f32 to i32
-  %53 = scalar.bitcast %23 : f32 to i32
-  %54 = scalar.andi %52, %53 : i32
-  %55 = scalar.bitcast %54 : i32 to f32
-  %56 = scalar.cmpf ogt, %26, %23 : f32
-  %57 = scalar.cmpf ogt, %23, %26 : f32
-  %58 = scf.select %57, %23, %55 : f32
-  %59 = scf.select %56, %26, %58 : f32
-  %60 = scalar.cmpf une, %26, %26 : f32
-  %61 = scalar.cmpf une, %23, %23 : f32
-  %63 = scf.select %61, %177, %23 : f32
-  %64 = scf.select %61, %26, %59 : f32
-  %65 = scf.select %60, %63, %64 : f32
-  %28 = scf.select %22, %65, %26 : f32
-  %30 = scf.select %25, %28, %23 : f32
-  test.use %30 : f32
+  %15 = index.cmp ne, %6, %4 : index
+  %17 = index.cmp ult, %4, %5 : index
+  %18 = view.load %13[%4] : view<3xf32> -> f32
+  %65 = scalar.bitcast %18 : f32 to i32
+  %66 = scalar.bitcast %140 : f32 to i32
+  %67 = scalar.andi %65, %66 : i32
+  %68 = scalar.bitcast %67 : i32 to f32
+  %69 = scalar.cmpf ogt, %18, %140 : f32
+  %70 = scalar.cmpf ogt, %140, %18 : f32
+  %71 = scf.select %70, %140, %68 : f32
+  %72 = scf.select %69, %18, %71 : f32
+  %73 = scalar.cmpf une, %18, %18 : f32
+  %74 = scalar.cmpf une, %140, %140 : f32
+  %76 = scf.select %74, %176, %140 : f32
+  %77 = scf.select %74, %18, %72 : f32
+  %78 = scf.select %73, %76, %77 : f32
+  %20 = scf.select %15, %78, %18 : f32
+  %21 = scalar.ori %15, %17 : i1
+  %22 = scf.select %17, %20, %140 : f32
+  %23 = index.constant 1 : index
+  %24 = index.cmp ult, %23, %5 : index
+  %25 = view.load %13[%23] : view<3xf32> -> f32
+  %51 = scalar.bitcast %25 : f32 to i32
+  %52 = scalar.bitcast %22 : f32 to i32
+  %53 = scalar.andi %51, %52 : i32
+  %54 = scalar.bitcast %53 : i32 to f32
+  %55 = scalar.cmpf ogt, %25, %22 : f32
+  %56 = scalar.cmpf ogt, %22, %25 : f32
+  %57 = scf.select %56, %22, %54 : f32
+  %58 = scf.select %55, %25, %57 : f32
+  %59 = scalar.cmpf une, %25, %25 : f32
+  %60 = scalar.cmpf une, %22, %22 : f32
+  %62 = scf.select %60, %176, %22 : f32
+  %63 = scf.select %60, %25, %58 : f32
+  %64 = scf.select %59, %62, %63 : f32
+  %27 = scf.select %21, %64, %25 : f32
+  %29 = scf.select %24, %27, %22 : f32
+  test.use %29 : f32
   kernel.return
 }
