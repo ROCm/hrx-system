@@ -45,3 +45,55 @@ void entry(__float8_e4m3fn* output) { *output = {-449.0f}; }
 // Excess scalar elements keep their owning diagnostic.
 // ERROR@+1: PARSE/036 "excess elements in scalar initializer"
 void entry(int* output) { *output = {1, 2}; }
+
+// ====
+// Library-list clauses keep the frontend's narrowing diagnostics.
+#include <initializer_list>
+void entry(float value) {
+  // ERROR@+1: PARSE/036 "narrowing conversion from 'float' to 'int' in braced-init-list"
+  std::initializer_list<int> values{value};
+}
+
+// ====
+// The backing array's elements are const regardless of the list's cv type.
+#include <initializer_list>
+void entry(int value) {
+  std::initializer_list<int> values{value};
+  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  *values.begin() = 2;
+}
+
+// ====
+// Library representations must carry an element pointer and count/end pair.
+namespace std {
+template<class E> class initializer_list { unsigned count; const E* begin; };
+}
+void entry(int value) {
+  // ERROR@+1: LOWERING/059 "initializer_list requires a const-element pointer followed by an element count or end pointer"
+  std::initializer_list<int> values{value};
+}
+
+// ====
+// Addressable elements cannot serialize opaque references into byte storage.
+#include <initializer_list>
+void entry(int* value) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  std::initializer_list<int*> values{value};
+}
+
+// ====
+// The same storage contract applies recursively to record elements.
+#include <initializer_list>
+struct Borrowed { const int& value; };
+void entry(int value) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  std::initializer_list<Borrowed> values{{value}};
+}
+
+// ====
+// An inner list is itself a reference-bearing object, not a byte payload.
+#include <initializer_list>
+void entry(int value) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  std::initializer_list<std::initializer_list<int>> values{{value}};
+}

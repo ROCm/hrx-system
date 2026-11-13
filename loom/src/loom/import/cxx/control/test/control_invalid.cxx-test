@@ -76,12 +76,3 @@ void entry(int (&values)[]) {
   // ERROR@+1: PARSE/036 "range-based for requires an array with a known bound"
   for (int element : values) {}
 }
-
-// ====
-// Implicit initializer-list backing storage is distinct from iterating an
-// already-constructed array or class range.
-#include <initializer_list>
-void entry() {
-  // ERROR@+1: LOWERING/059 "braced range initializers require initializer-list backing storage; declare an array and iterate over it instead"
-  for (unsigned value : {1u, 2u, 3u}) {}
-}

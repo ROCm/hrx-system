@@ -240,6 +240,22 @@ TemporaryOrigins::Facts TemporaryOrigins::classify(
   };
 }
 
+void TemporaryOrigins::retain_initializer_list(
+    cxx::BracedInitListAST* expression, cxx::BracedInitListAST* backing,
+    bool retain_materialization) {
+  auto child = facts(backing);
+  if (child.lifetime) {
+    // The list is not the backing array's result object. Its dependency
+    // permits extension without letting copies adopt the array's destructor.
+    lifetimes_.push_back({Dependencies{child.lifetime, 0}});
+    expressions_.insert_or_assign(
+        expression, StoredFacts{nullptr, lifetimes_.size(), lifetimes_.size()});
+  }
+  if (retain_materialization) {
+    materializations_.insert_or_assign(expression, expression);
+  }
+}
+
 size_t TemporaryOrigins::aggregate_members(
     cxx::ExpressionAST* initializer, cxx::List<cxx::ExpressionAST*>* elements,
     cxx::VariableSymbol* implicit_element, bool extend_references) {

@@ -9,10 +9,37 @@
 
 namespace std {
 
-// Braced initializer lists use frontend-owned storage. The declaration supplies
-// the standard type identity without introducing a library object ABI.
 template <typename Element>
-class initializer_list;
+class initializer_list {
+ public:
+  using value_type = Element;
+  using reference = const Element&;
+  using const_reference = const Element&;
+  using size_type = decltype(sizeof(0));
+  using iterator = const Element*;
+  using const_iterator = const Element*;
+
+  constexpr initializer_list() noexcept : begin_(nullptr), size_(0) {}
+  constexpr size_type size() const noexcept { return size_; }
+  constexpr const Element* begin() const noexcept { return begin_; }
+  constexpr const Element* end() const noexcept { return begin_ + size_; }
+
+ private:
+  // The compiler initializes this nonowning reference to a const backing array.
+  const Element* begin_;
+  // Number of elements; copying a list never copies or extends the array.
+  size_type size_;
+};
+
+template <typename Element>
+constexpr const Element* begin(initializer_list<Element> list) noexcept {
+  return list.begin();
+}
+
+template <typename Element>
+constexpr const Element* end(initializer_list<Element> list) noexcept {
+  return list.end();
+}
 
 }  // namespace std
 

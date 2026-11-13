@@ -856,6 +856,62 @@ kernel.def @page_present() {
     assert "bool present = page_id >= 0;" in result
 
 
+@pytest.mark.parametrize("width", [8, 16, 32, 64])
+@pytest.mark.parametrize(
+    ("predicate", "token"), [("ult", "<"), ("eq", "=="), ("ne", "!=")]
+)
+def test_comparisons_preserve_bits_across_mixed_signed_uses(
+    width: int, predicate: str, token: str
+) -> None:
+    source = f"""\
+func.def public @compare(%lhs: i{width}, %rhs: i{width}) -> (i1) {{
+  %signed_use = scalar.sitofp %lhs : i{width} to f64
+  %result = scalar.cmpi {predicate}, %lhs, %rhs : i{width}
+  func.return %result : i1
+}}
+"""
+    result = render_module(load_module(source.encode()))
+    interpretation = {
+        8: "unsigned char",
+        16: "unsigned short",
+        32: "unsigned",
+        64: "unsigned long long",
+    }[width]
+    assert f"static_cast<{interpretation}>(lhs) {token} rhs" in result
+
+
+@pytest.mark.parametrize(
+    ("predicate", "token"), [("slt", ">"), ("sle", ">="), ("sgt", "<"), ("sge", "<=")]
+)
+def test_signed_one_bit_comparisons_reverse_boolean_order(
+    predicate: str, token: str
+) -> None:
+    source = f"""\
+func.def public @compare(%lhs: i1, %rhs: i1) -> (i1) {{
+  %result = scalar.cmpi {predicate}, %lhs, %rhs : i1
+  func.return %result : i1
+}}
+"""
+    result = render_module(load_module(source.encode()))
+    assert f"lhs {token} rhs" in result
+
+
+def test_signed_comparison_uses_the_loop_carriers_actual_type() -> None:
+    source = """\
+func.def public @maximum(%lhs: i64, %rhs: i64) -> (i64) {
+  %result = scf.while(%value = %lhs : i64) -> (i64) {
+    %less = scalar.cmpi slt, %value, %rhs : i64
+    scf.condition %less, %value : i1, i64
+  } do(%current: i64) {
+    scf.yield %rhs : i64
+  }
+  func.return %result : i64
+}
+"""
+    result = render_module(load_module(source.encode()))
+    assert "static_cast<long long>(result) < rhs" in result
+
+
 def test_projects_numeric_conversions_through_the_public_facade() -> None:
     source = """\
 kernel.def @conversions() {

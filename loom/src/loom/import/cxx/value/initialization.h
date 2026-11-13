@@ -23,6 +23,8 @@
 
 namespace loom::cxx_import {
 
+struct InitializerList;
+
 // Source aggregate initialization has two destinations: immutable components
 // and addressable objects. In-place initialization publishes each completed
 // subobject before evaluating the next clause; value copies capture all source
@@ -99,6 +101,12 @@ class Initialization {
     // Array copies use their retained element call and projected source
     // storage. The source reference precedes the completed default arguments.
     virtual const ArrayCopyInitialization* array_copy(cxx::AST* owner) = 0;
+    // Retained backing construction, absent for an ordinary aggregate list.
+    virtual const InitializerList* initializer_list(
+        cxx::BracedInitListAST* expression) const = 0;
+    // Constructs an anonymous const array directly in its final storage and
+    // retains that storage in the ordinary temporary cleanup mechanism.
+    virtual Pointer materialize_array(cxx::BracedInitListAST* expression) = 0;
     virtual void call_copy_constructor(
         StorageProjection destination, const RecordPartition& record,
         cxx::FunctionSymbol* constructor, StorageProjection source,
@@ -201,6 +209,8 @@ class Initialization {
   Value materialize_constant(const cxx::ConstValue& value,
                              const cxx::Type* type, cxx::AST* owner);
   Value zero(const cxx::Type* type, cxx::AST* owner);
+  Value initializer_list(const InitializerList& list, const cxx::Type* type,
+                         cxx::AST* owner);
   Value default_record(const RecordPartition& record,
                        cxx::FunctionSymbol* constructor, bool zero_initialize,
                        cxx::AST* owner, std::optional<Value> retained);

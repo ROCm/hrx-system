@@ -9,6 +9,7 @@
 #include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
 #include <cxx/ast_rewriter.h>
+#include <cxx/control.h>
 #include <cxx/function_body.h>
 #include <cxx/initialization.h>
 #include <cxx/lambda_captures.h>
@@ -22,6 +23,7 @@
 
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/initializer_lists.h"
 #include "loom/import/cxx/source/objects.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/scalar/ops.h"
@@ -167,6 +169,19 @@ Value Initialization::value(const cxx::Type* type,
                             cxx::ExpressionAST* initializer,
                             cxx::FunctionSymbol* constructor, cxx::AST* owner,
                             std::optional<Value> retained) {
+  auto* list = cxx::Initializer(initializer).bracedInitList();
+  if (!list) {
+    if (auto* construction =
+            cxx::ast_cast<cxx::BracedTypeConstructionAST>(initializer);
+        construction && !construction->constructorSymbol) {
+      list = construction->bracedInitList;
+    }
+  }
+  if (list && types_.unqualified(type) == types_.unqualified(list->type)) {
+    if (auto* plan = evaluation_.initializer_list(list)) {
+      return initializer_list(*plan, type, owner);
+    }
+  }
   if (auto* conversion = constructor_conversion(initializer);
       conversion && types_.record_constructor_requires_call(
                         type, conversion->conversionFunction, owner)) {
@@ -248,6 +263,37 @@ Value Initialization::value(const cxx::Type* type,
   }
   return from_elements(type, elements, implicit_element, constructor,
                        initializer, owner, retained);
+}
+
+Value Initialization::initializer_list(const InitializerList& list,
+                                       const cxx::Type* type, cxx::AST* owner) {
+  const auto* array = cxx::type_cast<cxx::BoundedArrayType>(list.backing->type);
+  const auto* record = types_.record(type, owner);
+  auto begin = Value(array->size() ? evaluation_.materialize_array(list.backing)
+                                   : storage_.null(owner));
+  std::vector<loom_value_id_t> components;
+  components.reserve(record->component_count);
+  begin.append_to(components);
+  auto traits = unit_.typeTraits();
+  if (traits.is_pointer(list.limit->type())) {
+    auto end = begin;
+    if (array->size()) {
+      auto* count_type = unit_.control()->getSizeType();
+      auto count = scalars_.constant(cxx::ConstValue{uint64_t(array->size())},
+                                     count_type, owner);
+      end = Value(storage_
+                      .advance(storage_.project(begin.pointer(),
+                                                array->elementType(), owner),
+                               count, list.begin->type(), count_type,
+                               cxx::TokenKind::T_PLUS, owner)
+                      .pointer);
+    }
+    end.append_to(components);
+  } else {
+    components.push_back(scalars_.constant(
+        cxx::ConstValue{uint64_t(array->size())}, list.limit->type(), owner));
+  }
+  return arena_.capture(*record, components);
 }
 
 Value Initialization::closure(cxx::LambdaExpressionAST* expression) {

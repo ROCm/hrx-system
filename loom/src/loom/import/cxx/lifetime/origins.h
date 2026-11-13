@@ -36,6 +36,11 @@ class TemporaryOrigins {
   // Reference initializer subtrees additionally retain semantic
   // materializations that have no destruction node.
   void retain(cxx::ExpressionAST* expression, bool retain_materialization);
+  // A list borrows its newly constructed backing array. Copies of the list
+  // do not recreate this dependency or extend the backing array's lifetime.
+  void retain_initializer_list(cxx::BracedInitListAST* expression,
+                               cxx::BracedInitListAST* backing,
+                               bool retain_materialization);
   // Extends the materializations selected by one reference initializer. This
   // consumes the retained lifetime graph, including both conditional arms.
   void extend(cxx::ExpressionAST* initializer);

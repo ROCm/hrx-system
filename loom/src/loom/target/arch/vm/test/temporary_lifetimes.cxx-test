@@ -492,3 +492,192 @@ event 104
 event 3
 OK 0
 retired 0
+
+// ====
+// A named list extends its backing array. A copied list only borrows that
+// array. A call-argument array is destroyed at the full-expression boundary.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Marker emitted once when this backing-array element is destroyed.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+static void consume(std::initializer_list<Guard> values) {
+  unsigned sum = 0;
+  for (const auto& value : values) sum += value.value;
+  observe(100 + sum);
+}
+void run() {
+  {
+    std::initializer_list<Guard> values = {Guard{2}, Guard{3}};
+    observe(4);
+    auto copy = values;
+    consume(copy);
+    observe(5);
+  }
+  observe(6);
+  consume({Guard{7}, Guard{8}});
+  observe(9);
+}
+
+// ----
+event 4
+event 105
+event 5
+event 3
+event 2
+event 6
+event 115
+event 8
+event 7
+event 9
+OK 0
+retired 0
+
+// ====
+// Aggregate members extend their own backing arrays. References to a list
+// temporary and braced range initializers retain the same element lifetimes.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Payload used for the read and reverse destruction observations.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+struct Holder {
+  // Borrowed list whose array lifetime is established by this initializer.
+  std::initializer_list<Guard> values;
+};
+static unsigned early() {
+  for (const auto& value : {Guard{5}, Guard{6}}) return value.value + 10;
+  return 0;
+}
+void run() {
+  {
+    Holder owner{{Guard{1}, Guard{2}}};
+    observe(owner.values.begin()->value + 10);
+  }
+  {
+    const auto& values = std::initializer_list<Guard>{Guard{3}, Guard{4}};
+    observe(values.begin()->value + 10);
+  }
+  observe(early());
+}
+
+// ----
+event 11
+event 2
+event 1
+event 13
+event 4
+event 3
+event 6
+event 5
+event 15
+OK 0
+retired 0
+
+// ====
+// Only a selected list constructs its backing elements. Its local lifetime
+// ends on either an early return or the normal exit through the joined scope.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Value identifying the selected construction and its destruction.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+static void selected(bool condition, bool early) {
+  auto values = condition ? std::initializer_list<Guard>{Guard{1}, Guard{2}}
+                          : std::initializer_list<Guard>{Guard{3}};
+  observe(values.begin()->value + 10);
+  if (early) return;
+  observe(20);
+}
+void run() { selected(true, true); selected(false, false); }
+
+// ----
+event 11
+event 2
+event 1
+event 13
+event 20
+event 3
+OK 0
+retired 0
+
+// ====
+// Copy initialization invokes the selected copy constructor once. Elided
+// prvalues construct in the backing array, preserving escaped this pointers.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Element {
+  // Payload distinguishing the source from the constructed copy.
+  unsigned value;
+  Element(unsigned input, const Element*& identity) : value(input) { identity = this; }
+  Element(const Element& other) : value(other.value + 10) { observe(100 + value); }
+  ~Element() { observe(value); }
+};
+void run() {
+  const Element* original = nullptr;
+  const Element* second = nullptr;
+  Element source{1, original};
+  {
+    std::initializer_list<Element> values{source, Element{2, second}};
+    observe(original == &source);
+    observe(second == values.begin() + 1);
+    observe(values.begin()->value + second->value);
+  }
+  observe(9);
+}
+
+// ----
+event 111
+event 1
+event 1
+event 13
+event 2
+event 11
+event 9
+event 1
+OK 0
+retired 0
+
+// ====
+// Reusing a default initializer evaluates a fresh backing array at each call.
+// Assignment to a list borrows a full-expression array without extending it.
+#include <initializer_list>
+[[loom::import("lifetime", "event")]] void observe(unsigned value);
+struct Guard {
+  // Marker emitted for each dynamic construction's cleanup.
+  unsigned value;
+  ~Guard() { observe(value); }
+};
+static void consume(std::initializer_list<Guard> values = {Guard{2}, Guard{3}}) {
+  observe(values.begin()->value + 10);
+}
+void run() {
+  consume();
+  observe(4);
+  consume();
+  observe(5);
+  std::initializer_list<Guard> borrowed;
+  borrowed = {Guard{6}, Guard{7}};
+  observe(8);
+}
+
+// ----
+event 12
+event 3
+event 2
+event 4
+event 12
+event 3
+event 2
+event 5
+event 7
+event 6
+event 8
+OK 0
+retired 0

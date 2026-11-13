@@ -203,12 +203,39 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "initializer_lists",
+    srcs = ["initializer_lists.cc"],
+    hdrs = ["initializer_lists.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":frontend",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "range_loops",
     srcs = ["range_loops.cc"],
     hdrs = ["range_loops.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = ["//third_party:cxx_parser"],
+)
+
+loom_cc_test(
+    name = "initializer_lists_test",
+    srcs = ["initializer_lists_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":initializer_lists",
+        ":options",
+        ":source",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
 )
 
 loom_cc_test(
