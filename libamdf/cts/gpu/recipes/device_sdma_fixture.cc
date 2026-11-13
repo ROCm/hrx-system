@@ -6,6 +6,8 @@
 
 #include "libamdf/cts/gpu/recipes/device_sdma_fixture.h"
 
+#include <sstream>
+
 template <typename DispatchTest>
 amdf_status_t DeviceSdmaTest<DispatchTest>::MatchGpuEndpoint(
     amdf_endpoint_t* endpoint, bool* out_matches) {
@@ -34,6 +36,42 @@ amdf_status_t DeviceSdmaTest<DispatchTest>::MatchGpuEndpoint(
   }
   *out_matches = matches;
   return AMDF_STATUS_OK;
+}
+
+template <typename DispatchTest>
+std::string DeviceSdmaTest<DispatchTest>::DescribeNativeProgress(
+    const GpuUserQueue& transfer_queue, uint64_t completion_address,
+    uint32_t expected_completion, uint64_t expected_write_index,
+    const GpuUserQueue* producer_queue) const {
+  std::ostringstream description;
+  // These are independent observations, not an atomic snapshot of queues that
+  // may still be progressing after the failed outer join.
+  const auto queue_progress = [&](const char* name, const GpuUserQueue& queue) {
+    description << "\n  " << name << " read="
+                << GpuLoadAcquire<uint64_t>(queue.host.read_index_address)
+                << " write="
+                << GpuLoadAcquire<uint64_t>(queue.host.write_index_address);
+    amdf_user_queue_status_t native = {
+        .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
+        .structure_size = sizeof(native),
+    };
+    const amdf_status_t query =
+        api_->user_queue_query_status(queue.queue, &native);
+    description << " status_query=" << query;
+    if (amdf_status_is_ok(query)) {
+      description << " state=" << native.state
+                  << " terminal_status=" << native.terminal_status;
+    }
+  };
+  queue_progress("SDMA bytes", transfer_queue);
+  description << " expected_write=" << expected_write_index
+              << "\n  completed copy="
+              << GpuLoadAcquire<uint32_t>(completion_address)
+              << " expected=" << expected_completion;
+  if (producer_queue != nullptr) {
+    queue_progress("producer AQL packets", *producer_queue);
+  }
+  return description.str();
 }
 
 template <typename DispatchTest>

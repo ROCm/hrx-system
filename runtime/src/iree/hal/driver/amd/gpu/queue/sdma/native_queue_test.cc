@@ -336,7 +336,6 @@ class QueueTest : public ::testing::Test {
     while (poll(status) && !(out_copy && out_copy->fn)) {
     }
     iree_slim_mutex_deinitialize(&completion.drain_mutex);
-    EXPECT_FALSE(wait.pending);
     return wait;
   }
 
@@ -439,7 +438,9 @@ TEST_F(QueueTest, KernelRetirementOwnsCapacityAndCommandBytes) {
   EXPECT_EQ(copies[0].acceptances, 1u);
   EXPECT_EQ(copies[1].acceptances, 1u);
   EXPECT_EQ(copies[2].acceptances, 0u);
-  Poll();
+  const auto pending = Poll();
+  EXPECT_EQ(pending.address, nullptr);
+  EXPECT_TRUE(pending.pending);
   for (auto& copy : copies) {
     EXPECT_EQ(copy.notifications, 0u);
   }

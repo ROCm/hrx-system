@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <climits>
+#include <cstdio>
 
 #include "api.h"
 #include "hip_device_attribute_validation_test_shim.h"
@@ -14,6 +15,12 @@
 namespace {
 
 constexpr int kOutputSentinel = 0x5a5a5a5a;
+
+void ReportProgress(const char* phase) {
+  std::fprintf(stderr, "[hip-device-attribute-test] progress phase=%s\n",
+               phase);
+  std::fflush(stderr);
+}
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipHalDeinitFn = hipError_t (*)(void);
@@ -56,7 +63,9 @@ class HipDeviceAttributeValidationApiTest : public testing::Test {
  protected:
   void SetUp() override {
     if (!dso_.is_open()) {
+      ReportProgress("dso-open");
       ASSERT_TRUE(dso_.Open()) << dso_.error();
+      ReportProgress("symbol-resolve");
       api_.init = dso_.Resolve<HipInitFn>("hipInit");
       api_.hal_deinit = dso_.Resolve<HipHalDeinitFn>("hipHALDeinit");
       api_.get_device = dso_.Resolve<HipGetDeviceFn>("hipGetDevice");
@@ -83,15 +92,22 @@ class HipDeviceAttributeValidationApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.ext_get_last_error);
     ASSERT_NE(nullptr, api_.peek_at_last_error);
 
+    ReportProgress("hip-init");
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
+    ReportProgress("device-count");
     ASSERT_EQ(hipSuccess, api_.get_device_count(&device_count_));
     ASSERT_GT(device_count_, 0);
 
     current_device_ = device_count_ - 1;
+    ReportProgress("clear-error");
     ASSERT_EQ(hipSuccess, api_.get_last_error());
+    ReportProgress("set-device");
     ASSERT_EQ(hipSuccess, api_.set_device(current_device_));
+    ReportProgress("get-device");
     ExpectCurrentDevice();
+    ReportProgress("peek-error");
     ASSERT_EQ(hipSuccess, api_.peek_at_last_error());
+    ReportProgress("setup-complete");
   }
 
   static void TearDownTestSuite() {
@@ -99,9 +115,12 @@ class HipDeviceAttributeValidationApiTest : public testing::Test {
       return;
     }
     ASSERT_NE(nullptr, api_.hal_deinit);
+    ReportProgress("hal-deinit");
     EXPECT_EQ(hipSuccess, api_.hal_deinit());
     api_ = {};
+    ReportProgress("dso-close");
     EXPECT_TRUE(dso_.Close()) << dso_.error();
+    ReportProgress("suite-complete");
   }
 
   void ExpectCurrentDevice() {
@@ -141,20 +160,28 @@ hrx::hip::testing::HipDso HipDeviceAttributeValidationApiTest::dso_;
 
 TEST_F(HipDeviceAttributeValidationApiTest,
        SupportedQueryPreservesPendingErrorAndCurrentDevice) {
+  ReportProgress("invalid-attribute-query");
   ASSERT_EQ(hipErrorInvalidValue,
             GetDeviceAttribute(nullptr, hipDeviceAttributeMaxThreadsPerBlock,
                                /*device=*/0));
+  ReportProgress("invalid-error-peek");
   ASSERT_EQ(hipErrorInvalidValue, api_.peek_at_last_error());
 
   int attribute_value = kOutputSentinel;
+  ReportProgress("valid-attribute-query");
   EXPECT_EQ(hipSuccess, GetDeviceAttribute(&attribute_value,
                                            hipDeviceAttributeMaxThreadsPerBlock,
                                            /*device=*/0));
   EXPECT_GT(attribute_value, 0);
+  ReportProgress("get-device");
   ExpectCurrentDevice();
+  ReportProgress("pending-error-peek");
   EXPECT_EQ(hipErrorInvalidValue, api_.peek_at_last_error());
+  ReportProgress("pending-error-consume");
   EXPECT_EQ(hipErrorInvalidValue, api_.get_last_error());
+  ReportProgress("cleared-error-peek");
   EXPECT_EQ(hipSuccess, api_.peek_at_last_error());
+  ReportProgress("test-complete");
 }
 
 TEST_F(HipDeviceAttributeValidationApiTest,

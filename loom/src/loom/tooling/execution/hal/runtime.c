@@ -13,6 +13,15 @@
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/tooling/device_util.h"
 
+static iree_status_t loom_run_hal_runtime_emit_progress(
+    const loom_run_hal_runtime_options_t* options,
+    loom_run_hal_runtime_progress_phase_t phase) {
+  if (options->progress_sink.fn == NULL) {
+    return iree_ok_status();
+  }
+  return options->progress_sink.fn(options->progress_sink.user_data, phase);
+}
+
 static iree_status_t loom_run_hal_runtime_select_queue(
     iree_hal_device_t* device,
     iree_hal_queue_family_role_flags_t required_roles, const char* role_name,
@@ -60,6 +69,7 @@ static void loom_run_hal_runtime_add_family_access(
 }
 
 static iree_status_t loom_run_hal_runtime_create_pools(
+    const loom_run_hal_runtime_options_t* options,
     loom_run_hal_runtime_t* runtime, iree_allocator_t host_allocator) {
   iree_hal_pool_family_access_t family_accesses[2] = {0};
   iree_host_size_t family_access_count = 0;
@@ -78,9 +88,13 @@ static iree_status_t loom_run_hal_runtime_create_pools(
   device_source_options.trace_name = IREE_SV("loom.device.source");
 
   iree_hal_pool_t* device_source_pool = NULL;
-  iree_status_t status = iree_hal_slab_pool_create(
-      runtime->device_group, device_scope, &device_source_options,
-      host_allocator, &device_source_pool);
+  iree_status_t status = loom_run_hal_runtime_emit_progress(
+      options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DEVICE_SOURCE_POOL_CREATE);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_slab_pool_create(runtime->device_group, device_scope,
+                                       &device_source_options, host_allocator,
+                                       &device_source_pool);
+  }
   if (iree_status_is_ok(status)) {
     const iree_hal_device_spec_t* device_spec =
         iree_hal_device_spec(runtime->device);
@@ -108,8 +122,12 @@ static iree_status_t loom_run_hal_runtime_create_pools(
                          IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
       device_options.asan = sanitizer_spec->asan.pool_options;
     }
-    status = iree_hal_tlsf_pool_create(device_source_pool, &device_options,
-                                       host_allocator, &runtime->device_pool);
+    status = loom_run_hal_runtime_emit_progress(
+        options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DEVICE_POOL_CREATE);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_tlsf_pool_create(device_source_pool, &device_options,
+                                         host_allocator, &runtime->device_pool);
+    }
   }
   iree_hal_pool_release(device_source_pool);
   if (!iree_status_is_ok(status)) {
@@ -130,6 +148,8 @@ static iree_status_t loom_run_hal_runtime_create_pools(
   iree_hal_slab_pool_options_t staging_options;
   iree_hal_slab_pool_options_initialize(&staging_options);
   staging_options.trace_name = IREE_SV("loom.staging");
+  IREE_RETURN_IF_ERROR(loom_run_hal_runtime_emit_progress(
+      options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_STAGING_POOL_CREATE));
   return iree_hal_slab_pool_create(runtime->device_group, staging_scope,
                                    &staging_options, host_allocator,
                                    &runtime->staging_pool);
@@ -151,13 +171,25 @@ iree_status_t loom_run_hal_runtime_initialize(
 
   iree_async_proactor_pool_t* proactor_pool = NULL;
   iree_async_frontier_tracker_t* frontier_tracker = NULL;
-  iree_status_t status = iree_async_proactor_pool_create(
-      iree_numa_node_count(), /*node_ids=*/NULL,
-      iree_async_proactor_pool_options_default(), allocator, &proactor_pool);
+  iree_status_t status = loom_run_hal_runtime_emit_progress(
+      options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_PROACTOR_POOL_CREATE);
   if (iree_status_is_ok(status)) {
-    status = iree_async_frontier_tracker_create(
-        iree_async_frontier_tracker_options_default(), allocator,
-        &frontier_tracker);
+    status = iree_async_proactor_pool_create(
+        iree_numa_node_count(), /*node_ids=*/NULL,
+        iree_async_proactor_pool_options_default(), allocator, &proactor_pool);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_emit_progress(
+        options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_FRONTIER_TRACKER_CREATE);
+    if (iree_status_is_ok(status)) {
+      status = iree_async_frontier_tracker_create(
+          iree_async_frontier_tracker_options_default(), allocator,
+          &frontier_tracker);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_emit_progress(
+        options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DEVICE_CREATE);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_device_create_params_t create_params =
@@ -169,7 +201,17 @@ iree_status_t loom_run_hal_runtime_initialize(
         iree_hal_available_driver_registry(), options->hal_driver_name,
         &create_params, allocator, &out_runtime->device);
   }
-  iree_async_proactor_pool_release(proactor_pool);
+  if (proactor_pool != NULL) {
+    status = iree_status_join(
+        status, loom_run_hal_runtime_emit_progress(
+                    options,
+                    LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_PROACTOR_POOL_RELEASE));
+    iree_async_proactor_pool_release(proactor_pool);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_emit_progress(
+        options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DEVICE_GROUP_CREATE);
+  }
   if (iree_status_is_ok(status)) {
     // Group assignment establishes the device frontier and materializes its
     // configured hardware queues, so queue lookup must follow finalization.
@@ -177,7 +219,18 @@ iree_status_t loom_run_hal_runtime_initialize(
         out_runtime->device, frontier_tracker, allocator,
         &out_runtime->device_group);
   }
-  iree_async_frontier_tracker_release(frontier_tracker);
+  if (frontier_tracker != NULL) {
+    status = iree_status_join(
+        status,
+        loom_run_hal_runtime_emit_progress(
+            options,
+            LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_FRONTIER_TRACKER_RELEASE));
+    iree_async_frontier_tracker_release(frontier_tracker);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_emit_progress(
+        options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_DISPATCH_QUEUE_SELECT);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_runtime_select_queue(
         out_runtime->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
@@ -189,14 +242,22 @@ iree_status_t loom_run_hal_runtime_initialize(
         "HAL device has no provisioned dispatch-capable queue");
   }
   if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_emit_progress(
+        options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_TRANSFER_QUEUE_SELECT);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_run_hal_runtime_select_queue(
         out_runtime->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
         "transfer", &out_runtime->transfer_queue);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_run_hal_runtime_create_pools(out_runtime, allocator);
+    status = loom_run_hal_runtime_create_pools(options, out_runtime, allocator);
   }
   if (!iree_status_is_ok(status)) {
+    status = iree_status_join(
+        status,
+        loom_run_hal_runtime_emit_progress(
+            options, LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_FAILURE_DEINITIALIZE));
     loom_run_hal_runtime_deinitialize(out_runtime);
   }
   return status;

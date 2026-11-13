@@ -37,12 +37,20 @@ typedef struct iree_hal_amd_gpu_retirement_callback_t {
   void* user_data;
 } iree_hal_amd_gpu_retirement_callback_t;
 
-// A coherent host word whose change requests another source drain. Pending
-// work keeps observation active; passive publication and notification hints
-// are observed only while another source has pending work. When all sources
-// are idle, the worker parks on the native event. This is only a wake hint:
-// the source still establishes retirement before releasing resources. No
-// driver call or MMIO read is permitted to observe this word.
+// Maximum native-event wait between authoritative completion queries while
+// accepted work remains pending. Expiry requests another source drain; it is
+// not an execution deadline. An idle device continues to park indefinitely.
+enum { IREE_HAL_AMD_GPU_COMPLETION_RECHECK_MILLISECONDS = 5 };
+
+// A coherent host word whose change requests another source drain. The word
+// is optional: event-only sources report pending work without an address so
+// the worker periodically requeries their authoritative native status instead
+// of actively observing memory. Passive publication and notification hints
+// are observed only while all pending work is coherently observable. When all
+// sources are idle, the worker parks on the native event. Native events and
+// coherent words are only wake hints: the source still establishes retirement
+// before releasing resources. No driver call or MMIO read is permitted to
+// observe this word.
 typedef struct iree_hal_amd_gpu_completion_wait_t {
   // Borrowed CPU-cacheable 32- or 64-bit atomic word, or NULL for event-only
   // observation. Width is selected by is_64_bit.
@@ -56,8 +64,9 @@ typedef struct iree_hal_amd_gpu_completion_wait_t {
   struct iree_hal_amd_gpu_signal_t* signal;
   // Word width; false selects a signed 32-bit load, true a signed 64-bit load.
   bool is_64_bit;
-  // Outstanding work that warrants active observation. Passive hints do not
-  // keep an otherwise idle worker awake.
+  // Outstanding accepted work. This selects bounded native-event rechecks;
+  // address independently determines whether active observation is possible.
+  // Passive hints do not keep an otherwise idle worker awake.
   bool pending;
 } iree_hal_amd_gpu_completion_wait_t;
 
@@ -115,9 +124,11 @@ typedef struct iree_hal_amd_gpu_completion_source_t {
 
 // One high-priority completion worker per device. Its source array has
 // no submission-time activation or registration traffic. The worker waits
-// on coherent completion words for a bounded interval after actual progress,
-// then on the context's native event. GPU producers and host stop signals share
-// that event. No timer, polling thread, or per-queue worker is created.
+// on coherent completion words for a bounded interval after actual progress
+// only when every pending source supplies such a word. Event-only pending work
+// uses bounded native-event waits followed by authoritative source requery;
+// idle devices wait indefinitely. GPU producers and host stop signals share
+// the native event. No timer, polling thread, or per-queue worker is created.
 // The embedding owner joins accepted work before stopping this worker.
 typedef struct iree_hal_amd_gpu_completion_t {
   // Borrowed context whose event and API table outlive the worker join.

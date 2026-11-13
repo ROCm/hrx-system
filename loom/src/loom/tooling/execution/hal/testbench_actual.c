@@ -119,6 +119,30 @@ iree_status_t loom_run_hal_testbench_context_emit_progress(
   return context->progress_sink.fn(context->progress_sink.user_data, phase);
 }
 
+static iree_status_t loom_run_hal_testbench_context_emit_runtime_progress(
+    void* user_data, loom_run_hal_runtime_progress_phase_t phase) {
+  static const loom_run_hal_testbench_progress_phase_t kPhaseMap[] = {
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_PROACTOR_POOL_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FRONTIER_TRACKER_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_PROACTOR_POOL_RELEASE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_GROUP_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FRONTIER_TRACKER_RELEASE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DISPATCH_QUEUE_SELECT,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_TRANSFER_QUEUE_SELECT,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_SOURCE_POOL_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_DEVICE_POOL_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_STAGING_POOL_CREATE,
+      LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_FAILURE_DEINITIALIZE,
+  };
+  static_assert(
+      IREE_ARRAYSIZE(kPhaseMap) == LOOM_RUN_HAL_RUNTIME_PROGRESS_PHASE_COUNT,
+      "runtime progress phase map must remain complete");
+  IREE_ASSERT((uint32_t)phase < IREE_ARRAYSIZE(kPhaseMap));
+  return loom_run_hal_testbench_context_emit_progress(
+      (loom_run_hal_testbench_context_t*)user_data, kPhaseMap[phase]);
+}
+
 iree_status_t loom_run_hal_testbench_context_add_module_runtime_requirements(
     loom_run_hal_testbench_context_t* context, const loomc_module_t* module,
     const loomc_sanitizer_options_t* sanitizer_options,
@@ -209,6 +233,10 @@ iree_status_t loom_run_hal_testbench_context_ensure_runtime(
                                           &runtime_options);
   runtime_options.event_sink = context->device_event_sink;
   runtime_options.runtime_features = context->runtime_features;
+  runtime_options.progress_sink = (loom_run_hal_runtime_progress_sink_t){
+      .fn = loom_run_hal_testbench_context_emit_runtime_progress,
+      .user_data = context,
+  };
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
       context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_RUNTIME_INITIALIZE));
   iree_status_t status = loom_run_hal_runtime_initialize(
