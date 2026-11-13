@@ -16,6 +16,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/format/bytecode/index.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/ir.h"
@@ -97,6 +98,8 @@ typedef struct loom_link_module_index_add_options_t {
   iree_string_view_t provider_name;
   // Provider linkage role. Zero defaults to INPUT.
   loom_link_provider_role_t role;
+  // Optional structured diagnostics for materialized symbol admission.
+  iree_diagnostic_emitter_t diagnostic_emitter;
 } loom_link_module_index_add_options_t;
 
 // Indexed provider record.
@@ -290,6 +293,12 @@ loom_context_t* loom_link_module_index_context(
     const loom_link_module_index_t* index);
 
 // Adds one caller-owned materialized module to |index|.
+//
+// Addition APIs append no provider on diagnosed rejection and leave a supplied
+// |out_provider_ordinal| INVALID_ORDINAL. Callers admitting user input inspect
+// that result even without a diagnostic callback. Statuses report
+// infrastructure failures. Provider roles and materialized contexts are
+// admitted by the caller.
 iree_status_t loom_link_module_index_add_materialized(
     loom_link_module_index_t* index, const loom_module_t* module,
     const loom_link_module_index_add_options_t* options,

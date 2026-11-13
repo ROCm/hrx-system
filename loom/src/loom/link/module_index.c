@@ -9,6 +9,9 @@
 #include <string.h>
 
 #include "loom/analysis/symbol_references.h"
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
+#include "loom/error/source.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/input_contracts.h"
@@ -199,14 +202,31 @@ static iree_string_view_t loom_link_materialized_module_name(
   return loom_string_table_get(&module->strings, module->name_id);
 }
 
-static iree_status_t loom_link_index_validate_materialized_module(
-    const loom_module_t* module) {
-  if (module->name_id >= module->strings.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "module name id %u is out of range",
-                            (unsigned)module->name_id);
+static iree_status_t loom_link_index_admit_materialized_module(
+    const loom_module_t* module,
+    const loom_link_module_index_add_options_t* options,
+    const loom_source_resolver_t* source_resolver, bool* out_accepted) {
+  *out_accepted = false;
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    const loom_op_t* op = module->symbols.entries[i].defining_op;
+    if (op && !loom_op_is_direct_module_child(module, op)) {
+      const loom_diagnostic_param_t parameter =
+          loom_param_string(loom_op_name(module, op));
+      const loom_diagnostic_emission_t emission = {
+          .module = module,
+          .op = op,
+          .source_resolver = source_resolver,
+          .error = LOOM_ERR_STRUCTURE_049,
+          .params = &parameter,
+          .param_count = 1,
+      };
+      return iree_diagnostic_emit(options ? options->diagnostic_emitter
+                                          : (iree_diagnostic_emitter_t){0},
+                                  &emission);
+    }
   }
-  return loom_module_validate_symbol_definitions(module);
+  *out_accepted = true;
+  return iree_ok_status();
 }
 
 static iree_host_size_t loom_link_index_local_provider_ordinal(
@@ -556,12 +576,6 @@ static iree_status_t loom_link_index_insert_symbol_name(
 static iree_status_t loom_link_index_resolve_template_family(
     loom_link_module_index_t* index, iree_host_size_t family_symbol_ordinal,
     loom_link_template_family_ordinal_t* out_ordinal) {
-  if (family_symbol_ordinal < index->base.symbol_count ||
-      family_symbol_ordinal >= loom_link_module_index_symbol_count(index)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "template family symbol ordinal is out of range");
-  }
-
   loom_link_module_index_symbol_t* family_symbol =
       loom_link_index_local_symbol_at(index, family_symbol_ordinal);
   loom_link_template_family_ordinal_t* identity_ordinal =
@@ -711,10 +725,6 @@ static iree_status_t loom_link_index_append_provider(
       provider_name = options->provider_name;
     }
     role = options->role;
-  }
-  if (role > LOOM_LINK_PROVIDER_ROLE_LIBRARY) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown link provider role %u", (unsigned)role);
   }
 
   iree_host_size_t provider_ordinal = 0;
@@ -1062,12 +1072,6 @@ static iree_status_t loom_link_index_module_materialized_symbols(
     const loom_module_t* source_module) {
   for (iree_host_size_t i = 0; i < source_module->symbols.count; ++i) {
     const loom_symbol_t* symbol = &source_module->symbols.entries[i];
-    if (symbol->name_id >= source_module->strings.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "source symbol %" PRIhsz
-                              " has out-of-range name id %u",
-                              i, (unsigned)symbol->name_id);
-    }
     iree_string_view_t name =
         loom_string_table_get(&source_module->strings, symbol->name_id);
     loom_link_symbol_identity_t identity =
@@ -1122,14 +1126,6 @@ static iree_status_t loom_link_index_project_materialized_template_families(
     loom_func_like_t function =
         loom_func_like_cast(source_module, source_symbol->defining_op);
     const loom_symbol_ref_t family = loom_func_like_template_family(function);
-    if (!loom_func_like_isa(function) || !loom_symbol_ref_is_valid(family) ||
-        family.module_id != 0 ||
-        family.symbol_id >= source_module->symbols.count) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "template provider '%.*s' has an invalid family symbol",
-          (int)symbol->name.size, symbol->name.data);
-    }
     IREE_RETURN_IF_ERROR(loom_link_index_resolve_template_family(
         index, module->symbol_start_ordinal + family.symbol_id,
         &symbol->template_family_ordinal));
@@ -1161,13 +1157,7 @@ static iree_status_t loom_link_index_project_bytecode_template_families(
     if (!loom_link_symbol_is_template_provider(symbol->kind)) {
       continue;
     }
-    if (source_symbol->template_family_symbol_ordinal >=
-        bytecode_module->symbol_count) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "template provider '%.*s' has an invalid family symbol ordinal",
-          (int)symbol->name.size, symbol->name.data);
-    }
+
     IREE_RETURN_IF_ERROR(loom_link_index_resolve_template_family(
         index,
         module->symbol_start_ordinal +
@@ -1457,15 +1447,6 @@ iree_status_t loom_link_module_index_allocate_overlay(
   IREE_ASSERT_ARGUMENT(base_index);
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_index);
-  if (base_index->base.index != NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "module index overlays cannot be nested");
-  }
-  if (loom_link_module_index_input_provider_count(base_index) != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "module index overlays require a library-only base index");
-  }
   return loom_link_module_index_allocate_impl(
       loom_link_module_index_context(base_index), base_index, block_pool,
       allocator, out_index);
@@ -1503,11 +1484,15 @@ iree_status_t loom_link_module_index_add_materialized(
     iree_host_size_t* out_provider_ordinal) {
   IREE_ASSERT_ARGUMENT(index);
   IREE_ASSERT_ARGUMENT(module);
-  if (module->context != index->context) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "materialized provider context mismatch");
+  if (out_provider_ordinal) {
+    *out_provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
   }
-  IREE_RETURN_IF_ERROR(loom_link_index_validate_materialized_module(module));
+  bool accepted = false;
+  IREE_RETURN_IF_ERROR(loom_link_index_admit_materialized_module(
+      module, options, NULL, &accepted));
+  if (!accepted) {
+    return iree_ok_status();
+  }
 
   loom_link_module_index_provider_t* provider = NULL;
   IREE_RETURN_IF_ERROR(loom_link_index_append_provider(
@@ -1539,16 +1524,16 @@ iree_status_t loom_link_module_index_add_bytecode(
     iree_host_size_t* out_provider_ordinal) {
   IREE_ASSERT_ARGUMENT(index);
 
+  if (out_provider_ordinal) {
+    *out_provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  }
   loom_bytecode_read_result_t read_result = {0};
   loom_bytecode_file_metadata_t metadata = {0};
   IREE_RETURN_IF_ERROR(loom_bytecode_read_index(
       bytecode, filename, index->context, index->block_pool, &index->arena,
       index_options, &read_result, &metadata));
   if (read_result.error_count > 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "bytecode provider '%.*s' has %u validation errors",
-                            (int)filename.size, filename.data,
-                            read_result.error_count);
+    return iree_ok_status();
   }
 
   const bool provider_name_is_filename =
@@ -1594,6 +1579,9 @@ iree_status_t loom_link_module_index_add_text(
     const loom_link_module_index_add_options_t* options,
     iree_host_size_t* out_provider_ordinal) {
   IREE_ASSERT_ARGUMENT(index);
+  if (out_provider_ordinal) {
+    *out_provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  }
 
   iree_arena_allocator_t symbol_reference_arena;
   iree_arena_initialize(index->block_pool, &symbol_reference_arena);
@@ -1603,23 +1591,36 @@ iree_status_t loom_link_module_index_add_text(
   iree_status_t status = loom_text_parse_with_symbol_references(
       source, filename, index->context, index->block_pool, parse_options,
       &symbol_reference_arena, &symbol_references, &module);
-  if (iree_status_is_ok(status) && !module) {
-    status =
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "text provider '%.*s' did not parse into a module",
-                         (int)filename.size, filename.data);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_link_index_validate_materialized_module(module);
+  bool accepted = false;
+  if (iree_status_is_ok(status) && module) {
+    // Parsing assigns the primary input source ID before authored aliases.
+    // Retain that direct correspondence while admission can still diagnose.
+    const loom_source_entry_t source_entry = {
+        .source_id =
+            iree_string_view_is_empty(filename) ? LOOM_SOURCE_ID_INVALID : 0,
+        .source = source,
+        .filename = filename,
+    };
+    loom_source_table_resolver_t source_table = {
+        .module = module,
+        .entries = &source_entry,
+        .count = 1,
+    };
+    const loom_source_resolver_t resolver = {
+        .fn = loom_source_table_resolve,
+        .user_data = &source_table,
+    };
+    status = loom_link_index_admit_materialized_module(module, options,
+                                                       &resolver, &accepted);
   }
 
   loom_link_module_index_provider_t* provider = NULL;
   bool module_owned_by_index = false;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && accepted) {
     status = loom_link_index_append_provider(index, LOOM_LINK_PROVIDER_TEXT,
                                              filename, options, &provider);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && accepted) {
     loom_link_module_index_module_t* indexed_module = NULL;
     status = loom_link_index_append_module(
         index, provider, /*provider_module_ordinal=*/0,
@@ -1649,7 +1650,7 @@ iree_status_t loom_link_module_index_add_text(
   }
 
   iree_arena_deinitialize(&symbol_reference_arena);
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) || !accepted) {
     if (module && !module_owned_by_index) {
       loom_module_free(module);
     }

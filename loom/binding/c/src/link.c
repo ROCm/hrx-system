@@ -389,7 +389,7 @@ static loomc_status_t loomc_link_translate_operation_status(
 
 static loomc_status_t loomc_link_module_overlay_initialize(
     const loomc_linker_t* linker, loomc_workspace_t* workspace,
-    const loomc_link_options_t* options,
+    const loomc_link_options_t* options, loomc_result_t* result,
     loomc_link_module_overlay_t* out_overlay) {
   *out_overlay = (loomc_link_module_overlay_t){0};
   const loom_link_module_index_t* base_index =
@@ -415,18 +415,20 @@ static loomc_status_t loomc_link_module_overlay_initialize(
                 loomc_workspace_block_pool(workspace), allocator,
                 &module_index));
   for (loomc_host_size_t i = 0;
-       loomc_status_is_ok(status) && i < options->module_provider_count; ++i) {
+       loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+       i < options->module_provider_count;
+       ++i) {
     const loomc_link_module_provider_t* provider =
         &options->module_providers[i];
-    const loom_link_module_index_add_options_t add_options = {
-        .provider_name = iree_string_view_from_loomc(provider->provider_name),
-        .role = loomc_link_provider_role_to_loom(provider->role),
+    const loomc_link_index_source_options_t add_options = {
+        .provider_name = provider->provider_name,
+        .role = provider->role,
     };
-    status = loomc_status_from_iree(loom_link_module_index_add_materialized(
-        module_index, loomc_module_const_loom_module(provider->module),
-        &add_options, /*out_provider_ordinal=*/NULL));
+    status = loomc_link_index_add_module_to_module_index(
+        module_index, provider->module, &add_options, result,
+        /*out_provider_ordinal=*/NULL);
   }
-  if (loomc_status_is_ok(status)) {
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     *out_overlay = (loomc_link_module_overlay_t){
         .module_index = module_index,
         .owned_index = module_index,
@@ -696,7 +698,7 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
       options->target_profile;
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_link_module_overlay_initialize(linker, workspace, options,
-                                                  &overlay);
+                                                  result, &overlay);
   }
 
   iree_string_view_t* root_symbols = NULL;

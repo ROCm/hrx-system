@@ -977,10 +977,10 @@ func.def @parent() {
   };
 
   IndexPtr materialized_index = CreateIndex();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_link_module_index_add_materialized(
-                            materialized_index.get(), module, &options,
-                            /*out_provider_ordinal=*/nullptr));
+  iree_host_size_t provider_ordinal = 0;
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options, &provider_ordinal));
+  EXPECT_EQ(provider_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
   EXPECT_EQ(loom_link_module_index_provider_count(materialized_index.get()),
             0u);
 
@@ -995,12 +995,57 @@ func.def @parent() {
   iree_io_stream_release(stream);
 
   IndexPtr text_index = CreateIndex();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_link_module_index_add_text(
-                            text_index.get(), source, IREE_SV("nested.loom"),
-                            /*parse_options=*/nullptr, &options,
-                            /*out_provider_ordinal=*/nullptr));
+  provider_ordinal = 0;
+  IREE_ASSERT_OK(loom_link_module_index_add_text(
+      text_index.get(), source, IREE_SV("nested.loom"),
+      /*parse_options=*/nullptr, &options, &provider_ordinal));
+  EXPECT_EQ(provider_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
   EXPECT_EQ(loom_link_module_index_provider_count(text_index.get()), 0u);
+}
+
+TEST_F(ModuleIndexTest, RejectedInputDoesNotPublishWithoutDiagnosticCallback) {
+  IndexPtr index = CreateIndex();
+  iree_host_size_t provider_ordinal = 0;
+  IREE_ASSERT_OK(loom_link_module_index_add_text(
+      index.get(), IREE_SV("?"), IREE_SV("broken.loom"), nullptr, nullptr,
+      &provider_ordinal));
+  EXPECT_EQ(provider_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+  EXPECT_EQ(loom_link_module_index_provider_count(index.get()), 0u);
+
+  provider_ordinal = 0;
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      index.get(), iree_const_byte_span_empty(), IREE_SV("broken.loombc"),
+      nullptr, nullptr, &provider_ordinal));
+  EXPECT_EQ(provider_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+  EXPECT_EQ(loom_link_module_index_provider_count(index.get()), 0u);
+}
+
+TEST_F(ModuleIndexTest, DiagnosticSinkFailureRemainsInfrastructureFailure) {
+  const loom_diagnostic_sink_t sink = {
+      [](void*, const loom_diagnostic_t*) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      },
+      nullptr,
+  };
+  IndexPtr index = CreateIndex();
+  iree_host_size_t provider_ordinal = 0;
+  const loom_text_parse_options_t parse_options = {.diagnostic_sink = sink};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_link_module_index_add_text(
+                            index.get(), IREE_SV("?"), IREE_SV("broken.loom"),
+                            &parse_options, nullptr, &provider_ordinal));
+  EXPECT_EQ(provider_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+  EXPECT_EQ(loom_link_module_index_provider_count(index.get()), 0u);
+
+  provider_ordinal = 0;
+  const loom_bytecode_index_options_t index_options = {.diagnostic_sink = sink};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_link_module_index_add_bytecode(
+          index.get(), iree_const_byte_span_empty(), IREE_SV("broken.loombc"),
+          &index_options, nullptr, &provider_ordinal));
+  EXPECT_EQ(provider_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+  EXPECT_EQ(loom_link_module_index_provider_count(index.get()), 0u);
 }
 
 TEST_F(ModuleIndexTest, DuplicatePrivateNamesRemainProviderLocal) {
@@ -1050,41 +1095,6 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_EQ(
       loom_link_module_index_lookup_global(index.get(), IREE_SV("helper")),
       nullptr);
-}
-
-TEST_F(ModuleIndexTest, OverlayRequiresLibraryOnlyBase) {
-  loom_module_t* input = Parse(IREE_SV(R"(
-func.def public @entry() {
-  func.return
-}
-)"));
-  IndexPtr base_index = CreateIndex();
-  const loom_link_module_index_add_options_t input_options = {
-      .provider_name = IREE_SV("input"),
-      .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
-  };
-  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
-      base_index.get(), input, &input_options,
-      /*out_provider_ordinal=*/nullptr));
-
-  loom_link_module_index_t* overlay = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_link_module_index_allocate_overlay(
-          base_index.get(), &block_pool_, iree_allocator_system(), &overlay));
-  EXPECT_EQ(overlay, nullptr);
-}
-
-TEST_F(ModuleIndexTest, OverlayCannotUseAnotherOverlayAsBase) {
-  IndexPtr base_index = CreateIndex();
-  IndexPtr first_overlay = CreateOverlay(base_index.get());
-
-  loom_link_module_index_t* second_overlay = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_link_module_index_allocate_overlay(
-                            first_overlay.get(), &block_pool_,
-                            iree_allocator_system(), &second_overlay));
-  EXPECT_EQ(second_overlay, nullptr);
 }
 
 TEST_F(ModuleIndexTest, OverlayAppendsInputWithoutCopyingBaseRecords) {
