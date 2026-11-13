@@ -121,7 +121,7 @@ jobs:
           ctest --version
           ninja --version
           if [[ "$HRX_CMAKE_HOST_TOOLCHAIN" == clang ]]; then
-            bash .github/scripts/check_host_toolchain.sh --expect-rocm
+            bash .github/scripts/check_host_toolchain.sh --expect-artifact
           else
             bash .github/scripts/check_host_toolchain.sh --expect-system
             test "$("$CC" -dumpversion)" = 15

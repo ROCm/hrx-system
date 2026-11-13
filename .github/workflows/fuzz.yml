@@ -32,7 +32,7 @@ jobs:
       AR: ${{ github.workspace }}/build/fuzz/rocm-root/lib/llvm/bin/llvm-ar
       CC: ${{ github.workspace }}/build/fuzz/rocm-root/lib/llvm/bin/clang
       CXX: ${{ github.workspace }}/build/fuzz/rocm-root/lib/llvm/bin/clang++
-      HRX_ARTIFACT_SET: core
+      HRX_ARTIFACT_SET: llvm
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/fuzz/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/fuzz
       HRX_PYTHON: ${{ github.workspace }}/build/fuzz/python/bin/python3
@@ -63,13 +63,16 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Fetch ROCm toolchain
+      - name: Fetch LLVM toolchain
         run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Install Bazel host tools
         run: |
           python3 dev.py bazel setup --venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: bash .github/scripts/check_host_toolchain.sh --expect-artifact
 
       - name: Configure Bazel
         run: |

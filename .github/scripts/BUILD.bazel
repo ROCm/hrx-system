@@ -9,6 +9,7 @@
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
+    "check_host_toolchain.sh",
     "check_vulkan_hardware_environment.sh",
     "fetch_rocm_toolchain.sh",
 ])

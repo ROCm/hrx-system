@@ -84,13 +84,15 @@ jobs:
             command: iree-bazel-cpu-asan
             platform_coverage: true
             runner: az-linux-scale-rocm-default-prod
-            host_toolchain: rocm
+            artifact_set: llvm
+            host_toolchain: artifact
           - name: Clang / ASAN / Shared Tools
             kind: cpu
             command: iree-bazel-cpu-shared-tools-asan
             platform_coverage: true
             runner: az-linux-scale-rocm-default-prod
-            host_toolchain: rocm
+            artifact_set: llvm
+            host_toolchain: artifact
           - name: Clang / MSAN
             kind: cpu
             command: iree-bazel-cpu-msan
@@ -122,6 +124,7 @@ jobs:
             gcc_toolset: 15
             platform_coverage: true
             runner: az-linux-scale-rocm-default-prod
+            artifact_set: core
             host_ar: ar
             host_cc: gcc
             host_cxx: g++
@@ -130,7 +133,8 @@ jobs:
             command: iree-bazel-repository-build
             platform: Windows x86-64 (via Linux)
             runner: az-linux-scale-rocm-default-prod
-            host_toolchain: rocm
+            artifact_set: core
+            host_toolchain: artifact
           - name: GCC / Fastbuild / AMD gfx120x Vulkan
             kind: vulkan
             command: iree-bazel-vulkan
@@ -147,6 +151,7 @@ jobs:
             kind: amdgpu
             command: iree-bazel-amdgpu
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            artifact_set: core
             target_selector: gfx942
             loom_importer: cxx
             container_options: &amdgpu_container_options >-
@@ -158,18 +163,21 @@ jobs:
             kind: amdgpu
             command: iree-bazel-amdgpu
             runner: linux-gfx90a-1gpu-ossci-rocm
+            artifact_set: core
             target_selector: gfx90a
             container_options: *amdgpu_container_options
           - name: Clang / Fastbuild / AMD gfx110x
             kind: amdgpu
             command: iree-bazel-amdgpu
             runner: linux-gfx110X-gpu-rocm
+            artifact_set: core
             target_selector: gfx110X-all
             container_options: *amdgpu_container_options
           - name: Clang / Fastbuild / AMD gfx1150
             kind: amdgpu
             command: iree-bazel-amdgpu
             runner: labxsj-linux-u2604-gfx1150-gpu-rocm
+            artifact_set: core
             target_selector: gfx1150
             optional: true
             container_options: *amdgpu_container_options
@@ -177,24 +185,28 @@ jobs:
             kind: amdgpu
             command: iree-bazel-amdgpu
             runner: linux-gfx120X-gpu-rocm
+            artifact_set: core
             target_selector: gfx120X-all
             container_options: *amdgpu_container_options
           - name: Clang / ASAN / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu-asan
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            artifact_set: core
             target_selector: gfx942
             container_options: *amdgpu_container_options
           - name: Clang / TSAN / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu-tsan
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            artifact_set: core
             target_selector: gfx942
             container_options: *amdgpu_container_options
           - name: Clang / UBSAN / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu-ubsan
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            artifact_set: core
             target_selector: gfx942
             container_options: *amdgpu_container_options
     concurrency:
@@ -211,6 +223,7 @@ jobs:
       options: ${{ matrix.container_options || '' }}
     env:
       IREE_CI_PLATFORM_COVERAGE: ${{ matrix.platform_coverage && '1' || '0' }}
+      IREE_CI_ARTIFACT_SET: ${{ matrix.artifact_set || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -232,14 +245,18 @@ jobs:
           esac
           output_dir="${GITHUB_WORKSPACE}/build/${output_name}"
           {
-            echo "HRX_ARTIFACT_SET=core"
-            echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
             echo "HRX_OUTPUT_DIR=${output_dir}"
-            echo "HRX_PYTHON=${output_dir}/python/bin/python3"
-            echo "HRX_RELEASE_TYPE=nightly"
-            echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
             echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
           } >> "$GITHUB_ENV"
+          if [[ -n "$IREE_CI_ARTIFACT_SET" ]]; then
+            {
+              echo "HRX_ARTIFACT_SET=${IREE_CI_ARTIFACT_SET}"
+              echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
+              echo "HRX_PYTHON=${output_dir}/python/bin/python3"
+              echo "HRX_RELEASE_TYPE=nightly"
+              echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
+            } >> "$GITHUB_ENV"
+          fi
           if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
             {
               echo "LLVM_ROOT=${output_dir}/rocm-root/lib/llvm"
@@ -252,7 +269,7 @@ jobs:
             } >> "$GITHUB_ENV"
           fi
           case "${{ matrix.kind }}/${{ matrix.host_toolchain }}" in
-            amdgpu/*|*/rocm)
+            amdgpu/*|*/artifact)
               {
                 echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
                 echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
@@ -329,8 +346,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libclang-rt-18-dev
 
-      - name: Fetch ROCm toolchain
-        if: matrix.kind != 'vulkan'
+      - name: Fetch TheRock artifacts
+        if: env.IREE_CI_ARTIFACT_SET != ''
         run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Install Wine host tools
@@ -394,13 +411,15 @@ jobs:
             "${CXX}" --version
             "${AR}" --version
           else
-            expect_rocm=()
-            if [[ "${{ matrix.kind }}" == amdgpu || "${{ matrix.host_toolchain }}" == rocm ]]; then
-              expect_rocm=(--expect-rocm)
+            expected_origin=(--expect-system)
+            if [[ "${{ matrix.kind }}" == amdgpu || "${{ matrix.host_toolchain }}" == artifact ]]; then
+              expected_origin=(--expect-artifact)
             fi
-            bash .github/scripts/check_host_toolchain.sh "${expect_rocm[@]}"
-            bash .github/scripts/check_rocm_device_toolchain.sh
-            test -d "${HRX_ROCM_ROOT}/include"
+            bash .github/scripts/check_host_toolchain.sh "${expected_origin[@]}"
+            if [[ "$IREE_CI_ARTIFACT_SET" == core ]]; then
+              bash .github/scripts/check_rocm_device_toolchain.sh
+              test -d "${HRX_ROCM_ROOT}/include"
+            fi
           fi
           if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
             compiler_dir="$(find "$MSVC_WINE_ROOT/VC/Tools/MSVC" -mindepth 1 -maxdepth 1 -type d -print -quit)/bin/Hostx64/x64"
@@ -1017,7 +1036,7 @@ jobs:
           cmake --version
           ctest --version
           ninja --version
-          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_host_toolchain.sh --expect-artifact
           bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 

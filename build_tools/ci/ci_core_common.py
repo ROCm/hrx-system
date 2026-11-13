@@ -33,6 +33,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Minimal TheRock artifact closure used by HRX CI. Platform selection is handled
 # by the TheRock run prefix, not by changing component names here.
 ARTIFACT_SETS = {
+    "llvm": {
+        "sysdeps": ["lib", "run", "dev"],
+        "base": ["lib", "run", "dev"],
+        "amd-llvm": ["lib", "run"],
+    },
+    "llvm-with-dev": {
+        "sysdeps": ["lib", "run", "dev"],
+        "base": ["lib", "run", "dev"],
+        "amd-llvm": ["lib", "run", "dev"],
+    },
     "core": {
         "sysdeps": ["lib", "run", "dev"],
         "base": ["lib", "run", "dev"],

@@ -76,7 +76,9 @@ done
 append_path "${HRX_ROCM_ROOT}/bin"
 export_env "CMAKE_PREFIX_PATH" \
   "${HRX_ROCM_ROOT}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
-export_env "IREE_HAL_AMDGPU_LIBHSA_PATH" \
-  "${HRX_ROCM_ROOT}/lib/libhsa-runtime64.so.1"
+if [[ -f "${HRX_ROCM_ROOT}/lib/libhsa-runtime64.so.1" ]]; then
+  export_env "IREE_HAL_AMDGPU_LIBHSA_PATH" \
+    "${HRX_ROCM_ROOT}/lib/libhsa-runtime64.so.1"
+fi
 export_env "LD_LIBRARY_PATH" \
   "${HRX_ROCM_ROOT}/lib:${HRX_ROCM_ROOT}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
