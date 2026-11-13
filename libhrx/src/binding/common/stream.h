@@ -97,6 +97,9 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_value_flush_timer_t* value_flush_timer;
   // Number of kernel launches recorded in |command_buffer|.
   uint32_t pending_launch_count;
+  // Accepted native work requiring a queue flush before observation. Each
+  // dispatch carries its own system release. Protected by |mutex|.
+  bool pending_native_flush;
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
@@ -201,7 +204,8 @@ iree_status_t iree_hal_streaming_stream_begin(
 iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream);
 
-// Flushes pending commands.
+// Submits pending commands and publishes native writes to the system before
+// the resulting stream timeline point completes.
 // Synchronization: none (submits to queue, non-blocking).
 iree_status_t iree_hal_streaming_stream_flush(
     iree_hal_streaming_stream_t* stream);
@@ -219,11 +223,6 @@ iree_status_t iree_hal_streaming_stream_synchronize(
     iree_hal_streaming_stream_t* stream);
 // Synchronizes stream work that the caller has already flushed/submitted.
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(
-    iree_hal_streaming_stream_t* stream);
-
-// Wait for already-submitted work on this stream to complete.
-// Does NOT flush in-progress recordings - safe to call from other threads.
-iree_status_t iree_hal_streaming_stream_wait_submitted(
     iree_hal_streaming_stream_t* stream);
 
 // Waits for an event on a stream.
@@ -293,7 +292,8 @@ IREE_MUST_USE_RESULT iree_status_t
 iree_hal_streaming_stream_select_cooperative_queue_locked(
     iree_hal_streaming_stream_t* stream, iree_hal_queue_t** out_queue);
 
-// Submits the stream's pending command buffer, if any.
+// Submits pending commands and publishes native writes to the system before
+// the resulting stream timeline point completes.
 // Synchronization: caller must hold |stream->mutex|.
 IREE_MUST_USE_RESULT iree_status_t
 iree_hal_streaming_stream_flush_locked(iree_hal_streaming_stream_t* stream);

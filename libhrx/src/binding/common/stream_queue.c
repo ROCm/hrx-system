@@ -497,7 +497,6 @@ static iree_status_t iree_hal_streaming_acquire_value_wait_lane(
   iree_hal_queue_params_initialize(&params);
   params.priority = priority;
   params.features = features;
-  params.placement = iree_hal_streaming_queue_family_select_placement(family);
   params.execution_resources = execution_resources;
   iree_hal_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_queue_acquire(family, &params, &queue));

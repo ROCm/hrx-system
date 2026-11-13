@@ -9,6 +9,7 @@
 #include <array>
 #include <cstring>
 
+#include "iree/base/internal/memory_copy.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -63,6 +64,8 @@ TEST_F(DispatchTest, CooperativeGridStateIsPrivateAndCompletelyReinitialized) {
     EXPECT_EQ(state.single_grid_sync[1], 0u);
     EXPECT_EQ(state.workgroup_count, 6u);
     EXPECT_EQ(state.reserved, 0u);
+    const auto calculated = iree_hal_amd_gpu_dispatch_grid_sync(&dispatch_);
+    EXPECT_EQ(std::memcmp(&state, &calculated, sizeof(state)), 0);
     uint64_t pointer = 0;
     memcpy(&pointer, arguments + 13, sizeof(pointer));
     EXPECT_EQ(pointer, address);
@@ -309,11 +312,29 @@ TEST_F(DispatchTest, PartialGeometryPacksNativeHiddenArguments) {
   iree_hal_amd_gpu_dispatch_emplace_arguments(&function_, &dispatch_, {},
                                               nullptr, exact, bytes.data());
   EXPECT_EQ(bytes, (std::array<uint32_t, 4>{2, 0x00010020, 1, 384}));
+  for (auto flags : {exact, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS}) {
+    bytes.fill(UINT32_MAX);
+    iree_hal_amd_gpu_dispatch_emplace_arguments_stream(
+        &function_, &dispatch_, {}, nullptr, flags, 0, bytes.data());
+#if defined(IREE_ARCH_X86_64)
+    _mm_sfence();
+#endif  // IREE_ARCH_X86_64
+    EXPECT_EQ(bytes, (std::array<uint32_t, 4>{2, 0x00010020, 1, 384}));
+  }
   // Caller-owned native arguments never receive host writes.
   bytes.fill(0xcafebabe);
   iree_hal_amd_gpu_dispatch_emplace_arguments(
       &function_, &dispatch_, {}, nullptr,
       IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS, bytes.data());
+  EXPECT_EQ(bytes, (std::array<uint32_t, 4>{0xcafebabe, 0xcafebabe, 0xcafebabe,
+                                            0xcafebabe}));
+  iree_hal_amd_gpu_dispatch_emplace_arguments_stream(
+      &function_, &dispatch_, {}, nullptr,
+      IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS, UINT64_MAX,
+      bytes.data());
+#if defined(IREE_ARCH_X86_64)
+  _mm_sfence();
+#endif  // IREE_ARCH_X86_64
   EXPECT_EQ(bytes, (std::array<uint32_t, 4>{0xcafebabe, 0xcafebabe, 0xcafebabe,
                                             0xcafebabe}));
   iree_hal_amd_gpu_kernarg_layout_free(layout);

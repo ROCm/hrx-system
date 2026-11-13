@@ -51,6 +51,15 @@ class ArgumentPreparationTest : public GpuNativeTest {
       return;
     }
     const auto* family = iree_hal_queue_family(queues_[0]);
+    const auto* queue =
+        reinterpret_cast<iree_hal_amd_gpu_aql_queue_t*>(queues_[0]);
+    const bool local =
+        (queue->storage.capabilities &
+         AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) != 0;
+    EXPECT_EQ(queue->producer.argument_streaming, local);
+    EXPECT_EQ(queue->producer.arguments->memory.info.memory_class,
+              local ? AMDF_MEMORY_CLASS_LOCAL : AMDF_MEMORY_CLASS_SYSTEM);
+    RecordProperty("kernarg_memory_class", local ? "LOCAL" : "SYSTEM");
     const iree_hal_pool_family_access_t access = {
         .family = family,
         .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
@@ -255,6 +264,117 @@ TEST_F(ArgumentPreparationTest, OneShotArgumentSizesPreserveCpuPreparation) {
       EXPECT_EQ(NativeQueue(i)->producer.preparation.data, nullptr);
       EXPECT_EQ(NativeQueue(i)->producer.preparation.data_length, 0u);
     }
+  }
+}
+
+TEST_F(ArgumentPreparationTest, DirectRunsAcquireChangingHostInputs) {
+  constexpr uint32_t kLaunchCount = 65;
+  constexpr uint32_t kBindingCount = 9;
+  Ref<iree_hal_buffer_t> data;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_,
+      iree_hal_make_pool_reservation_request(
+          kLaunchCount * kBindingCount * sizeof(uint32_t), 8),
+      iree_infinite_timeout(), data.out()));
+  const auto* family = iree_hal_queue_family(queues_[0]);
+  iree_hal_memory_scope_t program_scope;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_PROGRAM, family}, &program_scope));
+  iree_hal_buffer_native_binding_slot_t slot;
+  IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
+      pool_, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS, &slot));
+  const uint64_t address =
+      iree_hal_buffer_native_binding(data, slot).device_address;
+  iree_hal_executable_function_t function;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable_, IREE_SV("many_bindings"), &function));
+
+  // Exercise both the backend default and explicit coherent HOST arguments.
+  Ref<iree_hal_queue_t> host_queue;
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  params.placement = IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL;
+  IREE_ASSERT_OK(iree_hal_queue_acquire(family, &params, host_queue.out()));
+  const auto* native_host_queue =
+      reinterpret_cast<iree_hal_amd_gpu_aql_queue_t*>(host_queue.get());
+  EXPECT_EQ(native_host_queue->producer.arguments->memory.info.memory_class,
+            AMDF_MEMORY_CLASS_SYSTEM);
+  EXPECT_FALSE(native_host_queue->producer.argument_streaming);
+  const std::array<iree_hal_queue_t*, 2> queues = {queues_[0],
+                                                   host_queue.get()};
+  std::array<Ref<iree_hal_semaphore_t>, 2> done;
+  for (auto& semaphore : done) {
+    CreateSemaphore(semaphore.out());
+  }
+  ASSERT_FALSE(HasFatalFailure());
+  std::array<uint64_t, 2> submitted = {};
+  const iree_hal_memory_barrier_t acquire_memory = {
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
+  const iree_hal_barrier_t acquire = {
+      .source_stage_mask =
+          IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .memory_barrier_count = 1,
+      .memory_barriers = &acquire_memory,
+  };
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  const iree_hal_barrier_list_t before = {1, &acquire};
+  const iree_hal_barrier_list_t after = {1, &release};
+  const iree_hal_queue_barriers_t barriers = {&before, &after};
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = config.workgroup_size[1] =
+      config.workgroup_size[2] = 1;
+  std::array<uint32_t, kLaunchCount * kBindingCount> words;
+  for (uint32_t epoch = 1; epoch <= 8; ++epoch) {
+    for (uint32_t i = 0; i < words.size(); ++i) {
+      words[i] = epoch * 10000 + i;
+    }
+    // Reuse warm payload caches after each CPU rewrite. Native publication
+    // supplies the host-to-device acquisition; payload scopes are device-only.
+    IREE_ASSERT_OK(
+        iree_hal_buffer_map_write(data, 0, words.data(), sizeof(words)));
+    for (uint32_t i = 0; i < kLaunchCount; ++i) {
+      std::array<uint8_t, kBindingCount * sizeof(uint64_t) + sizeof(uint32_t)>
+          arguments;
+      for (uint32_t j = 0; j < kBindingCount; ++j) {
+        const uint64_t input_address =
+            address + (i * kBindingCount + j) * sizeof(uint32_t);
+        std::memcpy(arguments.data() + j * sizeof(input_address),
+                    &input_address, sizeof(input_address));
+      }
+      std::memcpy(arguments.data() + kBindingCount * sizeof(uint64_t), &i,
+                  sizeof(i));
+      const uint32_t queue_index = i % queues.size();
+      auto* semaphore = done[queue_index].get();
+      uint64_t next = submitted[queue_index] + 1;
+      const iree_hal_semaphore_list_t waits = {submitted[queue_index] ? 1u : 0u,
+                                               &semaphore,
+                                               &submitted[queue_index]};
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queues[queue_index], waits, {1, &semaphore, &next}, executable_,
+          function, config,
+          iree_make_const_byte_span(arguments.data(), arguments.size()), {},
+          &barriers, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS));
+      submitted[queue_index] = next;
+      arguments.fill(0xCD);
+    }
+    for (uint32_t i = 0; i < done.size(); ++i) {
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(done[i], submitted[i],
+                                             iree_infinite_timeout(),
+                                             IREE_ASYNC_WAIT_FLAG_NONE));
+    }
+    IREE_ASSERT_OK(
+        iree_hal_buffer_map_read(data, 0, words.data(), sizeof(words)));
+    for (uint32_t i = 0; i < kLaunchCount; ++i) {
+      const uint32_t first = epoch * 10000 + i * kBindingCount;
+      EXPECT_EQ(words[i * kBindingCount + 8], 8 * first + 28 + i);
+    }
+    IREE_ASSERT_OK(iree_hal_device_trim(device_));
   }
 }
 

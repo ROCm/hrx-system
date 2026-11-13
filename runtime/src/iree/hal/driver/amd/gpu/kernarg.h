@@ -87,9 +87,9 @@ typedef struct iree_hal_amd_gpu_kernarg_copy_t {
 
 // One immutable kernel argument layout. Its allocation contains a 56-byte
 // header on 64-bit hosts, then binding offsets, constant copies, runtime
-// copies, indirect geometry copies, and cold HAL parameter reflection. No
-// packet protocol or native allocation is owned here. Strings in reflection
-// borrow from the enclosing image.
+// copies, indirect geometry copies, ordered input selectors, and cold HAL
+// parameter reflection. No packet protocol or native allocation is owned here.
+// Strings in reflection borrow from the enclosing image.
 typedef struct iree_hal_amd_gpu_kernarg_layout_t {
   // Complete native kernarg extent, including hidden arguments and padding.
   uint32_t byte_length;
@@ -113,6 +113,8 @@ typedef struct iree_hal_amd_gpu_kernarg_layout_t {
   uint16_t parameter_count;
   // Hidden grid-state pointer offset, present only with GRID_SYNC requirements.
   uint16_t grid_sync_offset;
+  // Number of coalesced input spans in native ABI order.
+  uint16_t span_count;
   // Byte offset from this header to aligned cold parameter reflection.
   uint32_t parameters_offset;
   // Allocator owning the header and all inline records.
@@ -185,6 +187,27 @@ void iree_hal_amd_gpu_kernarg_layout_emplace(
 // arguments bypass host emplacement entirely and remain the caller's native ABI
 // object.
 void iree_hal_amd_gpu_kernarg_layout_emplace_native(
+    const iree_hal_amd_gpu_kernarg_layout_t* layout,
+    iree_const_byte_span_t constants,
+    const iree_hal_amd_gpu_kernarg_inputs_t* inputs, void* target);
+
+// Streams the complete dense-input ABI in one pass, including zeroed holes and
+// a zero-padded final DWORD. target is four-byte aligned and owns
+// align4(byte_length) writable bytes. Every destination byte is written exactly
+// once, without destination reads, and non-temporally on x86-64. Source and
+// binding-null semantics match emplace. Scratch space is independent of ABI
+// size; this cannot allocate or fail. The caller owns the native visibility and
+// completion protocol and the store fence before publishing a consumer.
+void iree_hal_amd_gpu_kernarg_layout_emplace_stream(
+    const iree_hal_amd_gpu_kernarg_layout_t* layout, const void* constants,
+    const uint64_t* binding_addresses,
+    const iree_hal_amd_gpu_kernarg_inputs_t* inputs, void* target);
+
+// Streams a caller's native prefix with typed hidden fields using the same
+// target extent and publication contract as emplace_stream. Prefix/padding
+// semantics match emplace_native. Hidden fields are merged before their bytes
+// are written; no destination patch follows the initial write.
+void iree_hal_amd_gpu_kernarg_layout_emplace_native_stream(
     const iree_hal_amd_gpu_kernarg_layout_t* layout,
     iree_const_byte_span_t constants,
     const iree_hal_amd_gpu_kernarg_inputs_t* inputs, void* target);

@@ -67,11 +67,8 @@ iree_status_t iree_hal_amd_gpu_grid_sync_program_query(
   return iree_ok_status();
 }
 
-void iree_hal_amd_gpu_dispatch_emplace_grid_sync(
-    const iree_hal_amd_gpu_kernarg_layout_t* layout,
-    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
-    uint64_t grid_sync_address, void* arguments,
-    iree_hal_amd_gpu_grid_sync_t* grid_sync) {
+iree_hal_amd_gpu_grid_sync_t iree_hal_amd_gpu_dispatch_grid_sync(
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch) {
   uint64_t workgroup_count = 1;
   uint64_t workitem_count = 1;
   for (uint32_t i = 0; i < 3; ++i) {
@@ -82,11 +79,19 @@ void iree_hal_amd_gpu_dispatch_emplace_grid_sync(
                                           ? size - dispatch->partial_size[i]
                                           : 0);
   }
-  *grid_sync = (iree_hal_amd_gpu_grid_sync_t){
+  return (iree_hal_amd_gpu_grid_sync_t){
       .grid_count = workgroup_count ? 1u : 0u,
       .total_workitem_count = workitem_count,
       .workgroup_count = (uint32_t)workgroup_count,
   };
+}
+
+void iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+    const iree_hal_amd_gpu_kernarg_layout_t* layout,
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
+    uint64_t grid_sync_address, void* arguments,
+    iree_hal_amd_gpu_grid_sync_t* grid_sync) {
+  *grid_sync = iree_hal_amd_gpu_dispatch_grid_sync(dispatch);
   if (layout->requirements & IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC) {
     memcpy((uint8_t*)arguments + layout->grid_sync_offset, &grid_sync_address,
            sizeof(grid_sync_address));
@@ -461,33 +466,43 @@ iree_status_t iree_hal_amd_gpu_dispatch_validate_direct_bindings(
   return iree_ok_status();
 }
 
+static iree_hal_amd_gpu_kernarg_inputs_t
+iree_hal_amd_gpu_dispatch_kernarg_inputs(
+    const iree_hal_amd_gpu_function_t* function,
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
+    iree_hal_dispatch_flags_t flags, uint64_t grid_sync_address) {
+  iree_hal_amd_gpu_kernarg_inputs_t inputs = {
+      .services = {.grid_sync = grid_sync_address},
+      .dynamic_lds_size = dispatch->group_segment_byte_length -
+                          function->metadata->group_segment_fixed_size,
+      .grid_dimensions = 1,
+  };
+  for (int i = 0; i < 3; ++i) {
+    const uint32_t partial = dispatch->partial_size[i];
+    const bool remainder = partial && partial != dispatch->workgroup_size[i];
+    inputs.block_count[i] = dispatch->workgroup_count[i] - remainder;
+    inputs.group_size[i] = (uint16_t)dispatch->workgroup_size[i];
+    inputs.remainder[i] = remainder ? (uint16_t)partial : 0;
+    if (dispatch->workgroup_count[i] != 1 || dispatch->workgroup_size[i] != 1) {
+      inputs.grid_dimensions = (uint16_t)(i + 1);
+    }
+  }
+  if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
+    // HAL supplies a three-axis tuple without a separate rank. Device copies
+    // populate its counts; unused dimensions have size and count one.
+    inputs.grid_dimensions = 3;
+  }
+  return inputs;
+}
+
 void iree_hal_amd_gpu_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_function_t* function,
     const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
     iree_hal_dispatch_flags_t flags, void* target) {
   if (!iree_hal_dispatch_uses_indirect_arguments(flags)) {
-    iree_hal_amd_gpu_kernarg_inputs_t inputs = {
-        .dynamic_lds_size = dispatch->group_segment_byte_length -
-                            function->metadata->group_segment_fixed_size,
-        .grid_dimensions = 1,
-    };
-    for (int i = 0; i < 3; ++i) {
-      const uint32_t partial = dispatch->partial_size[i];
-      const bool remainder = partial && partial != dispatch->workgroup_size[i];
-      inputs.block_count[i] = dispatch->workgroup_count[i] - remainder;
-      inputs.group_size[i] = (uint16_t)dispatch->workgroup_size[i];
-      inputs.remainder[i] = remainder ? (uint16_t)partial : 0;
-      if (dispatch->workgroup_count[i] != 1 ||
-          dispatch->workgroup_size[i] != 1) {
-        inputs.grid_dimensions = (uint16_t)(i + 1);
-      }
-    }
-    if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
-      // HAL supplies a three-axis tuple without a separate rank. Device copies
-      // populate its counts; unused dimensions have size and count one.
-      inputs.grid_dimensions = 3;
-    }
+    const iree_hal_amd_gpu_kernarg_inputs_t inputs =
+        iree_hal_amd_gpu_dispatch_kernarg_inputs(function, dispatch, flags, 0);
     if (iree_any_bit_set(flags,
                          IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)) {
       iree_hal_amd_gpu_kernarg_layout_emplace_native(
@@ -496,6 +511,33 @@ void iree_hal_amd_gpu_dispatch_emplace_arguments(
       iree_hal_amd_gpu_kernarg_layout_emplace(function->kernarg, constants.data,
                                               binding_addresses, &inputs,
                                               target);
+    }
+  }
+}
+
+void iree_hal_amd_gpu_dispatch_emplace_arguments_stream(
+    const iree_hal_amd_gpu_function_t* function,
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
+    iree_const_byte_span_t constants, const uint64_t* binding_addresses,
+    iree_hal_dispatch_flags_t flags, uint64_t grid_sync_address, void* target) {
+  if (!iree_hal_dispatch_uses_indirect_arguments(flags)) {
+    // The verified layout identifies every consumer of hidden geometry inputs.
+    // Native ABIs without those fields need no geometry materialization.
+    iree_hal_amd_gpu_kernarg_inputs_t inputs;
+    const iree_hal_amd_gpu_kernarg_inputs_t* input_values = NULL;
+    if (function->kernarg->runtime_copy_count) {
+      inputs = iree_hal_amd_gpu_dispatch_kernarg_inputs(
+          function, dispatch, flags, grid_sync_address);
+      input_values = &inputs;
+    }
+    if (iree_any_bit_set(flags,
+                         IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)) {
+      iree_hal_amd_gpu_kernarg_layout_emplace_native_stream(
+          function->kernarg, constants, input_values, target);
+    } else {
+      iree_hal_amd_gpu_kernarg_layout_emplace_stream(
+          function->kernarg, constants.data, binding_addresses, input_values,
+          target);
     }
   }
 }

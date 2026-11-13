@@ -60,6 +60,8 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_publish_header(
     uint32_t header) {
   uint32_t* words = ring->packets[position & (ring->capacity - 1)].words;
   if (ring->host_publish_executor != AMDF_CACHE_TRANSITION_EXECUTOR_NONE) {
+    // The producer supplies payload acquisition in the packet header. Native
+    // release here orders the ring body before that header becomes visible.
     const amdf_status_t status = iree_hal_amd_gpu_user_queue_flush(storage);
     if (IREE_UNLIKELY(!amdf_status_is_ok(status))) {
       return status;
@@ -112,10 +114,11 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets_with_completion(
                                                   packets[0].words[0]);
 }
 
-void iree_hal_amd_gpu_aql_ring_notify(const iree_hal_amd_gpu_aql_ring_t* ring) {
+void iree_hal_amd_gpu_aql_ring_notify(const iree_hal_amd_gpu_aql_ring_t* ring,
+                                      uint64_t published) {
   const iree_hal_memory_transition_recipe_info_t publication_fence = {
       .host = {.fence_after = IREE_HAL_HOST_CACHE_FENCE_X86_SFENCE},
   };
   iree_hal_memory_transition_execute_host_direct(&publication_fence, NULL, 1);
-  *ring->doorbell = ring->reserved - 1;
+  *ring->doorbell = published;
 }

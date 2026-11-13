@@ -34,6 +34,8 @@ typedef struct iree_hal_amd_gpu_user_queue_t {
   bool inactivated;
   // Achieved native primary-ring locality, captured once during construction.
   iree_hal_queue_placement_t placement;
+  // Protocol capabilities achieved for this placement and live memory profile.
+  amdf_user_queue_capabilities_t capabilities;
   // Native release selected once before any command publication.
   amdf_cache_transition_executor_t host_publish_executor;
   // Direct host ordering before publishing a valid header or producer index.

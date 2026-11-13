@@ -36,7 +36,7 @@ void BM_HostMemoryPublication(benchmark::State& state) {
       iree_hal_amd_gpu_aql_ring_publish_header(&ring, nullptr, position + i,
                                                packet.words[0]);
     }
-    iree_hal_amd_gpu_aql_ring_notify(&ring);
+    iree_hal_amd_gpu_aql_ring_notify(&ring, ring.reserved - 1);
     benchmark::ClobberMemory();
     iree_atomic_store(&read_index, ring.reserved, iree_memory_order_release);
   }

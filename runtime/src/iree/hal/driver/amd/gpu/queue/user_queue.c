@@ -56,6 +56,7 @@ iree_status_t iree_hal_amd_gpu_user_queue_initialize(
               IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL,
       "native and HAL queue locality values agree");
   out_storage->placement = (iree_hal_queue_placement_t)info.placement;
+  out_storage->capabilities = info.capabilities;
   amdf_user_queue_mapping_info_t mapping_info;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,

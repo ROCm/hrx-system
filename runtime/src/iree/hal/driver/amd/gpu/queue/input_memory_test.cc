@@ -57,9 +57,7 @@ class InputMemoryTest : public ::testing::Test {
           auto* self = reinterpret_cast<InputMemoryTest*>(scope);
           EXPECT_EQ(count, 1u);
           EXPECT_EQ(access->requirements.access, self->device_access_);
-          EXPECT_EQ(
-              access->requirements.flags,
-              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
+          EXPECT_EQ(access->requirements.flags, self->access_flags_);
           *profile = self->profiles_[ordinal];
           capabilities->guaranteed_flags = self->flags_[ordinal];
           return AMDF_STATUS_OK;
@@ -102,6 +100,9 @@ class InputMemoryTest : public ::testing::Test {
   amdf_status_t pair_status_ = AMDF_STATUS_OK;
   // Device writes are needed only for ABI fields patched by indirect dispatch.
   amdf_memory_access_t device_access_ = AMDF_MEMORY_ACCESS_READ;
+  // Attachment requirements for coherent SYSTEM or qualified LOCAL authoring.
+  amdf_memory_flags_t access_flags_ =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
   // Selected persistent policy, published only after full qualification.
   iree_hal_amd_gpu_input_memory_t memory_ = {};
 };
@@ -188,6 +189,46 @@ TEST_F(InputMemoryTest, PreservesNativeDiscoveryFailure) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Initialize());
   pair_status_ = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, Initialize());
+}
+
+TEST_F(InputMemoryTest, LocalPublicationAcceptsMigrationStableHostProperties) {
+  amdf_memory_scope_t* scope = reinterpret_cast<amdf_memory_scope_t*>(this);
+  context_.memory_scopes = &scope;
+  context_.memory_scope_count = 1;
+  access_flags_ = AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+  device_access_ |= AMDF_MEMORY_ACCESS_WRITE;
+  api_.memory_scope_query_pair_info = nullptr;
+  for (auto& profile : profiles_) {
+    profile.memory_class = AMDF_MEMORY_CLASS_LOCAL;
+    profile.supported_flags |= AMDF_MEMORY_FLAG_DEVICE_LOCAL;
+    // A migratable LOCAL allocation promises no fixed CPU cache policy.
+    profile.host_mapping.properties = 0;
+  }
+  flags_[0] = AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_input_memory_initialize_local(
+      &context_, device_access_, &memory_));
+  EXPECT_EQ(memory_.options.scope, scope);
+  EXPECT_EQ(memory_.options.profile.ordinal, 1u);
+  EXPECT_EQ(memory_.options.profile.memory_class, AMDF_MEMORY_CLASS_LOCAL);
+  EXPECT_EQ(memory_.options.accesses, &memory_.access);
+  EXPECT_EQ(memory_.access.requirements.access,
+            AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+  EXPECT_EQ(memory_.options.host_access, AMDF_MEMORY_MAP_FLAG_WRITE);
+}
+
+TEST_F(InputMemoryTest, LocalPublicationRejectsSystemAndUnmappedProfiles) {
+  amdf_memory_scope_t* scope = reinterpret_cast<amdf_memory_scope_t*>(this);
+  context_.memory_scopes = &scope;
+  context_.memory_scope_count = 1;
+  access_flags_ = AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+  profiles_[0].supported_flags |= AMDF_MEMORY_FLAG_DEVICE_LOCAL;
+  profiles_[1].memory_class = AMDF_MEMORY_CLASS_LOCAL;
+  profiles_[1].supported_flags |= AMDF_MEMORY_FLAG_DEVICE_LOCAL;
+  profiles_[1].host_mapping.supported_access = AMDF_MEMORY_MAP_FLAG_READ;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_hal_amd_gpu_input_memory_initialize_local(
+                            &context_, device_access_, &memory_));
+  EXPECT_EQ(memory_.options.scope, nullptr);
 }
 
 }  // namespace

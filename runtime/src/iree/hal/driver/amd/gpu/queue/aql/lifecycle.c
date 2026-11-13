@@ -47,6 +47,9 @@ bool iree_hal_amd_gpu_aql_queue_retire_failed(iree_hal_queue_t* base,
     return false;
   }
   iree_hal_amd_gpu_aql_queue_fail_issued(queue, code);
+  iree_hal_amd_gpu_signal_release(queue->run.completion);
+  queue->run.completion = NULL;
+  iree_atomic_store(&queue->run.position, 0, iree_memory_order_release);
   uint64_t position = (uint64_t)iree_atomic_load(&queue->completed.count,
                                                  iree_memory_order_relaxed);
   const uint64_t end = (uint64_t)iree_atomic_load(&queue->producer.count,

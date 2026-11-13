@@ -39,10 +39,11 @@ void iree_hal_amd_gpu_signal_frontiers_free(
     iree_hal_amd_gpu_signal_frontiers_t* initial,
     iree_allocator_t host_allocator);
 
-// One native binary signal, independently retained by its publisher,
-// producer, caches, and dependent executions. A producer completing does not
-// retire the native readers. This metadata stays in ordinary host memory;
-// only the separately backed value is accessed by the GPU.
+// One logical completion, independently retained by its publisher, producer,
+// caches, and dependent executions. An ordered run may share one native binary
+// signal while preserving each operation's frontier and retirement. A producer
+// completing does not retire native readers. This metadata stays in ordinary
+// host memory; only the separately backed value is accessed by the GPU.
 typedef struct iree_hal_amd_gpu_signal_t {
   // Exclusive free-list state or shared live-use state, never both.
   union {
@@ -64,6 +65,8 @@ typedef struct iree_hal_amd_gpu_signal_t {
   // Borrowed host value, initialized only during exclusive acquisition. The
   // protocol supplies its initial value and completion predicate.
   uint64_t* host_value;
+  // Independently retained physical completion, or NULL for an owned operand.
+  struct iree_hal_amd_gpu_signal_t* completion;
 } iree_hal_amd_gpu_signal_t;
 
 // Coalescible capacity hint, invoked after publishing returned capacity. The
@@ -123,6 +126,13 @@ typedef struct iree_hal_amd_gpu_signal_block_t {
   // Current host table, release-published by cold expansion under exclusive
   // publication ownership. Independent readers acquire this pointer once.
   iree_atomic_intptr_t frontiers;
+  // First native operand's device address, used when recycling logical aliases.
+  uint64_t device_address;
+  // First native operand's host value, or NULL for an empty block. Owned by the
+  // enclosing backing.
+  uint8_t* host_values;
+  // Distance between native operands, in bytes.
+  uint32_t stride;
 } iree_hal_amd_gpu_signal_block_t;
 
 // Initializes an empty owner. Native blocks are attached only after their
@@ -148,6 +158,7 @@ void iree_hal_amd_gpu_signal_block_initialize(
 // host/device visibility, atomicity, and native protocol. Other native fields
 // are initialized by the protocol owner. The existing frontier table, including
 // expansions made before native acquisition completed, remains installed.
+// Empty blocks need no storage and do not form a native value address.
 // The exclusive publisher owns waiting work; attachment does not notify it.
 void iree_hal_amd_gpu_signal_block_attach(
     iree_hal_amd_gpu_signal_pool_t* pool, const void* domain, void* storage,
@@ -213,6 +224,13 @@ bool iree_hal_amd_gpu_signal_pool_has_available(
 // owner.
 iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire(
     iree_hal_amd_gpu_signal_pool_t* pool, uint64_t initial_value);
+
+// Acquires independent logical ownership of a physical completion. The producer
+// keeps that completion unpublished until this operation has been encoded into
+// the same ordered run. The alias retains the physical cell for native readers.
+iree_hal_amd_gpu_signal_t* iree_hal_amd_gpu_signal_pool_try_acquire_alias(
+    iree_hal_amd_gpu_signal_pool_t* pool,
+    iree_hal_amd_gpu_signal_t* completion);
 
 // Captures an accepted producer's complete native-domain frontier before the
 // signal is exposed to readers or completion. The vector covers the current

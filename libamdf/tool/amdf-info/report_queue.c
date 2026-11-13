@@ -51,6 +51,8 @@ static const amdf_info_name_t amdf_info_user_capabilities[] = {
     {AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH, "cooperative_dispatch"},
     {AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION,
      "execution_resource_selection"},
+    {AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION,
+     "host_non_temporal_publication"},
     {0, NULL},
 };
 

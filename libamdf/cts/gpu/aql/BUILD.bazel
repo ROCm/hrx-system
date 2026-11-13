@@ -78,6 +78,7 @@ amdf_cts_test_suite(
         "execution_resources_test.cc",
         "fanin_test.cc",
         "geometry_test.cc",
+        "host_payload_publication_test.cc",
         "lds_test.cc",
         "pattern_fill_test.cc",
         "private_test.cc",

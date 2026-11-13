@@ -165,6 +165,7 @@ iree_status_t iree_hal_amd_gpu_code_queue_allocate(
       .structure_size = sizeof(queue_create),
       .queue_family_ordinal = native_family_ordinal,
       .priority = AMDF_QUEUE_PRIORITY_NORMAL,
+      .placement = AMDF_QUEUE_PLACEMENT_HOST_LOCAL,
       .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
       .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
       .ring_byte_length = 4096,
@@ -246,7 +247,8 @@ static amdf_status_t iree_hal_amd_gpu_code_queue_submit_user(
     const amdf_status_t status = iree_hal_amd_gpu_aql_ring_publish_header(
         &queue->aql_ring, &queue->user, position, packet.words[0]);
     if (amdf_status_is_ok(status)) {
-      iree_hal_amd_gpu_aql_ring_notify(&queue->aql_ring);
+      iree_hal_amd_gpu_aql_ring_notify(&queue->aql_ring,
+                                       queue->aql_ring.reserved - 1);
     }
     return status;
   }

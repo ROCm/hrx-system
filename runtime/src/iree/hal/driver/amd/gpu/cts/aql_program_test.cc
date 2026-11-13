@@ -323,7 +323,7 @@ TEST_P(AqlProgramTest, ResidentFixupsAndIndirectPairsSurviveRingWrap) {
                               IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM,
                           0, nullptr, control_address_));
       pending_ = true;
-      iree_hal_amd_gpu_aql_ring_notify(&ring_);
+      iree_hal_amd_gpu_aql_ring_notify(&ring_, ring_.reserved - 1);
       ASSERT_NO_FATAL_FAILURE(Wait());
       offset += count;
     }
@@ -430,7 +430,7 @@ TEST_P(AqlProgramTest, TaggedCompletionsCaptureAndElideAcrossRingWrap) {
                 IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND | kHeader, 0, nullptr,
                 control_address_));
       pending_ = true;
-      iree_hal_amd_gpu_aql_ring_notify(&ring_);
+      iree_hal_amd_gpu_aql_ring_notify(&ring_, ring_.reserved - 1);
       ASSERT_NO_FATAL_FAILURE(Wait());
       const auto* output =
           reinterpret_cast<const uint32_t*>(control_.contents.data + 4096);

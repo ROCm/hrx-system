@@ -16,6 +16,16 @@ extern "C" {
 
 struct iree_hal_amd_gpu_aql_queue_t;
 
+// Packing independent small ABI records below this alignment penalizes short
+// launch bursts. Larger ABI alignments remain authoritative. Padding separates
+// reservations but is never written or included in the kernel ABI.
+enum { IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT = 128 };
+
+// Seals a finite run under exclusive publication ownership. Every accepted
+// packet and argument remains retained until its real native completion.
+amdf_status_t iree_hal_amd_gpu_aql_publish_run(
+    struct iree_hal_amd_gpu_aql_queue_t* queue);
+
 // Every fallible preparation precedes native reservation. Native release can
 // only fail the queue terminally after acceptance. Once reserved, all
 // ownership is published before firmware can observe the first valid header.

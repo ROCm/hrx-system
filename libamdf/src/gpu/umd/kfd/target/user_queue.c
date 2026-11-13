@@ -50,6 +50,18 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
   }
   for (uint32_t i = 0; i < plans.count; ++i) {
     amdf_gpu_queue_family_properties_t* family = &plans.values[i].family;
+    const amdf_queue_family_placement_info_t placement =
+        amdf_gpu_kfd_target_user_queue_placement(topology, page_size,
+                                                 family->command_type);
+    // Passive discovery has physical heap totals but no activated memory
+    // profile. Live queue construction qualifies the actual LOCAL route.
+    if (family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
+        topology->vram.total_byte_length != 0 &&
+        (placement.placement_capabilities &
+         AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL) != 0) {
+      family->user_queue_capabilities |=
+          AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION;
+    }
     if (topology->properties.execution_resources.compute_units_per_resource !=
             0 &&
         (family->roles & AMDF_QUEUE_ROLE_COMPUTE) != 0) {

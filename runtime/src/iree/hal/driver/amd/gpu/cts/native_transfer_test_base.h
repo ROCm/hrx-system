@@ -32,12 +32,12 @@ class GpuNativeTransferTest : public GpuNativeTest,
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
-    // Start with small staging, retirement, and primary-ring capacities. Bulk
-    // transfers must grow staging and reuse it through native completion
-    // events.
+    // Start with minimal ABI storage and small retirement and primary-ring
+    // capacities. Builtin dispatches must grow their argument storage; bulk
+    // transfers grow staging and reuse it through native completion events.
     options_.queue.ring_byte_length = 4096;
     options_.queue.retirement_capacity = 4;
-    options_.queue.argument_capacity = 1024;
+    options_.queue.argument_capacity = 8;
     Create();
     if (HasFatalFailure()) {
       return;

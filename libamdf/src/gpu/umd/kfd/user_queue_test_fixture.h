@@ -513,6 +513,7 @@ class KfdUserQueueTest : public ::testing::Test {
 
   void SelectAqlTopology() {
     device_.topology.properties.gfx_ip = {9, 4, 2};
+    device_.topology.gc_ip = {9, 4, 2, true};
     device_.topology.properties.compute.wavefront_size = 64;
     device_.topology.properties.compute.compute_unit_count = 16;
     device_.topology.properties.compute.maximum_wave_count_per_compute_unit =

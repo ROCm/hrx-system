@@ -22,6 +22,7 @@
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
 #include "iree/hal/driver/amd/gpu/queue/host_wait.h"
+#include "iree/hal/driver/amd/gpu/queue/input_memory.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
@@ -31,6 +32,13 @@ extern "C" {
 #endif
 
 typedef struct iree_hal_amd_gpu_aql_queue_t iree_hal_amd_gpu_aql_queue_t;
+
+enum {
+  // A single stable entry is queued or being consumed by the publisher.
+  IREE_HAL_AMD_GPU_AQL_SEAL_ENQUEUED = 1u << 0,
+  // Explicit flush seals even while an older completion is outstanding.
+  IREE_HAL_AMD_GPU_AQL_SEAL_FORCE = 1u << 1,
+};
 
 // Retirement credit owns both the native point and the inline host capture.
 // Firmware consumption alone never returns this storage.
@@ -109,6 +117,8 @@ struct iree_hal_amd_gpu_aql_queue_t {
   iree_host_size_t pending_size;
   // Native backing acquisition, independent of execution publication.
   iree_hal_amd_gpu_aql_growth_context_t growth;
+  // Optional owned LOCAL kernarg policy, borrowed by initial and grown backing.
+  iree_hal_amd_gpu_input_memory_t argument_memory;
   // Demand-driven firmware private memory.
   iree_hal_amd_gpu_aql_scratch_t scratch;
   // Publisher-owned native storage and accepted causal prefix.
@@ -132,7 +142,34 @@ struct iree_hal_amd_gpu_aql_queue_t {
     // CPU-only replay workspace, reused under exclusive publication. Its
     // capacity is independent of all GPU-visible storage and execution credit.
     iree_byte_span_t preparation;
+    // Every ABI byte uses non-temporal stores under the achieved native
+    // contract.
+    bool argument_streaming;
+    // The native format admits AGENT acquisition for fresh, isolated ABI
+    // records. These queues publish each packet; others use bounded groups.
+    bool argument_cache_isolated;
   } producer;
+  // A finite physical completion run published in bounded groups. Its final
+  // group stays behind an INVALID header until sealing. Only the current
+  // publisher touches packet coordinates and the physical completion.
+  struct {
+    // Retained physical completion for the run, or NULL while none is open.
+    iree_hal_amd_gpu_signal_t* completion;
+    // First reserved packet, establishing the publication group coordinates.
+    uint64_t first;
+    // Last reserved packet, which receives the physical completion at sealing.
+    uint64_t last;
+    // Complete header/setup word of the unpublished group's first packet.
+    uint32_t group_header;
+    // Complete final header/setup word, mutable until its group is published.
+    uint32_t last_header;
+    // First logical position plus one; zero means no open run.
+    iree_atomic_int64_t position;
+    // Coalesced retirement or explicit-flush request to seal the current run.
+    iree_hal_amd_gpu_aql_entry_t entry;
+    // Atomic ENQUEUED/FORCE flags; only the first request links the entry.
+    iree_atomic_int32_t pending;
+  } run;
   // Completion credit is isolated from ordinary publisher writes.
   struct {
     // Fully retired native prefix, including final resource release.
@@ -192,6 +229,20 @@ struct iree_hal_amd_gpu_aql_queue_t {
   // GPU fixup values with initial capacity acquired during queue construction.
   iree_hal_amd_gpu_byte_storage_pool_t values;
 };
+
+// Reads the optional shader-feedback terminal outcome without consuming
+// reports.
+iree_status_code_t iree_hal_amd_gpu_aql_queue_feedback_failure(
+    const iree_hal_amd_gpu_aql_queue_t* queue);
+
+// Resumes capacity-parked captures through one coalesced publication entry.
+void iree_hal_amd_gpu_aql_queue_capacity_available(
+    iree_hal_amd_gpu_aql_queue_t* queue);
+
+// Transfers a stable entry to the publisher, progressing it inline when idle
+// or handing the remaining FIFO to the existing publication service.
+void iree_hal_amd_gpu_aql_queue_enqueue_entry(
+    iree_hal_amd_gpu_aql_queue_t* queue, iree_hal_amd_gpu_aql_entry_t* entry);
 
 // Frees joined queue metadata after the device releases native ownership.
 void iree_hal_amd_gpu_aql_queue_destroy(iree_hal_queue_t* queue);

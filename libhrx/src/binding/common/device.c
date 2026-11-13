@@ -65,39 +65,14 @@ iree_status_t iree_hal_streaming_device_select_primary_queue(
       "device has no provisioned transfer-and-dispatch queue");
 }
 
-iree_hal_queue_placement_t iree_hal_streaming_queue_family_select_placement(
-    const iree_hal_queue_family_t* family) {
-  return iree_hal_queue_family_spec(family)->placement_capabilities &
-                 IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL
-             ? IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL
-             : IREE_HAL_QUEUE_PLACEMENT_DEFAULT;
-}
-
 iree_status_t iree_hal_streaming_device_acquire_primary_queue(
     iree_hal_streaming_device_t* device, iree_hal_queue_t** out_queue) {
   iree_hal_queue_t* provisioned_queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_device_select_primary_queue(
       device, &provisioned_queue));
-  const iree_hal_queue_family_t* family =
-      iree_hal_queue_family(provisioned_queue);
-  const iree_hal_queue_placement_t placement =
-      iree_hal_streaming_queue_family_select_placement(family);
-  if (placement == IREE_HAL_QUEUE_PLACEMENT_DEFAULT ||
-      iree_hal_queue_placement(provisioned_queue) == placement ||
-      !iree_any_bit_set(iree_hal_queue_family_spec(family)->flags,
-                        IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION)) {
-    iree_hal_queue_retain(provisioned_queue);
-    *out_queue = provisioned_queue;
-    return iree_ok_status();
-  }
-  iree_hal_queue_params_t params;
-  iree_hal_queue_params_initialize(&params);
-  params.priority = iree_hal_queue_priority(provisioned_queue);
-  params.placement = placement;
-  params.features = iree_hal_queue_features(provisioned_queue);
-  params.execution_resources =
-      iree_hal_queue_execution_resources(provisioned_queue);
-  return iree_hal_queue_acquire(family, &params, out_queue);
+  iree_hal_queue_retain(provisioned_queue);
+  *out_queue = provisioned_queue;
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_streaming_device_acquire_transfer_queue(

@@ -157,14 +157,16 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
 // host template is patched in host_contents; its actual ABI and native commands
 // are copied to their separate mappings. Resident programs write their separate
 // dense value table. values is NULL when the resident instance needs no fixups.
+// stream_arguments selects the achieved native LOCAL publication protocol;
+// upload then owns a DWORD-rounded extent and every byte uses an NT store.
 // host_contents has preparation_byte_length bytes for a mutable host template
 // and is NULL for a resident program. Its caller keeps it through publication.
 // The publisher borrows zero-fixup host templates directly and omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    uint64_t command_address, void* commands, void* host_contents,
-    uint64_t* values);
+    bool stream_arguments, uint64_t command_address, void* commands,
+    void* host_contents, uint64_t* values);
 
 #ifdef __cplusplus
 }  // extern "C"

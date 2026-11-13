@@ -216,7 +216,7 @@ class CodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
       ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(
                     &aql_ring_, &user_, position, packet.words[0]),
                 AMDF_STATUS_OK);
-      iree_hal_amd_gpu_aql_ring_notify(&aql_ring_);
+      iree_hal_amd_gpu_aql_ring_notify(&aql_ring_, aql_ring_.reserved - 1);
     } else {
       ASSERT_NO_FATAL_FAILURE(DispatchPm4(image, address));
     }

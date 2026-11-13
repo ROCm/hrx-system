@@ -608,8 +608,6 @@ hipError_t iree_hip_execution_context_stream_create(
     iree_hal_queue_params_t queue_params;
     iree_hal_queue_params_initialize(&queue_params);
     queue_params.priority = queue_priority;
-    queue_params.placement =
-        iree_hal_streaming_queue_family_select_placement(queue_family);
     queue_params.execution_resources = resource_set->resources;
     iree_status_t status =
         iree_hal_queue_acquire(queue_family, &queue_params, &queue);

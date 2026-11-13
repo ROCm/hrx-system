@@ -34,14 +34,14 @@ iree_status_t iree_hal_streaming_queue_host_call(
   IREE_ASSERT_ARGUMENT(call.fn);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_streaming_stream_flush(stream));
-
   iree_slim_mutex_lock(&stream->mutex);
   uint64_t wait_value = 0;
   uint64_t signal_value = 0;
-  iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
-      stream, &wait_value, &signal_value);
+  iree_status_t status = iree_hal_streaming_stream_flush_locked(stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &wait_value, &signal_value);
+  }
   if (iree_status_is_ok(status)) {
     const iree_hal_semaphore_list_t wait_semaphores = {
         .count = wait_value > 0 ? 1 : 0,

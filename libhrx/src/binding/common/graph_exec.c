@@ -1989,10 +1989,6 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_result = IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR;
 
-  // Flush stream to ensure all prior operations are submitted.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_streaming_stream_flush(stream));
-
   // Mutex needed for launch as multiple threads can submit at once.
   // It also protects the reserved generation of this executable and its
   // privately owned children; no child can be launched independently.
@@ -2002,12 +1998,23 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
   }
+  // A graph may begin with a host callback. Publish preceding native writes
+  // under the same stream lock that captures the graph's incoming dependency.
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status = iree_hal_streaming_stream_flush_locked(stream);
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    iree_slim_mutex_unlock(&exec->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
   // An empty recording needs no submission unless it must carry a previous
   // launch across streams after a parameter update removed all executable work.
   if (exec->block_count == 0 &&
       (!exec->last_launch.semaphore ||
        exec->last_launch.semaphore == stream->timeline_semaphore)) {
     *out_result = IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
+    iree_slim_mutex_unlock(&stream->mutex);
     iree_slim_mutex_unlock(&exec->mutex);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
@@ -2019,6 +2026,7 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   // the first refusal and leaves the blocks ahead of the record in flight with
   // nothing signaling the launching stream's timeline.
   if (exec->records_events && stream->context != exec->context) {
+    iree_slim_mutex_unlock(&stream->mutex);
     iree_slim_mutex_unlock(&exec->mutex);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
@@ -2036,11 +2044,8 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   iree_hal_streaming_accepted_signal_list_initialize(exec->host_allocator,
                                                      &accepted_signals);
 
-  iree_slim_mutex_lock(&stream->mutex);
-
   iree_hal_queue_t* cooperative_queue = NULL;
   bool cooperative_launch_too_large = false;
-  iree_status_t status = iree_ok_status();
   if (exec->has_cooperative_dispatches) {
     status = iree_hal_streaming_stream_select_cooperative_queue_locked(
         stream, &cooperative_queue);

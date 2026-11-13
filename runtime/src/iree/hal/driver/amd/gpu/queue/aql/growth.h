@@ -24,7 +24,7 @@ typedef struct iree_hal_amd_gpu_aql_growth_context_t {
   iree_hal_amd_gpu_context_t* context;
   // Borrowed coherent control-memory policy.
   const iree_hal_amd_fabric_memory_options_t* memory;
-  // Borrowed cached ABI policy, identical to initial argument allocation.
+  // Borrowed queue-selected ABI policy, identical to initial allocation.
   const iree_hal_amd_fabric_memory_options_t* argument_memory;
   // Borrowed read/write transfer policy, independent of native control.
   const iree_hal_amd_fabric_memory_options_t* transfer_memory;
