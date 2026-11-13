@@ -14,6 +14,10 @@ from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
     BF16_CONVERSION_ROUNDING,
     F32_ACCUMULATOR_ADD_CONTROL,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.f32_accumulator import (
+    emit_f32_full_accumulator_operand,
+    emit_f32_full_accumulator_result,
+)
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import AIE2P_CORE_DESCRIPTOR_SET
 from loom.target.contracts import (
     ContractEmit,
@@ -22,7 +26,6 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     EmitRegisterConcat,
-    EmitRegisterCopy,
     EmitRegisterSlice,
     Guard,
     ValueRef,
@@ -44,81 +47,6 @@ def _operation(key: str, source: ValueRef, result: ValueRef) -> EmitDescriptorOp
         result_types={"dst": DescriptorResultType()},
         form=DescriptorEmitForm.OP,
     )
-
-
-def _accumulator(
-    source: ValueRef,
-    prefix: str,
-    maximum: int,
-    short_accumulator: bool,
-    emits: list[ContractEmit],
-) -> ValueRef:
-    """Places the observed lanes in a full arithmetic accumulator."""
-    if maximum > 32:
-        return source
-    if maximum == 32 or short_accumulator:
-        parts = [source] * (2 if maximum == 32 else 4)
-    else:
-        parts = []
-        for ordinal in range(1 if maximum <= 16 else 2):
-            packet = source
-            if maximum > 16:
-                packet = ValueRef.temporary(f"{prefix}_vector_{ordinal}")
-                emits.append(
-                    EmitRegisterSlice(
-                        source=source,
-                        result=packet,
-                        unit_offset=2 * ordinal,
-                        unit_count=2,
-                    )
-                )
-            converted = ValueRef.temporary(f"{prefix}_accumulator_{ordinal}")
-            emits.append(
-                _operation("move.vector512.to.accumulator512", packet, converted)
-            )
-            parts.append(converted)
-        parts *= 4 // len(parts)
-    result = ValueRef.temporary(f"{prefix}_accumulator")
-    emits.append(
-        EmitRegisterConcat(
-            sources=parts,
-            result=result,
-            result_type=Vector("f32", lanes=64),
-        )
-    )
-    return result
-
-
-def _result(
-    source: ValueRef,
-    maximum: int,
-    short_accumulator: bool,
-    emits: list[ContractEmit],
-) -> None:
-    result = ValueRef.result("result")
-    if maximum == 32 or short_accumulator:
-        prefix = ValueRef.temporary("result_prefix")
-        emits.extend(
-            (
-                EmitRegisterSlice(
-                    source=source, result=prefix, unit_count=2 if maximum == 32 else 1
-                ),
-                EmitRegisterCopy(source=prefix, result=result),
-            )
-        )
-        return
-    packets = []
-    for ordinal in range(1 if maximum <= 16 else 2):
-        unit = ValueRef.temporary(f"result_unit_{ordinal}")
-        packet = ValueRef.temporary(f"result_vector_{ordinal}")
-        emits.append(
-            EmitRegisterSlice(
-                source=source, result=unit, unit_offset=ordinal, unit_count=1
-            )
-        )
-        emits.append(_operation("move.accumulator512.to.vector512", unit, packet))
-        packets.append(packet)
-    emits.append(EmitRegisterConcat(sources=packets, result=result))
 
 
 def _fma_rule(
@@ -163,7 +91,7 @@ def _fma_rule(
                 )
             )
     if not zero:
-        operands["acc1"] = _accumulator(
+        operands["acc1"] = emit_f32_full_accumulator_operand(
             ValueRef.operand("c"), "seed", maximum, seed_in_accumulator, emits
         )
     if not all(origins):
@@ -188,7 +116,7 @@ def _fma_rule(
                     name, "aie2p.ebmll" if in_accumulator else "aie2p.vec256"
                 )
             )
-        wide = _accumulator(
+        wide = emit_f32_full_accumulator_operand(
             ValueRef.operand(name), name, maximum, in_accumulator, emits
         )
         chunks = []
@@ -233,7 +161,13 @@ def _fma_rule(
         )
     )
     if width == 32:
-        _result(native_result, maximum, result_in_accumulator, emits)
+        emit_f32_full_accumulator_result(
+            native_result,
+            ValueRef.result("result"),
+            maximum,
+            result_in_accumulator,
+            emits,
+        )
     return DescriptorRule(
         source_op=vector.vector_fmaf,
         descriptor=descriptor,

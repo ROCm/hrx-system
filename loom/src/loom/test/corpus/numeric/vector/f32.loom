@@ -176,6 +176,146 @@ func.def @vector_f32_arithmetic(%lhs_buffer: buffer, %rhs_buffer: buffer, %outpu
   func.return
 }
 
+// Distinct lane values cross complete and partial arithmetic carriers. Each
+// result row leaves a sentinel tail to expose writes outside the logical width.
+func.def @vector_f32_add_sub_widths(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%origin] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%origin] : buffer -> view<64xf32>
+  %output = buffer.view %output_buffer[%origin] : buffer -> view<6x128xf32>
+  %lhs16 = vector.load %lhs_view[0] : view<64xf32> -> vector<16xf32>
+  %rhs16 = vector.load %rhs_view[0] : view<64xf32> -> vector<16xf32>
+  %sum16 = vector.addf %lhs16, %rhs16 : vector<16xf32>
+  %difference16 = vector.subf %lhs16, %rhs16 : vector<16xf32>
+  vector.store %sum16, %output[0, 0] : vector<16xf32>, view<6x128xf32>
+  vector.store %difference16, %output[0, 64] : vector<16xf32>, view<6x128xf32>
+  %lhs17 = vector.load %lhs_view[0] : view<64xf32> -> vector<17xf32>
+  %rhs17 = vector.load %rhs_view[0] : view<64xf32> -> vector<17xf32>
+  %sum17 = vector.addf %lhs17, %rhs17 : vector<17xf32>
+  %difference17 = vector.subf %lhs17, %rhs17 : vector<17xf32>
+  vector.store %sum17, %output[1, 0] : vector<17xf32>, view<6x128xf32>
+  vector.store %difference17, %output[1, 64] : vector<17xf32>, view<6x128xf32>
+  %lhs31 = vector.load %lhs_view[0] : view<64xf32> -> vector<31xf32>
+  %rhs31 = vector.load %rhs_view[0] : view<64xf32> -> vector<31xf32>
+  %sum31 = vector.addf %lhs31, %rhs31 : vector<31xf32>
+  %difference31 = vector.subf %lhs31, %rhs31 : vector<31xf32>
+  vector.store %sum31, %output[2, 0] : vector<31xf32>, view<6x128xf32>
+  vector.store %difference31, %output[2, 64] : vector<31xf32>, view<6x128xf32>
+  %lhs32 = vector.load %lhs_view[0] : view<64xf32> -> vector<32xf32>
+  %rhs32 = vector.load %rhs_view[0] : view<64xf32> -> vector<32xf32>
+  %sum32 = vector.addf %lhs32, %rhs32 : vector<32xf32>
+  %difference32 = vector.subf %lhs32, %rhs32 : vector<32xf32>
+  vector.store %sum32, %output[3, 0] : vector<32xf32>, view<6x128xf32>
+  vector.store %difference32, %output[3, 64] : vector<32xf32>, view<6x128xf32>
+  %lhs33 = vector.load %lhs_view[0] : view<64xf32> -> vector<33xf32>
+  %rhs33 = vector.load %rhs_view[0] : view<64xf32> -> vector<33xf32>
+  %sum33 = vector.addf %lhs33, %rhs33 : vector<33xf32>
+  %difference33 = vector.subf %lhs33, %rhs33 : vector<33xf32>
+  vector.store %sum33, %output[4, 0] : vector<33xf32>, view<6x128xf32>
+  vector.store %difference33, %output[4, 64] : vector<33xf32>, view<6x128xf32>
+  %lhs64 = vector.load %lhs_view[0] : view<64xf32> -> vector<64xf32>
+  %rhs64 = vector.load %rhs_view[0] : view<64xf32> -> vector<64xf32>
+  %sum64 = vector.addf %lhs64, %rhs64 : vector<64xf32>
+  %difference64 = vector.subf %lhs64, %rhs64 : vector<64xf32>
+  vector.store %sum64, %output[5, 0] : vector<64xf32>, view<6x128xf32>
+  vector.store %difference64, %output[5, 64] : vector<64xf32>, view<6x128xf32>
+  func.return
+}
+
+// F64 scalar arithmetic followed by F32 rounding supplies an independent
+// reference without using vector formation or the target accumulator layout.
+func.def @vector_f32_add_sub_widths_oracle(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%origin] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%origin] : buffer -> view<64xf32>
+  %output = buffer.view %output_buffer[%origin] : buffer -> view<6x128xf32>
+  %widths = vector.constanti [16, 17, 31, 32, 33, 64] : vector<6xi32>
+  %begin = index.constant 0 : index
+  %row_count = index.constant 6 : index
+  %step = index.constant 1 : index
+  %difference_offset = index.constant 64 : index
+  scf.for %row = [%begin to %row_count step %step] {
+    %width_value = vector.extract %widths[%row] : vector<6xi32> -> i32
+    %width = index.cast %width_value : i32 to index
+    scf.for %lane = [%begin to %width step %step] {
+      %lhs = view.load %lhs_view[%lane] : view<64xf32> -> f32
+      %rhs = view.load %rhs_view[%lane] : view<64xf32> -> f32
+      %wide_lhs = scalar.extf %lhs : f32 to f64
+      %wide_rhs = scalar.extf %rhs : f32 to f64
+      %wide_sum = scalar.addf %wide_lhs, %wide_rhs : f64
+      %wide_difference = scalar.subf %wide_lhs, %wide_rhs : f64
+      %sum = scalar.fptrunc %wide_sum : f64 to f32
+      %difference = scalar.fptrunc %wide_difference : f64 to f32
+      %difference_lane = index.add %lane, %difference_offset : index
+      view.store %sum, %output[%row, %lane] : f32, view<6x128xf32>
+      view.store %difference, %output[%row, %difference_lane] : f32, view<6x128xf32>
+    }
+  }
+  func.return
+}
+
+func.def @generate_f32_add_sub_boundaries(%lhs_buffer: buffer, %rhs_buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %lhs = buffer.view %lhs_buffer[%origin] : buffer -> view<64xi32>
+  %rhs = buffer.view %rhs_buffer[%origin] : buffer -> view<64xi32>
+  // Zeros, infinities, NaNs, cancellation, overflow, and halfway rounding.
+  %left = vector.constanti [0, -2147483648, 2139095040, -8388608, 2143289345, 1065353216, 2139095039, 1065353217, 1065353216, 1065353217, -1082130432, 2143289344, 0, -2147483648, 16777216, -2130706432] : vector<16xi32>
+  %right = vector.constanti [-2147483648, -2147483648, 2139095040, 2139095040, 1065353216, -1082130432, 2139095039, 1065353216, 864026624, 864026624, 1065353216, -4194303, 0, 0, 8388608, -2139095040] : vector<16xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %packet_lanes = index.constant 16 : index
+  scf.for %offset = [%begin to %end step %packet_lanes] {
+    vector.store %left, %lhs[%offset] : vector<16xi32>, view<64xi32>
+    vector.store %right, %rhs[%offset] : vector<16xi32>, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario @vector_f32_add_sub_width_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %lhs = check.generate.random.uniform seed(%seed) range(-65536.0 to 65536.0) : tensor<64xf32>
+    %rhs = check.generate.iota offset(-3.75) step(0.125) : tensor<64xf32>
+    %storage = check.generate.fill value(-123.5) : tensor<800xf32>
+    %output = check.tensor.view %storage offset(64) : tensor<800xf32> -> tensor<6x128xf32>
+    check.compare<@vector_f32_add_sub_widths, @vector_f32_add_sub_widths_oracle>(%lhs, %rhs, %output) : (tensor<64xf32>, tensor<64xf32>, tensor<6x128xf32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<800xf32>
+      check.expect.bitwise actual(%lhs) expected(%lhs) : tensor<64xf32>
+      check.expect.bitwise actual(%rhs) expected(%rhs) : tensor<64xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_f32_add_sub_signed_zeros {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.generate.fill value(-0.0) : tensor<64xf32>
+    %rhs = check.generate.fill value(-0.0) : tensor<64xf32>
+    %storage = check.generate.fill value(-123.5) : tensor<800xf32>
+    %output = check.tensor.view %storage offset(64) : tensor<800xf32> -> tensor<6x128xf32>
+    check.compare<@vector_f32_add_sub_widths, @vector_f32_add_sub_widths_oracle>(%lhs, %rhs, %output) : (tensor<64xf32>, tensor<64xf32>, tensor<6x128xf32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<800xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @vector_f32_add_sub_rounding_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.generate.fill value(0.0) : tensor<64xf32>
+    %rhs = check.generate.fill value(0.0) : tensor<64xf32>
+    check.generate<@generate_f32_add_sub_boundaries>(%lhs, %rhs) : (tensor<64xf32>, tensor<64xf32>) -> ()
+    %storage = check.generate.fill value(-123.5) : tensor<800xf32>
+    %output = check.tensor.view %storage offset(64) : tensor<800xf32> -> tensor<6x128xf32>
+    check.compare<@vector_f32_add_sub_widths, @vector_f32_add_sub_widths_oracle>(%lhs, %rhs, %output) : (tensor<64xf32>, tensor<64xf32>, tensor<6x128xf32>) -> () {
+      check.expect.approximate actual(%storage) expected(%storage) atol(0.0) rtol(0.0) nan(same) : tensor<800xf32>, tensor<800xf32>
+      check.expect.bitwise actual(%lhs) expected(%lhs) : tensor<64xf32>
+      check.expect.bitwise actual(%rhs) expected(%rhs) : tensor<64xf32>
+    }
+  }
+  check.return
+}
+
 func.def @vector_f32_division(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xf32>

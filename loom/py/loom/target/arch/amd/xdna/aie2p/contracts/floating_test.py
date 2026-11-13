@@ -112,30 +112,57 @@ def _bf16_value(bits: int) -> float:
     return struct.unpack("<f", struct.pack("<I", bits << 16))[0]
 
 
-def test_full_accumulator_add_and_subtract_share_native_lane_coverage() -> None:
-    accumulator = Vector("f32", minimum_static_elements=33, maximum_static_elements=64)
+@pytest.mark.parametrize("lane_count", tuple(range(66)))
+def test_full_accumulator_add_and_subtract_share_native_lane_coverage(
+    lane_count: int,
+) -> None:
     for source_op, operation in (
         (vector.vector_addf, "add"),
         (vector.vector_subf, "sub"),
     ):
         descriptor_key = f"amd.xdna.aie2p.{operation}.f32x64.configured"
-        (rule,) = (
+        rules = [
             rule
             for rule in AIE2P_FLOATING_RULES
-            if rule.source_op is source_op and rule.descriptor.key == descriptor_key
-        )
+            if rule.source_op is source_op
+            and rule.descriptor.key == descriptor_key
+            and rule.guards[0].type_pattern.minimum_static_elements
+            <= lane_count
+            <= rule.guards[0].type_pattern.maximum_static_elements
+        ]
+        if lane_count <= 16 or lane_count > 64:
+            assert not rules
+            continue
+        (rule,) = rules
+        source_type = rule.guards[0].type_pattern
         assert rule.guards == tuple(
-            Guard.value_type(name, accumulator) for name in ("lhs", "rhs", "result")
+            Guard.value_type(name, source_type) for name in ("lhs", "rhs", "result")
         )
-        control, arithmetic = rule.emit
+        operations = [emit for emit in rule.emit if isinstance(emit, EmitDescriptorOp)]
+        assert [emit.descriptor.key for emit in operations] == [
+            *(
+                ["amd.xdna.aie2p.move.vector512.to.accumulator512"] * 4
+                if lane_count < 32
+                else []
+            ),
+            "amd.xdna.aie2p.constant.i32.mova",
+            descriptor_key,
+            *(
+                ["amd.xdna.aie2p.move.accumulator512.to.vector512"] * 2
+                if lane_count < 32
+                else []
+            ),
+        ]
+        control = operations[4 if lane_count < 32 else 0]
+        arithmetic = operations[5 if lane_count < 32 else 1]
         assert control.immediates == {"i": 60}
-        assert arithmetic.descriptor.key == descriptor_key
-        assert arithmetic.operands == {
-            "acc1": ValueRef.operand("lhs"),
-            "acc2": ValueRef.operand("rhs"),
-            "acc": ValueRef.temporary("arithmetic_control"),
-        }
-        assert arithmetic.results == {"dst": ValueRef.result("result")}
+        if lane_count > 32:
+            assert arithmetic.operands == {
+                "acc1": ValueRef.operand("lhs"),
+                "acc2": ValueRef.operand("rhs"),
+                "acc": ValueRef.temporary("arithmetic_control"),
+            }
+            assert arithmetic.results == {"dst": ValueRef.result("result")}
 
 
 def test_bf16_origin_scale_uses_native_multiply_with_packed_underflow_repair() -> None:

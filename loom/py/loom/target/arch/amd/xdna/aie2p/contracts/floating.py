@@ -25,6 +25,8 @@ from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
 from loom.target.arch.amd.xdna.aie2p.contracts.f32 import emit_f32_multiply
 from loom.target.arch.amd.xdna.aie2p.contracts.f32_accumulator import (
     F32AccumulatorProgram,
+    emit_f32_full_accumulator_operand,
+    emit_f32_full_accumulator_result,
     emit_f32_planned_accumulator_binary,
     emit_f32_scalar_accumulator_binary,
 )
@@ -65,9 +67,6 @@ _F32X16_VECTOR = Vector("f32", lanes=16)
 _F32X32_VECTOR = Vector("f32", lanes=32)
 _I16X32_VECTOR = Vector("i16", lanes=32)
 _F32X64_ACCUMULATOR = Vector("f32", lanes=64)
-_F32_FULL_ACCUMULATOR = Vector(
-    "f32", minimum_static_elements=33, maximum_static_elements=64
-)
 _I1_VECTOR = Vector("i1", minimum_static_elements=1, maximum_static_elements=64)
 
 _BF16_ELEMENTWISE_MULTIPLY_CONTROL = vector_data_path_control(
@@ -1115,32 +1114,62 @@ def _float_packet_accumulator_zero_rule() -> DescriptorRule:
 
 
 def _float_full_accumulator_binary_rule(
-    source_op: Op, operation_descriptor_key: str
+    source_op: Op,
+    operation_descriptor_key: str,
+    minimum_lane_count: int,
+    maximum_lane_count: int,
 ) -> DescriptorRule:
-    # These values occupy a complete DM carrier. The unobserved tail of a
-    # partial vector neither requires initialization nor changes active lanes.
-    config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
+    # Partial carriers use the same lane-local arithmetic as a complete DM.
+    # Unobserved lanes repeat the operand instead of requiring a separate fill.
+    emits: list[ContractEmit] = []
+    operands = {
+        name: emit_f32_full_accumulator_operand(
+            ValueRef.operand(name), name, maximum_lane_count, False, emits
+        )
+        for name in ("lhs", "rhs")
+    }
+    result = ValueRef.result("result")
+    native_result = (
+        result if maximum_lane_count > 32 else ValueRef.temporary("arithmetic_result")
+    )
     operation = _descriptor(operation_descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=operation,
-        guards=_typed_guards(("lhs", "rhs", "result"), _F32_FULL_ACCUMULATOR),
-        emit=(
+    emits.extend(
+        (
             _constant_emit(
-                config_constant,
+                _descriptor("amd.xdna.aie2p.constant.i32.mova"),
                 ValueRef.temporary("arithmetic_control"),
                 F32_ACCUMULATOR_ADD_CONTROL,
             ),
             _op_emit(
                 operation,
                 operands={
-                    "acc1": ValueRef.operand("lhs"),
-                    "acc2": ValueRef.operand("rhs"),
+                    "acc1": operands["lhs"],
+                    "acc2": operands["rhs"],
                     "acc": ValueRef.temporary("arithmetic_control"),
                 },
-                results={"dst": ValueRef.result("result")},
+                results={"dst": native_result},
+                result_types=(
+                    {"dst": DescriptorResultType()}
+                    if maximum_lane_count <= 32
+                    else None
+                ),
             ),
-        ),
+        )
+    )
+    if maximum_lane_count <= 32:
+        emit_f32_full_accumulator_result(
+            native_result, result, maximum_lane_count, False, emits
+        )
+    source_type = Vector(
+        "f32",
+        minimum_static_elements=minimum_lane_count,
+        maximum_static_elements=maximum_lane_count,
+    )
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=operation,
+        guards=_typed_guards(("lhs", "rhs", "result"), source_type),
+        emit=tuple(emits),
     )
 
 
@@ -1363,7 +1392,10 @@ AIE2P_FLOATING_RULES = (
     _float_packet_accumulator_zero_rule(),
     _float_matrix_accumulator_zero_rule(),
     *(
-        _float_full_accumulator_binary_rule(source_op, descriptor_key)
+        _float_full_accumulator_binary_rule(
+            source_op, descriptor_key, minimum_lane_count, maximum_lane_count
+        )
+        for minimum_lane_count, maximum_lane_count in ((17, 31), (32, 32), (33, 64))
         for source_op, descriptor_key in (
             (vector.vector_addf, "amd.xdna.aie2p.add.f32x64.configured"),
             (vector.vector_subf, "amd.xdna.aie2p.sub.f32x64.configured"),
