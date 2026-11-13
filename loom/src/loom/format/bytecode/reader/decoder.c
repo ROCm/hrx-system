@@ -49,12 +49,11 @@ iree_status_t loom_bytecode_reader_emit_unexpected_end(
 
 iree_status_t loom_bytecode_reader_emit_invalid_varint(
     loom_bytecode_reader_decoder_t* decoder, uint64_t offset,
-    iree_status_t decode_status) {
-  const bool reached_end = iree_status_is_out_of_range(decode_status);
-  iree_status_free(decode_status);
+    loom_varint_decode_result_t result) {
   const iree_string_view_t failure_code =
-      reached_end ? IREE_SV("unterminated_varint")
-                  : IREE_SV("noncanonical_or_uint64_overflow");
+      result == LOOM_VARINT_DECODE_TRUNCATED
+          ? IREE_SV("unterminated_varint")
+          : IREE_SV("noncanonical_or_uint64_overflow");
   const loom_diagnostic_param_t params[] = {
       loom_param_u64(offset),
       loom_param_string(failure_code),

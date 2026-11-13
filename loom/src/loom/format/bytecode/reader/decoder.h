@@ -84,10 +84,10 @@ iree_status_t loom_bytecode_reader_emit_unexpected_end(
     loom_bytecode_reader_decoder_t* decoder, uint64_t offset, uint64_t needed,
     uint64_t available);
 
-// Consumes a failed raw varint status and emits its structured diagnostic.
+// Emits the structured diagnostic for a non-complete raw varint outcome.
 iree_status_t loom_bytecode_reader_emit_invalid_varint(
     loom_bytecode_reader_decoder_t* decoder, uint64_t offset,
-    iree_status_t decode_status);
+    loom_varint_decode_result_t result);
 
 // Emits an invalid table-field diagnostic.
 iree_status_t loom_bytecode_reader_emit_invalid_field(
@@ -145,48 +145,51 @@ iree_status_t loom_bytecode_reader_emit_enum_value(
 static inline iree_status_t loom_bytecode_reader_read_u8(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint8_t* out_value) {
-  if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(&cursor->cursor, 1))) {
-    return loom_bytecode_reader_emit_unexpected_end(
-        decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 1,
-        loom_bytecode_cursor_remaining(&cursor->cursor));
+  if (IREE_LIKELY(loom_bytecode_cursor_read_u8(&cursor->cursor, out_value))) {
+    return iree_ok_status();
   }
-  return loom_bytecode_cursor_read_u8(&cursor->cursor, out_value);
+  return loom_bytecode_reader_emit_unexpected_end(
+      decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 1,
+      loom_bytecode_cursor_remaining(&cursor->cursor));
 }
 
 // Reads a little-endian unsigned 16-bit integer from |cursor|.
 static inline iree_status_t loom_bytecode_reader_read_u16_le(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint16_t* out_value) {
-  if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(&cursor->cursor, 2))) {
-    return loom_bytecode_reader_emit_unexpected_end(
-        decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 2,
-        loom_bytecode_cursor_remaining(&cursor->cursor));
+  if (IREE_LIKELY(
+          loom_bytecode_cursor_read_u16_le(&cursor->cursor, out_value))) {
+    return iree_ok_status();
   }
-  return loom_bytecode_cursor_read_u16_le(&cursor->cursor, out_value);
+  return loom_bytecode_reader_emit_unexpected_end(
+      decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 2,
+      loom_bytecode_cursor_remaining(&cursor->cursor));
 }
 
 // Reads a little-endian unsigned 32-bit integer from |cursor|.
 static inline iree_status_t loom_bytecode_reader_read_u32_le(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint32_t* out_value) {
-  if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(&cursor->cursor, 4))) {
-    return loom_bytecode_reader_emit_unexpected_end(
-        decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 4,
-        loom_bytecode_cursor_remaining(&cursor->cursor));
+  if (IREE_LIKELY(
+          loom_bytecode_cursor_read_u32_le(&cursor->cursor, out_value))) {
+    return iree_ok_status();
   }
-  return loom_bytecode_cursor_read_u32_le(&cursor->cursor, out_value);
+  return loom_bytecode_reader_emit_unexpected_end(
+      decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 4,
+      loom_bytecode_cursor_remaining(&cursor->cursor));
 }
 
 // Reads a little-endian unsigned 64-bit integer from |cursor|.
 static inline iree_status_t loom_bytecode_reader_read_u64_le(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {
-  if (IREE_UNLIKELY(!loom_bytecode_cursor_has_bytes(&cursor->cursor, 8))) {
-    return loom_bytecode_reader_emit_unexpected_end(
-        decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 8,
-        loom_bytecode_cursor_remaining(&cursor->cursor));
+  if (IREE_LIKELY(
+          loom_bytecode_cursor_read_u64_le(&cursor->cursor, out_value))) {
+    return iree_ok_status();
   }
-  return loom_bytecode_cursor_read_u64_le(&cursor->cursor, out_value);
+  return loom_bytecode_reader_emit_unexpected_end(
+      decoder, loom_bytecode_reader_cursor_absolute_position(cursor), 8,
+      loom_bytecode_cursor_remaining(&cursor->cursor));
 }
 
 // Reads a canonical unsigned LEB128 integer with guaranteed successful-path
@@ -196,11 +199,12 @@ loom_bytecode_reader_read_uvarint_inline(
     loom_bytecode_reader_decoder_t* decoder,
     loom_bytecode_reader_cursor_t* cursor, uint64_t* out_value) {
   const uint64_t offset = loom_bytecode_reader_cursor_absolute_position(cursor);
-  iree_status_t status = loom_uvarint_decode(&cursor->cursor, out_value);
-  if (IREE_LIKELY(iree_status_is_ok(status))) {
+  const loom_varint_decode_result_t result =
+      loom_uvarint_decode(&cursor->cursor, out_value);
+  if (IREE_LIKELY(result == LOOM_VARINT_DECODE_COMPLETE)) {
     return iree_ok_status();
   }
-  return loom_bytecode_reader_emit_invalid_varint(decoder, offset, status);
+  return loom_bytecode_reader_emit_invalid_varint(decoder, offset, result);
 }
 
 // Reads a canonical unsigned LEB128 integer from |cursor| while allowing the
@@ -234,13 +238,13 @@ static inline iree_status_t loom_bytecode_reader_read_span(
         cursor->absolute_offset + cursor->cursor.length);
   }
   const iree_host_size_t host_length = (iree_host_size_t)length;
-  if (IREE_UNLIKELY(
-          !loom_bytecode_cursor_has_bytes(&cursor->cursor, host_length))) {
-    return loom_bytecode_reader_emit_unexpected_end(
-        decoder, loom_bytecode_reader_cursor_absolute_position(cursor), length,
-        loom_bytecode_cursor_remaining(&cursor->cursor));
+  if (IREE_LIKELY(loom_bytecode_cursor_read_span(&cursor->cursor, host_length,
+                                                 out_span))) {
+    return iree_ok_status();
   }
-  return loom_bytecode_cursor_read_span(&cursor->cursor, host_length, out_span);
+  return loom_bytecode_reader_emit_unexpected_end(
+      decoder, loom_bytecode_reader_cursor_absolute_position(cursor), length,
+      loom_bytecode_cursor_remaining(&cursor->cursor));
 }
 
 // Requires that |cursor| has no unread trailing bytes.

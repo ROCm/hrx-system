@@ -1964,7 +1964,8 @@ class ReaderTest : public ::testing::Test {
     loom_bytecode_cursor_initialize(bytes.data() + *offset,
                                     bytes.size() - *offset, &cursor);
     uint64_t value = 0;
-    IREE_CHECK_OK(loom_uvarint_decode(&cursor, &value));
+    EXPECT_EQ(loom_uvarint_decode(&cursor, &value),
+              LOOM_VARINT_DECODE_COMPLETE);
     *offset += cursor.position;
     return value;
   }

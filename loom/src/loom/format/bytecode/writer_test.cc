@@ -612,20 +612,23 @@ TEST_F(WriterTest, StringsSectionContainsModuleName) {
       section_data, (iree_host_size_t)strings_entry.length, &cursor);
 
   uint64_t string_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &string_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &string_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_GE(string_count, 2u);
 
   // The first string is reserved for the anonymous SSA value-name sentinel.
   uint64_t first_length = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &first_length));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &first_length),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_EQ(first_length, 0u);
 
   // The next string should be the module name "hello".
   uint64_t second_length = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &second_length));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &second_length),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_EQ(second_length, 5u);
   iree_const_byte_span_t span = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_span(&cursor, 5, &span));
+  ASSERT_TRUE(loom_bytecode_cursor_read_span(&cursor, 5, &span));
   EXPECT_EQ(memcmp(span.data, "hello", 5), 0);
 
   loom_module_free(module);
@@ -728,7 +731,8 @@ TEST_F(WriterTest, ModuleWithFunction) {
   loom_bytecode_cursor_initialize(ops_data, (iree_host_size_t)ops_entry.length,
                                   &cursor);
   uint64_t op_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &op_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_GE(op_count, 1u);
 
   loom_module_free(module);
@@ -754,23 +758,28 @@ TEST_F(WriterTest, FunctionSymbolKindUsesDenseWireEnum) {
   uint64_t import_count = 0;
   uint64_t export_count = 0;
   uint64_t root_region_payload_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &symbol_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &import_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &export_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_region_payload_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &symbol_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &import_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &export_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &root_region_payload_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(symbol_count, 1u);
   ASSERT_EQ(import_count, 0u);
   ASSERT_EQ(export_count, 1u);
   ASSERT_EQ(root_region_payload_count, 1u);
 
   iree_const_byte_span_t export_table = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_span(&cursor, 8, &export_table));
+  ASSERT_TRUE(loom_bytecode_cursor_read_span(&cursor, 8, &export_table));
   EXPECT_EQ(export_table.data_length, 8u);
 
   uint64_t name_id = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &name_id));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &name_id),
+            LOOM_VARINT_DECODE_COMPLETE);
   uint8_t kind = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &kind));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &kind));
   EXPECT_EQ(kind, LOOM_BYTECODE_SYMBOL_FUNC_DEF);
 
   loom_module_free(module);
@@ -1011,68 +1020,85 @@ TEST_F(WriterTest, FunctionBodySummaryAndOpTableRefsUseNewWireShape) {
   uint64_t region_count = 0;
   uint64_t block_count = 0;
   uint64_t op_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &value_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &region_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &value_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &region_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &op_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_EQ(value_count, 3u);
   EXPECT_EQ(region_count, 1u);
   EXPECT_EQ(block_count, 1u);
   EXPECT_EQ(op_count, 1u);
 
   uint64_t root_source_flags = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_source_flags));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &root_source_flags),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(root_source_flags, 0u);
   uint64_t root_block_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_block_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &root_block_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(root_block_count, 1u);
   uint8_t has_label = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &has_label));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &has_label));
   ASSERT_EQ(has_label, 0u);
   uint64_t block_source_trivia = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_source_trivia));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_source_trivia),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(block_source_trivia, 3u);
   uint64_t block_comment_length = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_comment_length));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_comment_length),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(block_comment_length, block_comments[0].size + 1);
   iree_const_byte_span_t block_comment = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_span(
+  ASSERT_TRUE(loom_bytecode_cursor_read_span(
       &cursor, (iree_host_size_t)block_comment_length, &block_comment));
   ASSERT_EQ(block_comment.data[0], ' ');
   EXPECT_EQ(memcmp(block_comment.data + 1, block_comments[0].data,
                    block_comments[0].size),
             0);
   uint64_t block_arg_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_arg_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_arg_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(block_arg_count, 2u);
   for (uint64_t i = 0; i < block_arg_count; ++i) {
     uint64_t unused = 0;
-    IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &unused));  // name_id
-    IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &unused));  // Type reference.
-    ASSERT_EQ(unused & 1u, 0u);                             // Static type.
-    IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &unused));  // Record length.
+    ASSERT_EQ(loom_uvarint_decode(&cursor, &unused),
+              LOOM_VARINT_DECODE_COMPLETE);  // name_id
+    ASSERT_EQ(loom_uvarint_decode(&cursor, &unused),
+              LOOM_VARINT_DECODE_COMPLETE);  // Type reference.
+    ASSERT_EQ(unused & 1u, 0u);              // Static type.
+    ASSERT_EQ(loom_uvarint_decode(&cursor, &unused),
+              LOOM_VARINT_DECODE_COMPLETE);  // Record length.
     ASSERT_EQ(unused, 0u);
   }
   uint64_t block_op_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_op_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_op_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(block_op_count, 1u);
   uint64_t op_table_index_plus1 = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_table_index_plus1));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &op_table_index_plus1),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_GT(op_table_index_plus1, 0u);
   uint8_t instance_flags = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &instance_flags));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &instance_flags));
   ASSERT_EQ(instance_flags, 0u);
   uint64_t location_id = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &location_id));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &location_id),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(location_id, 0u);
   uint64_t op_source_trivia = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_source_trivia));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &op_source_trivia),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(op_source_trivia, 3u);
   uint64_t op_comment_length = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_comment_length));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &op_comment_length),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(op_comment_length, op_comments[0].size + 1);
   iree_const_byte_span_t op_comment = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_span(
+  ASSERT_TRUE(loom_bytecode_cursor_read_span(
       &cursor, (iree_host_size_t)op_comment_length, &op_comment));
   ASSERT_EQ(op_comment.data[0], ' ');
   EXPECT_EQ(
@@ -1129,51 +1155,66 @@ TEST_F(WriterTest, FunctionBodySuccessorsUseRegionBlockOrdinals) {
   uint64_t region_count = 0;
   uint64_t block_count = 0;
   uint64_t op_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &value_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &region_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_count));
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &value_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &region_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_count),
+            LOOM_VARINT_DECODE_COMPLETE);
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &op_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_EQ(value_count, 0u);
   EXPECT_EQ(region_count, 1u);
   EXPECT_EQ(block_count, 2u);
   EXPECT_EQ(op_count, 1u);
 
   uint64_t root_source_flags = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_source_flags));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &root_source_flags),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(root_source_flags, 0u);
   uint64_t root_block_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &root_block_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &root_block_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(root_block_count, 2u);
   uint8_t has_label = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &has_label));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &has_label));
   ASSERT_EQ(has_label, 0u);
   uint64_t block_source_trivia = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_source_trivia));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_source_trivia),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(block_source_trivia, 0u);
   uint64_t block_arg_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_arg_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_arg_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(block_arg_count, 0u);
   uint64_t block_op_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &block_op_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &block_op_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(block_op_count, 1u);
 
   uint64_t unused = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &unused));  // op_table_index
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &unused),
+            LOOM_VARINT_DECODE_COMPLETE);  // op_table_index
   uint8_t flags = 0;
-  IREE_ASSERT_OK(loom_bytecode_cursor_read_u8(&cursor, &flags));
+  ASSERT_TRUE(loom_bytecode_cursor_read_u8(&cursor, &flags));
   EXPECT_EQ(flags, 0u);
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &unused));  // location_id
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &unused),
+            LOOM_VARINT_DECODE_COMPLETE);  // location_id
   uint64_t op_source_trivia = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &op_source_trivia));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &op_source_trivia),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(op_source_trivia, 0u);
   uint64_t operand_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &operand_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &operand_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(operand_count, 0u);
   uint64_t successor_count = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &successor_count));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &successor_count),
+            LOOM_VARINT_DECODE_COMPLETE);
   ASSERT_EQ(successor_count, 1u);
   uint64_t successor_block_index = 0;
-  IREE_ASSERT_OK(loom_uvarint_decode(&cursor, &successor_block_index));
+  ASSERT_EQ(loom_uvarint_decode(&cursor, &successor_block_index),
+            LOOM_VARINT_DECODE_COMPLETE);
   EXPECT_EQ(successor_block_index, 1u);
 
   loom_module_free(module);
