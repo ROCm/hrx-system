@@ -22,6 +22,7 @@ loom_check_test_suite(
         "kernel_barrier_control.loom-test",
         "kernel_resources.loom-test",
         "kernel_synchronization_legality.loom-test",
+        "predicate_storage.loom-test",
         "private_storage_unobserved.loom-test",
         "private_storage_write_scopes.loom-test",
         "promote_private_fragments.loom-test",

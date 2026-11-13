@@ -317,7 +317,6 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "kernel/workgroup/reduce_tree.loom:@workgroup_tree_integer_types": "TARGET/003",
     "kernel/workgroup/scan.loom:@workgroup_scan_extrema_bf16": "TARGET/003",
     "kernel/workgroup/scan.loom:@workgroup_scan_extrema_f64": "TARGET/003",
-    "kernel/workgroup/scan.loom:@workgroup_scan_predicate": "TARGET/003",
     "memory/address/generic.loom:@generic_copy_half": "TARGET/003",
     "memory/address/generic.loom:@generic_narrow_half_store": "TARGET/003",
     "memory/address/integer_casts.loom:@loaded_integer_address_joins": "TARGET/003",
