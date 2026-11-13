@@ -68,7 +68,11 @@ static int loom_vm_export_compare(const void* lhs_ptr, const void* rhs_ptr) {
       *(const loom_vm_program_callable_t* const*)lhs_ptr;
   const loom_vm_program_callable_t* rhs =
       *(const loom_vm_program_callable_t* const*)rhs_ptr;
-  return iree_string_view_compare(lhs->export_name, rhs->export_name);
+  const int comparison =
+      iree_string_view_compare(lhs->export_name, rhs->export_name);
+  // Local function ordinals preserve definition order. qsort may otherwise
+  // reverse equal names and diagnose the first definition as the duplicate.
+  return comparison ? comparison : (int)lhs->ordinal - (int)rhs->ordinal;
 }
 
 // Import rows are ordered by module, symbol, then structural callable type.

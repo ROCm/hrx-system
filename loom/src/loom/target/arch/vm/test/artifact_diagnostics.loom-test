@@ -11,12 +11,13 @@ low.func.def public target<vm.core>(@target) @untyped(%value: reg<vm.value>) -> 
 
 vm.target<core> @target
 
-func.def public target(@target) export("same") @first() {
+// Collision provenance follows definition order, not IR symbol spelling.
+func.def public target(@target) export("same") @z_first() {
   func.return
 }
 
 // ERROR@+1: BACKEND/056 {format="VM", symbol_name="same"}
-func.def public target(@target) export("same") @second() {
+func.def public target(@target) export("same") @a_second() {
   func.return
 }
 
