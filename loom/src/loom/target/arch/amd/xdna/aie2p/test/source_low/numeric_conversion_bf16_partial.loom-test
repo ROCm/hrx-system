@@ -1,5 +1,43 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
+// Arithmetic already produces an accumulator; NaN restoration must not send
+// the conversion operand through the vector register file and back.
+func.def @narrow_accumulator_bf16(%lhs: vector<16xf32>, %rhs: vector<16xf32>) -> (vector<16xbf16>) {
+  %sum = vector.addf %lhs, %rhs : vector<16xf32>
+  %result = vector.fptrunc<daz> %sum : vector<16xf32> to vector<16xbf16>
+  func.return %result : vector<16xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @narrow_accumulator_bf16(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %8 = vmov.vector512.to.accumulator512.low %lhs
+  %9 = vmov.vector512.to.accumulator512.low %rhs
+  %10 = mova.i32 60
+  %11 = vadd.f32x16 %8, %9, %10
+  %12 = slice %11[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %sum = copy %12 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  set.rounding 12
+  %14 = copy %sum : reg<aie2p.ebmll> -> reg<aie2p.mbms>
+  %15 = vconv.bf16.fp32x16 %14
+  %16 = copy %15 : reg<aie2p.vec256> -> reg<aie2p.vec256>
+  %17 = concat(%15, %16) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %18 = copy %sum : reg<aie2p.ebmll> -> reg<aie2p.mbms>
+  %19 = vmov.accumulator512.to.vector512 %18
+  %20 = mov.i32 2147483647
+  %21 = vbcst.32 %20
+  %22 = mov.i32 2139095040
+  %23 = vbcst.32 %22
+  %24 = mov.i32 32704
+  %25 = vbcst.16 %24
+  %26 = vband %19, %21
+  %27 = vlt.u32x16.el.low32 %23, %26
+  %28 = predicate.complete.zero.high32 %27, 0
+  %result = vsel.16.mask64 %17, %25, %28
+  return %result
+}
+
+// ====
+
 func.def @widen_partial_bf16(%input: vector<4xbf16>) -> (vector<4xf32>) {
   %result = vector.extf %input : vector<4xbf16> to vector<4xf32>
   func.return %result : vector<4xf32>
@@ -95,32 +133,31 @@ func.def @narrow_partial_wide_bf16(%input: vector<24xf32>) -> (vector<24xbf16>) 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @narrow_partial_wide_bf16(%input: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
   %5 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %6 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %7 = mov.i32 2147483647
-  %8 = vbcst.32 %7
-  %9 = mov.i32 2139095040
-  %10 = vbcst.32 %9
-  %11 = mov.i32 32704
-  %12 = vbcst.16 %11
+  %6 = vmov.vector512.to.accumulator512 %5
+  %7 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %8 = vmov.vector512.to.accumulator512 %7
+  %9 = concat(%6, %8) : (reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x2>
   set.rounding 12
-  %33 = slice %input[1] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256>
-  %14 = vmov.vector512.to.accumulator512 %5
-  %15 = vconv.bf16.fp32x16 %14
-  %16 = concat(%15, %33) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %17 = vband %5, %8
-  %18 = vlt.u32x16.el.low32 %10, %17
-  %19 = predicate.complete.zero.high32 %18, 0
-  %20 = vsel.16.mask64 %16, %12, %19
-  %32 = slice %input[3] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256>
-  %22 = vmov.vector512.to.accumulator512 %6
-  %23 = vconv.bf16.fp32x16 %22
-  %24 = concat(%23, %32) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %25 = vband %6, %8
-  %26 = vlt.u32x16.el.low32 %10, %25
-  %27 = predicate.complete.zero.high32 %26, 0
-  %28 = vsel.16.mask64 %24, %12, %27
-  %29 = slice %20[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %30 = slice %28[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %result = concat(%29, %30) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %10 = vconv.bf16.fp32 %9
+  %13 = mov.i32 2147483647
+  %14 = vbcst.32 %13
+  %15 = mov.i32 2139095040
+  %16 = vbcst.32 %15
+  %17 = mov.i32 32704
+  %18 = vbcst.16 %17
+  %19 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %20 = slice %10[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %21 = concat(%20, %19) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %22 = vband %5, %14
+  %23 = vlt.u32x16.el.low32 %16, %22
+  %24 = predicate.complete.zero.high32 %23, 0
+  %25 = vsel.16.mask64 %10, %18, %24
+  %26 = vband %7, %14
+  %27 = vlt.u32x16.el.low32 %16, %26
+  %28 = predicate.complete.zero.high32 %27, 0
+  %29 = vsel.16.mask64 %21, %18, %28
+  %30 = slice %25[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %31 = slice %29[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %result = concat(%30, %31) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %result
 }

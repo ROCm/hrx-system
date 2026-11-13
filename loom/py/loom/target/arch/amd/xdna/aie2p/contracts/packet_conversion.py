@@ -1525,36 +1525,38 @@ def _integer_to_f32_packet_rule(
     )
 
 
-def _f32_to_bf16_vector_rule(
+def _f32_to_bf16_emits(
     rule_shape: FloatPacketRuleShape,
+    source: ValueRef,
+    result: ValueRef,
     *,
+    temporary_prefix: str = "",
     input_in_accumulator: bool = False,
-) -> DescriptorRule:
+) -> tuple[ContractEmit, ...]:
+    """Converts an F32 packet using its full native accumulator width."""
+
+    def temporary(name: str) -> ValueRef:
+        return ValueRef.temporary(f"{temporary_prefix}{name}")
+
     native_lane_count = rule_shape.native_lane_count
     set_rounding = _descriptor("amd.xdna.aie2p.state.rounding.immediate")
     convert = _descriptor(
         f"amd.xdna.aie2p.convert.f32x{native_lane_count}.to.bf16x{native_lane_count}"
     )
-    source_type = rule_shape.vector_type("f32")
-    result_type = rule_shape.vector_type("bf16")
-    native_source = ValueRef.operand("input")
+    native_source = source
     input_emits: tuple[ContractEmit, ...] = ()
-    native_result = ValueRef.result("result")
-    result_types = None
+    native_result = result
     output_emits: tuple[ContractEmit, ...] = ()
     if native_lane_count == 16:
         native_source = (
-            ValueRef.operand("input")
-            if input_in_accumulator
-            else ValueRef.temporary("source_accumulator")
+            source if input_in_accumulator else temporary("source_accumulator")
         )
-        native_result = ValueRef.temporary("converted_w")
-        result_types = {"dst": DescriptorResultType()}
+        native_result = temporary("converted_w")
         if input_in_accumulator:
             output_emits = (
                 EmitRegisterCopy(
                     source=native_result,
-                    result=ValueRef.temporary("unused_w"),
+                    result=temporary("unused_w"),
                     result_type=native_result,
                 ),
             )
@@ -1564,7 +1566,7 @@ def _f32_to_bf16_vector_rule(
                     descriptor=_descriptor(
                         "amd.xdna.aie2p.move.vector512.to.accumulator512"
                     ),
-                    operands={"src": ValueRef.operand("input")},
+                    operands={"src": source},
                     results={"dst": native_source},
                     result_types={"dst": DescriptorResultType()},
                     form=DescriptorEmitForm.OP,
@@ -1572,8 +1574,8 @@ def _f32_to_bf16_vector_rule(
             )
             output_emits = (
                 EmitRegisterSlice(
-                    source=ValueRef.operand("input"),
-                    result=ValueRef.temporary("unused_w"),
+                    source=source,
+                    result=temporary("unused_w"),
                     unit_offset=1,
                     unit_count=1,
                 ),
@@ -1581,23 +1583,22 @@ def _f32_to_bf16_vector_rule(
         output_emits = (
             *output_emits,
             EmitRegisterConcat(
-                sources=(native_result, ValueRef.temporary("unused_w")),
-                result=ValueRef.result("result"),
+                sources=(native_result, temporary("unused_w")),
+                result=result,
+                result_type=ValueRef.result("result"),
             ),
         )
     elif rule_shape.maximum_lane_count < native_lane_count:
         accumulator_units = []
         input_emit_list: list[ContractEmit] = []
-        native_source = ValueRef.temporary("source_accumulator")
+        native_source = temporary("source_accumulator")
         for unit_index in range(2):
-            vector_unit = ValueRef.temporary(f"source_vector_unit_{unit_index}")
-            accumulator_unit = ValueRef.temporary(
-                f"source_accumulator_unit_{unit_index}"
-            )
+            vector_unit = temporary(f"source_vector_unit_{unit_index}")
+            accumulator_unit = temporary(f"source_accumulator_unit_{unit_index}")
             input_emit_list.extend(
                 (
                     EmitRegisterSlice(
-                        source=ValueRef.operand("input"),
+                        source=source,
                         result=vector_unit,
                         unit_offset=2 * unit_index,
                         unit_count=2,
@@ -1622,12 +1623,40 @@ def _f32_to_bf16_vector_rule(
             )
         )
         input_emits = tuple(input_emit_list)
+    return (
+        *input_emits,
+        EmitDescriptorOp(
+            descriptor=set_rounding,
+            immediates={"i": BF16_CONVERSION_ROUNDING},
+            form=DescriptorEmitForm.OP,
+        ),
+        EmitDescriptorOp(
+            descriptor=convert,
+            operands={"src": native_source},
+            results={"dst": native_result},
+            result_types={"dst": DescriptorResultType()},
+            form=DescriptorEmitForm.OP,
+            copy_operands=("src",) if input_in_accumulator else (),
+        ),
+        *output_emits,
+    )
+
+
+def _f32_to_bf16_vector_rule(
+    rule_shape: FloatPacketRuleShape,
+    *,
+    input_in_accumulator: bool = False,
+) -> DescriptorRule:
+    native_lane_count = rule_shape.native_lane_count
+    convert = _descriptor(
+        f"amd.xdna.aie2p.convert.f32x{native_lane_count}.to.bf16x{native_lane_count}"
+    )
     return DescriptorRule(
         source_op=vector.vector_fptrunc,
         descriptor=convert,
         guards=(
-            Guard.value_type("input", source_type),
-            Guard.value_type("result", result_type),
+            Guard.value_type("input", rule_shape.vector_type("f32")),
+            Guard.value_type("result", rule_shape.vector_type("bf16")),
             Guard.value_not_nan("input"),
             Guard.value_not_subnormal_or_instance_flags_has_all(
                 "input", "subnormal", "daz"
@@ -1643,22 +1672,11 @@ def _f32_to_bf16_vector_rule(
                 else ()
             ),
         ),
-        emit=(
-            *input_emits,
-            EmitDescriptorOp(
-                descriptor=set_rounding,
-                immediates={"i": BF16_CONVERSION_ROUNDING},
-                form=DescriptorEmitForm.OP,
-            ),
-            EmitDescriptorOp(
-                descriptor=convert,
-                operands={"src": native_source},
-                results={"dst": native_result},
-                result_types=result_types,
-                form=DescriptorEmitForm.OP,
-                copy_operands=("src",) if input_in_accumulator else (),
-            ),
-            *output_emits,
+        emit=_f32_to_bf16_emits(
+            rule_shape,
+            ValueRef.operand("input"),
+            ValueRef.result("result"),
+            input_in_accumulator=input_in_accumulator,
         ),
         report_key=(
             f"native_binary32x{rule_shape.report_lane_range}_to_"
@@ -3441,6 +3459,16 @@ def _f32_to_bf16_nan_preserving_vector_rule(
     """Restores NaN lanes that native BF16 conversion maps to infinity."""
 
     program = PacketProgram(32, "bf16_native_narrow_")
+    converted = program.temporary("converted")
+    program.emits.extend(
+        _f32_to_bf16_emits(
+            rule_shape,
+            ValueRef.operand("input"),
+            converted,
+            temporary_prefix="bf16_native_narrow_",
+            input_in_accumulator=input_in_accumulator,
+        )
+    )
     source = ValueRef.operand("input")
     if input_in_accumulator:
         source = program.operation(
@@ -3456,22 +3484,35 @@ def _f32_to_bf16_nan_preserving_vector_rule(
     nonsign_mask = program.splat("nonsign_mask", 0x7FFFFFFF)
     infinity = program.splat("infinity", 0x7F800000)
     quiet_nan = program.splat("quiet_nan", 0x7FC0, element_bits=16)
-    program.state("rounding", BF16_CONVERSION_ROUNDING)
-    results = []
-    for index, chunk in enumerate(chunks):
-        prefix = f"chunk_{index}"
-        accumulator, filler = _i32_packet_accumulator(program, prefix, chunk)
-        converted = program.operation(
-            f"{prefix}_converted", "convert.f32x16.to.bf16x16", "dst", src=accumulator
-        )
-        converted_vector = program.temporary(f"{prefix}_converted_vector")
-        program.emits.append(
-            EmitRegisterConcat(
-                sources=(converted, filler),
-                result=converted_vector,
-                result_type=Vector("bf16", lanes=32),
+    converted_chunks = (converted,)
+    if len(chunks) == 2:
+        # Each restoration observes only its low sixteen lanes. Reuse the
+        # other converted half as padding instead of duplicating a word.
+        low_word = program.temporary("converted_low_w")
+        high_word = program.temporary("converted_high_w")
+        upper_chunk = program.temporary("converted_upper_chunk")
+        program.emits.extend(
+            (
+                EmitRegisterSlice(source=converted, result=low_word, unit_count=1),
+                EmitRegisterSlice(
+                    source=converted,
+                    result=high_word,
+                    unit_offset=1,
+                    unit_count=1,
+                ),
+                EmitRegisterConcat(
+                    sources=(high_word, low_word),
+                    result=upper_chunk,
+                    result_type=Vector("bf16", lanes=32),
+                ),
             )
         )
+        converted_chunks = (converted, upper_chunk)
+    results = []
+    for index, (chunk, converted_chunk) in enumerate(
+        zip(chunks, converted_chunks, strict=True)
+    ):
+        prefix = f"chunk_{index}"
         magnitude = program.binary(
             f"{prefix}_magnitude", "and.bits512", chunk, nonsign_mask
         )
@@ -3482,7 +3523,7 @@ def _f32_to_bf16_nan_preserving_vector_rule(
             program.select(
                 None if len(chunks) == 1 else f"{prefix}_result",
                 quiet_nan,
-                converted_vector,
+                converted_chunk,
                 is_nan,
                 element_bits=16,
             )
@@ -3490,7 +3531,10 @@ def _f32_to_bf16_nan_preserving_vector_rule(
     _bind_bf16_narrowing_results(program, tuple(results))
     return DescriptorRule(
         source_op=vector.vector_fptrunc,
-        descriptor=_descriptor("amd.xdna.aie2p.convert.f32x16.to.bf16x16"),
+        descriptor=_descriptor(
+            f"amd.xdna.aie2p.convert.f32x{rule_shape.native_lane_count}.to."
+            f"bf16x{rule_shape.native_lane_count}"
+        ),
         guards=(
             Guard.value_type("input", rule_shape.vector_type("f32")),
             Guard.value_type("result", rule_shape.vector_type("bf16")),
