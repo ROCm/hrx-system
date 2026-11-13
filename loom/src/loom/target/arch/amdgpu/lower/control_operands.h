@@ -15,6 +15,13 @@
 extern "C" {
 #endif
 
+// Admits lossless native argument conversions from retained distribution and
+// range facts. This does not choose or change either endpoint's carrier.
+bool loom_amdgpu_control_operand_accepts(loom_type_t source_type,
+                                         loom_value_facts_t source_facts,
+                                         loom_type_t actual_type,
+                                         loom_type_t required_type);
+
 // Retains branch/call/return literal, extension, or active-mask choices and
 // establishes the uniformity proof for selecting one lane from a
 // vector-register producer.

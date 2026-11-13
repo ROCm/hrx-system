@@ -745,13 +745,12 @@ iree_status_t loom_low_lower_source_invoke_finalize(
     }
     const loom_type_t source_type =
         loom_module_value_type(context->module, operands.values[i]);
-    const loom_type_t joined_type =
-        context->policy->join_result_type &&
-                context->policy->control_operand.prepare
-            ? context->policy->join_result_type(source_type, actual_type,
-                                                expected_type)
-            : loom_type_none();
-    if (!loom_type_equal(joined_type, expected_type)) {
+    if (!context->policy->control_operand.accepts ||
+        !context->policy->control_operand.accepts(
+            source_type,
+            loom_value_fact_table_lookup(context->fact_table,
+                                         operands.values[i]),
+            actual_type, expected_type)) {
       status = loom_low_source_call_emit_type_error(
           context, source_op,
           loom_low_source_call_symbol_name(context->module,

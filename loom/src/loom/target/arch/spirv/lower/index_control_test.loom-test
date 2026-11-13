@@ -159,3 +159,74 @@ low.kernel.def target<spirv.logical.core>(@target) abi_layout({signature = (i1, 
   OpStore.storage_buffer.i64 %29, %group_output
   return
 }
+
+// ====
+
+// A wide coordinate may retain its carrier through an identity relation even
+// after a local range proof admits the native signed index argument.
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @native_coordinate(%value: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+  return %value
+}
+
+func.def target(@target) @bounded_native_argument(%input: index) -> (index) where [range(%input, -2147483648, 4294967296)] {
+  %bounded = index.assume %input [range(%input, -32, 31)] : index
+  %result = low.invoke @native_coordinate(%bounded) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @native_coordinate(%value: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+  return %value
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @bounded_native_argument(%bounded: reg<spirv.id : i64>) -> (reg<spirv.id : index>) where [range(%bounded, -2147483648, 4294967296)] asm {
+  %8 = OpSConvert.i64.i32 %bounded : reg<spirv.id : index>
+  %result = low.func.call @native_coordinate(%8) : (reg<spirv.id : index>) -> (reg<spirv.id : index>)
+  return %result
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @native_coordinate(%value: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+  return %value
+}
+
+// A positive high-bit value is outside the signed receiving index domain.
+func.def target(@target) @unrepresentable_native_argument() -> (index) {
+  %value = index.constant 2147483648 : index
+  // ERROR@+1: TARGET/074 {callee_name="native_coordinate", value_kind="operand", actual_type="reg<spirv.id : i64>", expected_type="reg<spirv.id : index>"}
+  %result = low.invoke @native_coordinate(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @wide_coordinate(%value: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
+  return %value
+}
+
+func.def target(@target) @widen_native_argument(%value: index) -> (i64) {
+  %result = low.invoke @wide_coordinate(%value) : (index) -> (i64)
+  func.return %result : i64
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) @wide_coordinate(%value: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
+  return %value
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @widen_native_argument(%value: reg<spirv.id : index>) -> (reg<spirv.id : i64>) asm {
+  %7 = OpSConvert.i32.i64 %value
+  %result = low.func.call @wide_coordinate(%7) : (reg<spirv.id : i64>) -> (reg<spirv.id : i64>)
+  return %result
+}
