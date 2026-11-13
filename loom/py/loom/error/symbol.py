@@ -298,6 +298,34 @@ ERR_SYMBOL_023 = ErrorDef(
     params=(),
 )
 
+ERR_SYMBOL_024 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=24,
+    severity=Severity.ERROR,
+    summary="Selected symbol contract cannot be projected.",
+    message="symbol '@{symbol_name}' cannot be projected: {reason}",
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+)
+
+ERR_SYMBOL_025 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=25,
+    severity=Severity.ERROR,
+    summary="Projected declaration exceeds operand capacity.",
+    message=(
+        "symbol '@{symbol_name}' requires {operand_count} declaration operands, "
+        "exceeding the limit of {maximum_count}"
+    ),
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("operand_count", ParamKind.U64),
+        ErrorParam("maximum_count", ParamKind.U64),
+    ),
+)
+
 ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_001,
     ERR_SYMBOL_002,
@@ -322,4 +350,6 @@ ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_021,
     ERR_SYMBOL_022,
     ERR_SYMBOL_023,
+    ERR_SYMBOL_024,
+    ERR_SYMBOL_025,
 )

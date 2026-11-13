@@ -10,6 +10,7 @@
 #include "loom/format/bytecode/reader/selected_body.h"
 #include "loom/format/bytecode/reader/selected_symbol.h"
 #include "loom/format/bytecode/reader/selected_tables.h"
+#include "loom/format/bytecode/reader/validation.h"
 
 struct loom_bytecode_function_projection_reader_t {
   // Reset-free storage retaining decoded header payloads for the reader life.
@@ -85,15 +86,6 @@ iree_status_t loom_bytecode_function_projection_reader_bind_symbol(
     loom_bytecode_function_projection_reader_t* reader,
     uint32_t source_symbol_ordinal, loom_symbol_ref_t target_symbol_ref) {
   IREE_ASSERT_ARGUMENT(reader);
-  if (source_symbol_ordinal >= reader->metadata->symbol_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "source symbol ordinal is out of range");
-  }
-  if (target_symbol_ref.module_id != 0 ||
-      target_symbol_ref.symbol_id >= reader->output_module->symbols.count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "target symbol reference is out of range");
-  }
   const uint32_t source_name_string_ordinal =
       reader->metadata->symbols[source_symbol_ordinal].name_string_index;
   return loom_bytecode_selected_table_bind_symbol(
@@ -106,10 +98,6 @@ iree_status_t loom_bytecode_function_projection_reader_read_header(
     loom_bytecode_function_header_t* out_header) {
   IREE_ASSERT_ARGUMENT(reader);
   IREE_ASSERT_ARGUMENT(out_header);
-  if (source_symbol_ordinal >= reader->metadata->symbol_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "source symbol ordinal is out of range");
-  }
   return loom_bytecode_selected_function_header_materialize(
       &reader->symbols, source_symbol_ordinal, out_header);
 }
@@ -120,16 +108,14 @@ iree_status_t loom_bytecode_function_projection_reader_materialize_region(
     uint8_t source_region_payload_ordinal, loom_builder_t* builder,
     loom_op_t* target_parent_op, uint8_t target_region_index,
     const loom_value_id_t* predefined_values, uint16_t predefined_value_count,
-    const loom_low_repr_descriptor_set_t* low_descriptor_set) {
+    const loom_low_repr_descriptor_set_t* low_descriptor_set,
+    bool* out_accepted) {
+  *out_accepted = false;
   IREE_ASSERT_ARGUMENT(reader);
   IREE_ASSERT_ARGUMENT(header);
   IREE_ASSERT_ARGUMENT(builder);
   IREE_ASSERT_ARGUMENT(target_parent_op);
   IREE_ASSERT(header->source_symbol_ordinal < reader->metadata->symbol_count);
-  if (source_region_payload_ordinal >= header->region_payload_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "source region payload ordinal is out of range");
-  }
   const loom_bytecode_symbol_metadata_t* source_symbol =
       &reader->metadata->symbols[header->source_symbol_ordinal];
   IREE_ASSERT(source_region_payload_ordinal <
@@ -150,15 +136,21 @@ iree_status_t loom_bytecode_function_projection_reader_materialize_region(
       reader->bytecode.data + (iree_host_size_t)payload->absolute_offset,
       payload->length);
   loom_bytecode_region_summary_t summary = {0};
-  IREE_RETURN_IF_ERROR(loom_bytecode_region_summary_read(
+  iree_status_t status = loom_bytecode_region_summary_read(
       &reader->decoder, header->name, payload_bytes, payload->absolute_offset,
-      &summary));
-  return loom_bytecode_selected_body_materialize_region(
-      &reader->symbols.body_materializer, header->name, payload_bytes,
-      payload->absolute_offset, &summary, builder, target_parent_op,
-      target_region_index,
-      LOOM_BYTECODE_REGION_MATERIALIZATION_FLAG_BIND_ENTRY_ARGUMENTS,
-      predefined_values, predefined_value_count, low_descriptor_set);
+      &summary);
+  if (iree_status_is_ok(status)) {
+    status = loom_bytecode_selected_body_materialize_region(
+        &reader->symbols.body_materializer, header->name, payload_bytes,
+        payload->absolute_offset, &summary, builder, target_parent_op,
+        target_region_index,
+        LOOM_BYTECODE_REGION_MATERIALIZATION_FLAG_BIND_ENTRY_ARGUMENTS,
+        predefined_values, predefined_value_count, low_descriptor_set);
+  }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_normalize_diagnosed_error(
+      status, reader->error_count));
+  *out_accepted = reader->error_count == 0;
+  return iree_ok_status();
 }
 
 iree_status_t loom_bytecode_function_projection_reader_import_encoding(

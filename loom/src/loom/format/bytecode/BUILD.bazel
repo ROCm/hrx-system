@@ -181,6 +181,7 @@ loom_cc_library(
         "//loom/src/loom/format/bytecode/reader:selected_body",
         "//loom/src/loom/format/bytecode/reader:selected_symbol",
         "//loom/src/loom/format/bytecode/reader:selected_tables",
+        "//loom/src/loom/format/bytecode/reader:validation",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",

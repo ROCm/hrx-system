@@ -8,12 +8,14 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
@@ -623,6 +625,235 @@ kernel.def retain target(@dispatch_target) export("native_rows") linkage(dso_loc
   }
 
   loom_module_free(source_module);
+}
+
+TEST_F(KernelConfigMaterializerTest,
+       InvalidConfigurationRetainsOriginAcrossProviderForms) {
+  const auto* files = loom_link_kernel_contracts_testdata_create();
+  std::string source(files[0].data, files[0].size);
+  const auto start = source.find("  kernel.launch.config");
+  ASSERT_NE(start, std::string::npos);
+  source.replace(start, source.find('\n', start) - start, "  kernel.return");
+  const auto input = iree_make_string_view(source.data(), source.size());
+  std::unique_ptr<loom_module_t, decltype(&loom_module_free)> module(
+      Parse(input), loom_module_free);
+  const auto bytecode = Write(module.get());
+  for (const auto form :
+       {LOOM_LINK_PROVIDER_MATERIALIZED, LOOM_LINK_PROVIDER_TEXT,
+        LOOM_LINK_PROVIDER_BYTECODE}) {
+    for (bool capture : {false, true}) {
+      SCOPED_TRACE(form);
+      SCOPED_TRACE(capture);
+      IndexPtr index = CreateIndex();
+      if (form == LOOM_LINK_PROVIDER_BYTECODE) {
+        IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+            index.get(),
+            iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+            IREE_SV("provider.loombc"), nullptr, nullptr, nullptr));
+      } else if (form == LOOM_LINK_PROVIDER_MATERIALIZED) {
+        IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+            index.get(), module.get(), nullptr, nullptr));
+      } else {
+        AddText(index.get(), input);
+      }
+      const auto* entry =
+          loom_link_module_index_lookup_name(index.get(), IREE_SV("entry"));
+      ASSERT_NE(entry, nullptr);
+      auto plan = BuildFacetPlan(index.get(), entry->ordinal,
+                                 LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION);
+      ASSERT_NE(plan, nullptr);
+      uint32_t diagnostics = 0;
+      loom_link_plan_materialization_environment_t environment = {
+          .context = &context_,
+          .block_pool = &block_pool_,
+          .allocator = iree_allocator_system(),
+      };
+      if (capture) {
+        environment.diagnostics.emitter = {
+            [](void* user_data, const loom_diagnostic_emission_t* emission) {
+              ++*static_cast<uint32_t*>(user_data);
+              EXPECT_EQ(emission->error, LOOM_ERR_SYMBOL_024);
+              EXPECT_NE(emission->origin, nullptr);
+              if (emission->origin) {
+                EXPECT_TRUE(iree_string_view_equal(emission->origin->filename,
+                                                   IREE_SV("provider.loom")));
+                EXPECT_EQ(emission->origin->start_line, 1u);
+                EXPECT_EQ(emission->origin->end_line, 6u);
+              }
+              return iree_ok_status();
+            },
+            &diagnostics,
+        };
+      }
+      iree_arena_allocator_t arena;
+      iree_arena_initialize(&block_pool_, &arena);
+      loom_link_plan_materialization_t product = {};
+      IREE_ASSERT_OK(loom_link_plan_materialize(
+          plan.get(), &environment, IREE_SV("projected"), &arena, &product));
+      EXPECT_EQ(product.module, nullptr);
+      EXPECT_EQ(diagnostics, capture ? 1u : 0u);
+      loom_module_free(product.module);
+      iree_arena_deinitialize(&arena);
+    }
+  }
+}
+
+TEST_F(KernelConfigMaterializerTest,
+       MalformedConfigurationBodyDoesNotPublishWithoutDiagnosticSink) {
+  const auto* files = loom_link_kernel_contracts_testdata_create();
+  std::unique_ptr<loom_module_t, decltype(&loom_module_free)> module(
+      Parse(iree_make_string_view(files[0].data, files[0].size)),
+      loom_module_free);
+  auto bytecode = Write(module.get());
+  uint64_t payload_offset = 0;
+  {
+    IndexPtr index = CreateIndex();
+    IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+        index.get(),
+        iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+        IREE_SV("provider.loombc"), nullptr, nullptr, nullptr));
+    const auto* entry =
+        loom_link_module_index_lookup_name(index.get(), IREE_SV("entry"));
+    ASSERT_NE(entry, nullptr);
+    const auto& metadata = loom_link_module_index_provider_at(index.get(), 0)
+                               ->bytecode.metadata.modules[0];
+    const auto& symbol = metadata.symbols[entry->module_symbol_ordinal];
+    ASSERT_NE(symbol.kernel_workload_region_payload_ordinal_plus_one, 0u);
+    const auto& payload =
+        metadata.region_payloads
+            [symbol.first_region_payload_index +
+             symbol.kernel_workload_region_payload_ordinal_plus_one - 1];
+    payload_offset = payload.absolute_offset;
+    std::fill_n(bytecode.data() + payload.absolute_offset, payload.length,
+                UINT8_C(0xFF));
+  }
+  for (int sink_mode : {0, 1, 2}) {
+    SCOPED_TRACE(sink_mode);
+    IndexPtr index = CreateIndex();
+    iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+        index.get(),
+        iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+        IREE_SV("provider.loombc"), nullptr, nullptr, &provider_ordinal));
+    ASSERT_NE(provider_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+    const auto* entry =
+        loom_link_module_index_lookup_name(index.get(), IREE_SV("entry"));
+    ASSERT_NE(entry, nullptr);
+    auto plan = BuildFacetPlan(index.get(), entry->ordinal,
+                               LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION);
+    ASSERT_NE(plan, nullptr);
+    std::vector<loom_source_range_t> origins;
+    loom_diagnostic_sink_t sink = {
+        [](void* user_data, const loom_diagnostic_t* diagnostic) {
+          static_cast<std::vector<loom_source_range_t>*>(user_data)->push_back(
+              diagnostic->origin);
+          return iree_ok_status();
+        },
+        &origins,
+    };
+    if (sink_mode == 2) {
+      sink.fn = [](void*, const loom_diagnostic_t*) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      };
+    }
+    loom_link_plan_materialization_environment_t environment = {
+        .context = &context_,
+        .block_pool = &block_pool_,
+        .user_data = &sink,
+        .allocator = iree_allocator_system(),
+    };
+    if (sink_mode != 0) {
+      environment.diagnostic_sink =
+          [](void* user_data, const loom_link_module_index_provider_t*) {
+            return *static_cast<loom_diagnostic_sink_t*>(user_data);
+          };
+    }
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(&block_pool_, &arena);
+    loom_link_plan_materialization_t product = {};
+    iree_status_t status = loom_link_plan_materialize(
+        plan.get(), &environment, IREE_SV("projected"), &arena, &product);
+    if (sink_mode == 2) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    } else {
+      IREE_EXPECT_OK(status);
+    }
+    EXPECT_EQ(product.module, nullptr);
+    EXPECT_EQ(origins.size(), sink_mode == 1 ? 1u : 0u);
+    if (!origins.empty()) {
+      EXPECT_TRUE(iree_string_view_equal(origins[0].filename,
+                                         IREE_SV("provider.loombc")));
+      EXPECT_EQ(origins[0].start, payload_offset);
+    }
+    loom_module_free(product.module);
+    iree_arena_deinitialize(&arena);
+  }
+}
+
+TEST_F(KernelConfigMaterializerTest,
+       AdmitsDeclarationCapacityBeforeProjectingEitherProviderForm) {
+  const auto* files = loom_link_kernel_contracts_testdata_create();
+  const std::string source(files[0].data, files[0].size);
+  const auto end = source.find("command.def");
+  ASSERT_NE(end, std::string::npos);
+  std::unique_ptr<loom_module_t, decltype(&loom_module_free)> module(
+      Parse(iree_make_string_view(source.data(), end)), loom_module_free);
+  const auto* entry = FindSymbol(module.get(), IREE_SV("entry"));
+  ASSERT_NE(entry, nullptr);
+  auto* block =
+      loom_region_entry_block(loom_kernel_def_config(entry->defining_op));
+  const auto type = loom_block_arg_type(module.get(), block, 0);
+  while (block->arg_count < UINT16_MAX) {
+    loom_value_id_t value = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_define_value(module.get(), type, &value));
+    IREE_ASSERT_OK(loom_block_add_arg(module.get(), block, value));
+  }
+  Verify(module.get());
+  const auto bytecode = Write(module.get());
+  for (bool materialized : {false, true}) {
+    SCOPED_TRACE(materialized);
+    IndexPtr index = CreateIndex();
+    if (materialized) {
+      IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+          index.get(), module.get(), nullptr, nullptr));
+    } else {
+      IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+          index.get(),
+          iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+          IREE_SV("provider.loombc"), nullptr, nullptr, nullptr));
+    }
+    const auto* indexed =
+        loom_link_module_index_lookup_name(index.get(), IREE_SV("entry"));
+    ASSERT_NE(indexed, nullptr);
+    auto plan = BuildFacetPlan(index.get(), indexed->ordinal,
+                               LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION);
+    ASSERT_NE(plan, nullptr);
+    uint32_t diagnostics = 0;
+    const loom_link_plan_materialization_environment_t environment = {
+        .context = &context_,
+        .block_pool = &block_pool_,
+        .diagnostics =
+            {
+                .emitter = {[](void* user_data,
+                               const loom_diagnostic_emission_t* emission) {
+                              ++*static_cast<uint32_t*>(user_data);
+                              EXPECT_EQ(emission->error, LOOM_ERR_SYMBOL_025);
+                              return iree_ok_status();
+                            },
+                            &diagnostics},
+            },
+        .allocator = iree_allocator_system(),
+    };
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(&block_pool_, &arena);
+    loom_link_plan_materialization_t product = {};
+    IREE_ASSERT_OK(loom_link_plan_materialize(
+        plan.get(), &environment, IREE_SV("projected"), &arena, &product));
+    EXPECT_EQ(product.module, nullptr);
+    EXPECT_EQ(diagnostics, 1u);
+    loom_module_free(product.module);
+    iree_arena_deinitialize(&arena);
+  }
 }
 
 TEST_F(KernelConfigMaterializerTest,

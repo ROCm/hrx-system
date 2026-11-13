@@ -103,11 +103,7 @@ static iree_status_t loom_bytecode_symbol_policy_project_symbol_ordinal(
   bool found = false;
   IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_resolve_symbol(
       materializer->tables, source_name_ordinal, out_target_ref, &found));
-  if (!found) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "selected function header references an unprojected symbol");
-  }
+  IREE_ASSERT(found);
   return iree_ok_status();
 }
 
@@ -329,11 +325,7 @@ iree_status_t loom_bytecode_selected_function_header_materialize(
   IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_resolve_symbol(
       materializer->tables, metadata->name_string_index, &target_symbol,
       &found));
-  if (!found) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "selected function header source symbol is not projected");
-  }
+  IREE_ASSERT(found);
 
   IREE_ASSERT(metadata->entry_offset <=
               materializer->tables->bytecode.data_length);
@@ -350,10 +342,7 @@ iree_status_t loom_bytecode_selected_function_header_materialize(
   loom_bytecode_symbol_entry_header_t entry_header;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_symbol_entry_header(
       materializer, &cursor, source_symbol_ordinal, &entry_header));
-  if (entry_header.kind > LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "selected symbol is not function-like");
-  }
+
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_materialize_function_header(
       materializer, &cursor, source_symbol_ordinal,
       entry_header.name_string_ordinal, entry_header.flags,

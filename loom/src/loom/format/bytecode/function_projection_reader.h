@@ -92,14 +92,17 @@ iree_status_t loom_bytecode_function_projection_reader_read_header(
 //
 // |source_region_payload_ordinal| indexes |header|'s payload array.
 // |predefined_values| bind the target entry block arguments in source order.
-// No other root-region payload is read.
+// No other root-region payload is read. Diagnosed input rejection leaves
+// |out_accepted| false even without a diagnostic sink; statuses describe only
+// infrastructure failures.
 iree_status_t loom_bytecode_function_projection_reader_materialize_region(
     loom_bytecode_function_projection_reader_t* reader,
     const loom_bytecode_function_header_t* header,
     uint8_t source_region_payload_ordinal, loom_builder_t* builder,
     loom_op_t* target_parent_op, uint8_t target_region_index,
     const loom_value_id_t* predefined_values, uint16_t predefined_value_count,
-    const loom_low_repr_descriptor_set_t* low_descriptor_set);
+    const loom_low_repr_descriptor_set_t* low_descriptor_set,
+    bool* out_accepted);
 
 #ifdef __cplusplus
 }  // extern "C"

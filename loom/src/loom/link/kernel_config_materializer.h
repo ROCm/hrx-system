@@ -49,6 +49,9 @@ typedef struct loom_link_kernel_config_module_projection_t {
 // |selection|, allowing the
 // generic plan materializer to pass this module directly to the incremental
 // linker without name lookup or a second reachability pass.
+//
+// Diagnosed input rejection leaves out_projection->module NULL independently
+// of installed callbacks. Statuses carry infrastructure failures only.
 iree_status_t loom_link_plan_project_kernel_config_module(
     const loom_link_plan_t* plan,
     const loom_link_plan_module_selection_t* selection,
