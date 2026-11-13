@@ -1,0 +1,77 @@
+// RUN: pass source-to-low{control-flow=cfg}
+
+amdgpu.target<gfx11-generic> @target
+
+// A common seed connects the cursor and winner for width continuity, but the
+// cursor's fixed-width arithmetic remains scalar while the winner varies.
+func.def target(@target) @shared_offset_seed(%choice: i64) -> (offset, offset) {
+  %seed = index.constant 0 : offset
+  %end = scalar.constant 24 : i64
+  %step = scalar.constant 8 : i64
+  cfg.br ^header(%seed: offset, %seed: offset)
+^header(%cursor: offset, %winner: offset):
+  %cursor_word = index.cast %cursor : offset to i64
+  %next_word = scalar.addi %cursor_word, %step : i64
+  %positive = scalar.assume %next_word [range(%next_word, 0, 9223372036854775807)] : i64
+  %next = index.cast %positive : i64 to offset
+  %more = scalar.cmpi slt, %next_word, %end : i64
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %choose = scalar.cmpi eq, %choice, %next_word : i64
+  %selected = scf.select %choose, %next, %winner : offset
+  cfg.br ^header(%next: offset, %selected: offset)
+^exit:
+  func.return %next, %winner : offset, offset
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @shared_offset_seed(%choice: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %20 = s_mov_b32 0
+  %21 = s_mov_b32 0
+  %seed = concat(%20, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %23 = s_mov_b32 24
+  %24 = s_mov_b32 0
+  %end = concat(%23, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %26 = s_mov_b32 8
+  %27 = s_mov_b32 0
+  %step = concat(%26, %27) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %29 = slice %seed[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = v_mov_b32_copy %29
+  %31 = slice %seed[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %31
+  %33 = concat(%30, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^header(%seed: reg<amdgpu.sgpr x2>, %33: reg<amdgpu.vgpr x2>)
+^header(%cursor_word: reg<amdgpu.sgpr x2>, %winner: reg<amdgpu.vgpr x2>):
+  %34 = slice %cursor_word[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = slice %cursor_word[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = slice %step[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = slice %step[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38, %39 = s_add_co_u32 %34, %36
+  %40, %41 = s_addc_u32 %35, %37, %39
+  %next = concat(%38, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %43 = slice %next[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = slice %next[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = slice %end[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %46 = slice %end[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %47 = s_xor_b32_lit %44, 2147483648
+  %48 = s_xor_b32_lit %46, 2147483648
+  %49 = s_cmp_lt_u32 %43, %45
+  %50, %more = s_subb_u32 %47, %48, %49
+  low.cond_br %more, ^body, ^exit : reg<amdgpu.scc>
+^body:
+  %choose = v_cmp_eq_i64 %choice, %next
+  %53 = slice %next[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = v_mov_b32_copy %53
+  %55 = slice %winner[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %56 = v_cndmask_b32 %55, %54, %choose
+  %57 = slice %next[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %58 = v_mov_b32_copy %57
+  %59 = slice %winner[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %60 = v_cndmask_b32 %59, %58, %choose
+  %selected = concat(%56, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^header(%next: reg<amdgpu.sgpr x2>, %selected: reg<amdgpu.vgpr x2>)
+^exit:
+  return %next, %winner
+}

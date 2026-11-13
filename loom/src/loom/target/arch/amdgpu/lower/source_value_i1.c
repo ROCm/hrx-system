@@ -219,7 +219,7 @@ static bool loom_amdgpu_i1_compare_has_direct_vgpr_operand(
     loom_value_id_t excluded_value_id) {
   for (uint16_t i = 0; i < values->operand_count; ++i) {
     if (loom_amdgpu_source_value_directly_prefers_vgpr(
-            module, /*fact_table=*/NULL, values->operands[i],
+            module, /*fact_table=*/NULL, /*analysis=*/NULL, values->operands[i],
             excluded_value_id)) {
       return true;
     }
@@ -272,7 +272,8 @@ static bool loom_amdgpu_query_secondary_i1_native_mask(
         break;
       }
     } else if (loom_amdgpu_source_value_directly_prefers_vgpr(
-                   module, fact_table, operands[i], excluded_value_id)) {
+                   module, fact_table, analysis, operands[i],
+                   excluded_value_id)) {
       *out_requires_native_mask = true;
       break;
     }

@@ -113,121 +113,137 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core> abi_layout({constant_count = 0,
   %144 = s_bfe_u32_lit %132, 262152
   %group_z = s_lshl1_add_u32 %143, %144
   %146 = s_getreg_b32_cluster_workgroup_flat_id
-  %147 = v_mov_b32_copy %134
-  %148 = v_mov_b32 0
-  %cluster_x = concat(%147, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %150 = v_mov_b32_copy %140
-  %cluster_y = concat(%150, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %153 = v_mov_b32_copy %143
-  %cluster_z = concat(%153, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %156 = v_mov_b32_copy %138
-  %local_x = concat(%156, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %159 = v_mov_b32_copy %141
-  %local_y = concat(%159, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %162 = v_mov_b32_copy %144
-  %local_z = concat(%162, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %165 = v_mov_b32_copy %146
-  %local_flat = concat(%165, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %168 = s_load_dword_offset_only %135 {offset = 12}
-  %169 = s_lshl_b32_rhs_inline %168, 1
-  %170 = s_load_dword_offset_only %135 {offset = 16}
-  %171 = s_and_b32_lit %170, 65535
-  %172 = s_lshl_b32_rhs_inline %171, 1
-  %173 = s_lshr_b32_rhs_inline %170, 16
-  %174 = s_lshl_b32_rhs_inline %173, 1
-  %175 = v_mov_b32_copy %169
-  %count_x = concat(%175, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %178 = v_mov_b32_copy %172
-  %count_y = concat(%178, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %181 = v_mov_b32_copy %174
-  %count_z = concat(%181, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %184 = v_mov_b32_copy %168
-  %clusters_x = concat(%184, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %187 = v_mov_b32_copy %171
-  %clusters_y = concat(%187, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %190 = v_mov_b32_copy %173
-  %clusters_z = concat(%190, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %c0_index = s_mov_b32 0
-  %first_x = s_cmp_eq_i32 %group_x, %c0_index
-  %first_y = s_cmp_eq_i32 %group_y, %c0_index
-  %first_z = s_cmp_eq_i32 %group_z, %c0_index
+  %147 = s_mov_b32 0
+  %161 = s_load_dword_offset_only %135 {offset = 12}
+  %162 = s_lshl_b32_rhs_inline %161, 1
+  %163 = s_load_dword_offset_only %135 {offset = 16}
+  %164 = s_and_b32_lit %163, 65535
+  %165 = s_lshl_b32_rhs_inline %164, 1
+  %166 = s_lshr_b32_rhs_inline %163, 16
+  %167 = s_lshl_b32_rhs_inline %166, 1
+  %first_x = s_cmp_eq_i32 %group_x, %147
+  %first_y = s_cmp_eq_i32 %group_y, %147
+  %first_z = s_cmp_eq_i32 %group_z, %147
   %first_lane = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
-  %199 = s_mov_b32 1
-  %200 = s_cselect_b32 %199, %c0_index, %first_x
-  %201 = s_cselect_b32 %199, %c0_index, %first_y
-  %202 = s_and_b32 %200, %201
-  %first_xy = s_cmp_lg_i32 %202, %c0_index
-  %206 = s_cselect_b32 %199, %c0_index, %first_xy
-  %207 = s_cselect_b32 %199, %c0_index, %first_z
-  %208 = s_and_b32 %206, %207
-  %first_xyz = s_cmp_lg_i32 %208, %c0_index
-  %211 = v_mov_b32 2
-  %size = concat(%211, %148) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %215 = slice %first_lane[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %216 = s_cselect_b32 %215, %c0_index, %first_xyz
-  %217 = slice %first_lane[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %218 = s_cselect_b32 %217, %c0_index, %first_xyz
-  %leader = concat(%216, %218) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %220, %221 = s_and_saveexec_b64 %leader
-  low.cond_br %221, ^enter, ^_bb4 : reg<amdgpu.scc>
+  %186 = s_mov_b32 1
+  %187 = s_cselect_b32 %186, %147, %first_x
+  %188 = s_cselect_b32 %186, %147, %first_y
+  %189 = s_and_b32 %187, %188
+  %first_xy = s_cmp_lg_i32 %189, %147
+  %193 = s_cselect_b32 %186, %147, %first_xy
+  %194 = s_cselect_b32 %186, %147, %first_z
+  %195 = s_and_b32 %193, %194
+  %first_xyz = s_cmp_lg_i32 %195, %147
+  %198 = s_mov_b32 2
+  %202 = slice %first_lane[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %203 = s_cselect_b32 %202, %147, %first_xyz
+  %204 = slice %first_lane[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %205 = s_cselect_b32 %204, %147, %first_xyz
+  %leader = concat(%203, %205) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %207, %208 = s_and_saveexec_b64 %leader
+  low.cond_br %208, ^enter, ^_bb4 : reg<amdgpu.scc>
 ^enter:
-  %222 = v_mov_b32 7
-  %223 = v_mov_b32 1
-  %wide_count_x = concat(%222, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %225 = v_mov_b32 8
-  %wide_count_y = concat(%225, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %228 = v_mov_b32 9
-  %wide_count_z = concat(%228, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %231 = v_mov_b32 10
-  %wide_cluster_x = concat(%231, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %234 = v_mov_b32 11
-  %wide_cluster_y = concat(%234, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %237 = v_mov_b32 12
-  %wide_cluster_z = concat(%237, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %240 = v_mov_b32 13
-  %wide_local_x = concat(%240, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %243 = v_mov_b32 14
-  %wide_local_y = concat(%243, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %246 = v_mov_b32 15
-  %wide_local_z = concat(%246, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %249 = v_mov_b32 16
-  %wide_local_flat = concat(%249, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %252 = v_mov_b32 17
-  %wide_size = concat(%252, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %255 = v_mov_b32 18
-  %wide_clusters_x = concat(%255, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %258 = v_mov_b32 19
-  %wide_clusters_y = concat(%258, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %261 = v_mov_b32 20
-  %wide_clusters_z = concat(%261, %223) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %264 = v_mov_b32 2
-  low.br ^loop(%264: reg<amdgpu.vgpr>, %count_x: reg<amdgpu.vgpr x2>, %count_y: reg<amdgpu.vgpr x2>, %count_z: reg<amdgpu.vgpr x2>, %cluster_x: reg<amdgpu.vgpr x2>, %cluster_y: reg<amdgpu.vgpr x2>, %cluster_z: reg<amdgpu.vgpr x2>, %local_x: reg<amdgpu.vgpr x2>, %local_y: reg<amdgpu.vgpr x2>, %local_z: reg<amdgpu.vgpr x2>, %local_flat: reg<amdgpu.vgpr x2>, %size: reg<amdgpu.vgpr x2>, %clusters_x: reg<amdgpu.vgpr x2>, %clusters_y: reg<amdgpu.vgpr x2>, %clusters_z: reg<amdgpu.vgpr x2>)
+  %209 = s_mov_b32 7
+  %210 = s_mov_b32 1
+  %212 = s_mov_b32 8
+  %215 = s_mov_b32 9
+  %218 = s_mov_b32 10
+  %221 = s_mov_b32 11
+  %224 = s_mov_b32 12
+  %227 = s_mov_b32 13
+  %230 = s_mov_b32 14
+  %233 = s_mov_b32 15
+  %236 = s_mov_b32 16
+  %239 = s_mov_b32 17
+  %242 = s_mov_b32 18
+  %245 = s_mov_b32 19
+  %248 = s_mov_b32 20
+  %251 = v_mov_b32 2
+  %253 = v_mov_b32_copy %162
+  %255 = v_mov_b32_copy %147
+  %256 = concat(%253, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %258 = v_mov_b32_copy %165
+  %261 = concat(%258, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %263 = v_mov_b32_copy %167
+  %266 = concat(%263, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %268 = v_mov_b32_copy %134
+  %271 = concat(%268, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %273 = v_mov_b32_copy %140
+  %276 = concat(%273, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %278 = v_mov_b32_copy %143
+  %281 = concat(%278, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %283 = v_mov_b32_copy %138
+  %286 = concat(%283, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %288 = v_mov_b32_copy %141
+  %291 = concat(%288, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %293 = v_mov_b32_copy %144
+  %296 = concat(%293, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %298 = v_mov_b32_copy %146
+  %301 = concat(%298, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %303 = v_mov_b32_copy %198
+  %306 = concat(%303, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %308 = v_mov_b32_copy %161
+  %311 = concat(%308, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %313 = v_mov_b32_copy %164
+  %316 = concat(%313, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %318 = v_mov_b32_copy %166
+  %321 = concat(%318, %255) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^loop(%251: reg<amdgpu.vgpr>, %256: reg<amdgpu.vgpr x2>, %261: reg<amdgpu.vgpr x2>, %266: reg<amdgpu.vgpr x2>, %271: reg<amdgpu.vgpr x2>, %276: reg<amdgpu.vgpr x2>, %281: reg<amdgpu.vgpr x2>, %286: reg<amdgpu.vgpr x2>, %291: reg<amdgpu.vgpr x2>, %296: reg<amdgpu.vgpr x2>, %301: reg<amdgpu.vgpr x2>, %306: reg<amdgpu.vgpr x2>, %311: reg<amdgpu.vgpr x2>, %316: reg<amdgpu.vgpr x2>, %321: reg<amdgpu.vgpr x2>)
 ^loop(%remaining: reg<amdgpu.vgpr>, %bits_count_x: reg<amdgpu.vgpr x2>, %bits_count_y: reg<amdgpu.vgpr x2>, %bits_count_z: reg<amdgpu.vgpr x2>, %bits_cluster_x: reg<amdgpu.vgpr x2>, %bits_cluster_y: reg<amdgpu.vgpr x2>, %bits_cluster_z: reg<amdgpu.vgpr x2>, %bits_local_x: reg<amdgpu.vgpr x2>, %bits_local_y: reg<amdgpu.vgpr x2>, %bits_local_z: reg<amdgpu.vgpr x2>, %bits_local_flat: reg<amdgpu.vgpr x2>, %bits_size: reg<amdgpu.vgpr x2>, %bits_clusters_x: reg<amdgpu.vgpr x2>, %bits_clusters_y: reg<amdgpu.vgpr x2>, %bits_clusters_z: reg<amdgpu.vgpr x2>):
-  %265 = v_mov_b32 112
-  %266 = v_mul_lo_u32 %remaining, %265
-  global_store_b64_saddr %266, %bits_count_x, %view
-  global_store_b64_saddr %266, %bits_count_y, %view {offset = 8}
-  global_store_b64_saddr %266, %bits_count_z, %view {offset = 16}
-  global_store_b64_saddr %266, %bits_cluster_x, %view {offset = 24}
-  global_store_b64_saddr %266, %bits_cluster_y, %view {offset = 32}
-  global_store_b64_saddr %266, %bits_cluster_z, %view {offset = 40}
-  global_store_b64_saddr %266, %bits_local_x, %view {offset = 48}
-  global_store_b64_saddr %266, %bits_local_y, %view {offset = 56}
-  global_store_b64_saddr %266, %bits_local_z, %view {offset = 64}
-  global_store_b64_saddr %266, %bits_local_flat, %view {offset = 72}
-  global_store_b64_saddr %266, %bits_size, %view {offset = 80}
-  global_store_b64_saddr %266, %bits_clusters_x, %view {offset = 88}
-  global_store_b64_saddr %266, %bits_clusters_y, %view {offset = 96}
-  global_store_b64_saddr %266, %bits_clusters_z, %view {offset = 104}
+  %322 = v_mov_b32 112
+  %323 = v_mul_lo_u32 %remaining, %322
+  global_store_b64_saddr %323, %bits_count_x, %view
+  global_store_b64_saddr %323, %bits_count_y, %view {offset = 8}
+  global_store_b64_saddr %323, %bits_count_z, %view {offset = 16}
+  global_store_b64_saddr %323, %bits_cluster_x, %view {offset = 24}
+  global_store_b64_saddr %323, %bits_cluster_y, %view {offset = 32}
+  global_store_b64_saddr %323, %bits_cluster_z, %view {offset = 40}
+  global_store_b64_saddr %323, %bits_local_x, %view {offset = 48}
+  global_store_b64_saddr %323, %bits_local_y, %view {offset = 56}
+  global_store_b64_saddr %323, %bits_local_z, %view {offset = 64}
+  global_store_b64_saddr %323, %bits_local_flat, %view {offset = 72}
+  global_store_b64_saddr %323, %bits_size, %view {offset = 80}
+  global_store_b64_saddr %323, %bits_clusters_x, %view {offset = 88}
+  global_store_b64_saddr %323, %bits_clusters_y, %view {offset = 96}
+  global_store_b64_saddr %323, %bits_clusters_z, %view {offset = 104}
   %more = v_cmp_gt_i32_src1_inline %remaining {rhs = 0}
-  %294 = s_mov_b64_exec_read
-  %295, %296 = s_and_b64_scc %more, %294
-  low.cond_br %296, ^body, ^_bb4 : reg<amdgpu.scc>
+  %351 = s_mov_b64_exec_read
+  %352, %353 = s_and_b64_scc %more, %351
+  low.cond_br %353, ^body, ^_bb4 : reg<amdgpu.scc>
 ^body:
-  %298 = v_mov_b32 4294967295
-  %next = v_add_u32 %remaining, %298
-  low.br ^loop(%next: reg<amdgpu.vgpr>, %wide_count_x: reg<amdgpu.vgpr x2>, %wide_count_y: reg<amdgpu.vgpr x2>, %wide_count_z: reg<amdgpu.vgpr x2>, %wide_cluster_x: reg<amdgpu.vgpr x2>, %wide_cluster_y: reg<amdgpu.vgpr x2>, %wide_cluster_z: reg<amdgpu.vgpr x2>, %wide_local_x: reg<amdgpu.vgpr x2>, %wide_local_y: reg<amdgpu.vgpr x2>, %wide_local_z: reg<amdgpu.vgpr x2>, %wide_local_flat: reg<amdgpu.vgpr x2>, %wide_size: reg<amdgpu.vgpr x2>, %wide_clusters_x: reg<amdgpu.vgpr x2>, %wide_clusters_y: reg<amdgpu.vgpr x2>, %wide_clusters_z: reg<amdgpu.vgpr x2>)
+  %355 = v_mov_b32 4294967295
+  %next = v_add_u32 %remaining, %355
+  %358 = v_mov_b32_copy %209
+  %360 = v_mov_b32_copy %210
+  %361 = concat(%358, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %363 = v_mov_b32_copy %212
+  %366 = concat(%363, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %368 = v_mov_b32_copy %215
+  %371 = concat(%368, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %373 = v_mov_b32_copy %218
+  %376 = concat(%373, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %378 = v_mov_b32_copy %221
+  %381 = concat(%378, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %383 = v_mov_b32_copy %224
+  %386 = concat(%383, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %388 = v_mov_b32_copy %227
+  %391 = concat(%388, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %393 = v_mov_b32_copy %230
+  %396 = concat(%393, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %398 = v_mov_b32_copy %233
+  %401 = concat(%398, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %403 = v_mov_b32_copy %236
+  %406 = concat(%403, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %408 = v_mov_b32_copy %239
+  %411 = concat(%408, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %413 = v_mov_b32_copy %242
+  %416 = concat(%413, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %418 = v_mov_b32_copy %245
+  %421 = concat(%418, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %423 = v_mov_b32_copy %248
+  %426 = concat(%423, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^loop(%next: reg<amdgpu.vgpr>, %361: reg<amdgpu.vgpr x2>, %366: reg<amdgpu.vgpr x2>, %371: reg<amdgpu.vgpr x2>, %376: reg<amdgpu.vgpr x2>, %381: reg<amdgpu.vgpr x2>, %386: reg<amdgpu.vgpr x2>, %391: reg<amdgpu.vgpr x2>, %396: reg<amdgpu.vgpr x2>, %401: reg<amdgpu.vgpr x2>, %406: reg<amdgpu.vgpr x2>, %411: reg<amdgpu.vgpr x2>, %416: reg<amdgpu.vgpr x2>, %421: reg<amdgpu.vgpr x2>, %426: reg<amdgpu.vgpr x2>)
 ^_bb4:
-  s_mov_b64_exec %220
+  s_mov_b64_exec %207
   return
 }

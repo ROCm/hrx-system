@@ -75,6 +75,8 @@ typedef struct loom_amdgpu_source_value_analysis_t {
   const loom_local_value_domain_t* value_domain;
   // Borrowed active fact scope providing value records and source CFGs.
   const loom_value_fact_table_t* fact_table;
+  // Borrowed solved representation plan, or NULL before source observation.
+  loom_low_representation_plan_t* representation_plan;
   // Descriptor set governing target-specific source placement capabilities.
   const loom_low_descriptor_set_t* descriptor_set;
   // Cached target capabilities for descriptor_set.
@@ -190,6 +192,7 @@ bool loom_amdgpu_source_value_facts_prefer_vgpr(
 // available to the caller.
 bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id, loom_value_id_t excluded_value_id);
 bool loom_amdgpu_op_results_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,

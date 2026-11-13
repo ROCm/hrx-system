@@ -485,11 +485,8 @@ static void loom_amdgpu_apply_address_representation(
     case LOOM_LOW_REPRESENTATION_ID_NONE:
     case LOOM_AMDGPU_ADDRESS_REPRESENTATION_NARROW:
       return;
-    case LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE_SGPR:
-      *shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
-      return;
-    case LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE_VGPR:
-      *shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2);
+    case LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE:
+      shape->unit_count = 2;
       return;
     default:
       IREE_ASSERT_UNREACHABLE(

@@ -194,6 +194,18 @@ void loom_low_lower_representation_observer_observe(
 iree_status_t loom_low_lower_representation_observer_end(
     void* observer_state, loom_low_lower_context_t* context);
 
+// Borrows the solved function-local plan, or NULL before observation completes.
+// The plan and its selected representations remain valid for the active source
+// function. Dependent analyses include this identity in their cache scope.
+loom_low_representation_plan_t* loom_low_lower_representation_plan_if_ready(
+    loom_low_lower_context_t* context);
+
+// Borrows the same solved plan through a contract query's target-state scope.
+// A scope without representation observation returns NULL.
+iree_status_t loom_low_lower_representation_query_plan(
+    const loom_target_contract_query_environment_t* environment,
+    loom_low_representation_plan_t** out_plan);
+
 // Returns the selected representation for |source_value_id|, or NONE when its
 // component remained unconstrained. The representation observer must have
 // completed successfully before this query.

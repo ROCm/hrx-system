@@ -537,6 +537,11 @@ loom_cc_test(
 )
 
 loom_check_test(
+    name = "source_representation_test",
+    src = "source_representation_test.loom-test",
+)
+
+loom_check_test(
     name = "uniform_predicate_select_test",
     src = "uniform_predicate_select.loom-test",
 )

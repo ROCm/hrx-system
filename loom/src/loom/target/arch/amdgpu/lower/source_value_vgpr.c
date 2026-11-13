@@ -17,6 +17,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/target/arch/amdgpu/lower/source_representation.h"
 #include "loom/target/arch/amdgpu/lower/source_value_analysis.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -153,10 +154,23 @@ bool loom_amdgpu_source_value_facts_prefer_vgpr(
   const loom_value_facts_t facts =
       fact_table ? loom_value_fact_table_lookup(fact_table, source_value_id)
                  : loom_value_facts_unknown();
-  if (loom_value_facts_is_lane_varying(facts) ||
-      (loom_value_is_block_arg(loom_module_value(module, source_value_id)) &&
-       !loom_value_facts_is_subgroup_uniform(facts))) {
+  if (loom_value_facts_is_lane_varying(facts)) {
     return true;
+  }
+  if (!loom_value_facts_is_subgroup_uniform(facts)) {
+    const loom_value_t* value = loom_module_value(module, source_value_id);
+    if (loom_value_is_block_arg(value)) {
+      return true;
+    }
+    // Structured results join control-flow values just like block arguments.
+    // Unknown distribution cannot justify a scalar callable result carrier.
+    const loom_op_t* defining_op = loom_value_def_op(value);
+    if (defining_op != NULL && defining_op->region_count != 0) {
+      const loom_op_vtable_t* vtable = loom_op_vtable(module, defining_op);
+      if (vtable->region_branch != NULL || vtable->loop_like != NULL) {
+        return true;
+      }
+    }
   }
   if (loom_type_is_buffer(source_type) && fact_table != NULL) {
     loom_value_fact_buffer_reference_t reference = {0};
@@ -615,17 +629,33 @@ loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
 
 static bool loom_amdgpu_source_producer_requires_wide_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id,
     loom_amdgpu_source_producer_flags_t producer_flags) {
-  return iree_any_bit_set(producer_flags,
-                          LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT) &&
-         loom_amdgpu_source_address_value_needs_64bit(
-             module, fact_table, source_value_id,
-             loom_module_value_type(module, source_value_id));
+  if (!iree_any_bit_set(producer_flags,
+                        LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT)) {
+    return false;
+  }
+  if (analysis != NULL && analysis->representation_plan != NULL) {
+    loom_low_representation_id_t representation =
+        LOOM_LOW_REPRESENTATION_ID_NONE;
+    loom_low_representation_plan_lookup(
+        analysis->representation_plan,
+        loom_local_value_domain_ordinal(analysis->value_domain,
+                                        source_value_id),
+        &representation);
+    if (representation == LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE) {
+      return true;
+    }
+  }
+  return loom_amdgpu_source_address_value_needs_64bit(
+      module, fact_table, source_value_id,
+      loom_module_value_type(module, source_value_id));
 }
 
 bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id, loom_value_id_t excluded_value_id) {
   while (true) {
     if (source_value_id == excluded_value_id ||
@@ -661,7 +691,7 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_amdgpu_source_producer_flags_t producer_flags =
         loom_amdgpu_source_producer_flags(defining_op->kind);
     if (loom_amdgpu_source_producer_requires_wide_vgpr(
-            module, fact_table, source_value_id, producer_flags)) {
+            module, fact_table, analysis, source_value_id, producer_flags)) {
       return true;
     }
     if (iree_any_bit_set(producer_flags,
@@ -699,11 +729,11 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
                          LOOM_AMDGPU_SOURCE_PRODUCER_SCF_SELECT)) {
       return loom_value_def_index(value) == 0 &&
              (loom_amdgpu_source_value_directly_prefers_vgpr(
-                  module, fact_table, loom_scf_select_true_value(defining_op),
-                  excluded_value_id) ||
+                  module, fact_table, analysis,
+                  loom_scf_select_true_value(defining_op), excluded_value_id) ||
               loom_amdgpu_source_value_directly_prefers_vgpr(
-                  module, fact_table, loom_scf_select_false_value(defining_op),
-                  excluded_value_id));
+                  module, fact_table, analysis,
+                  loom_scf_select_false_value(defining_op), excluded_value_id));
     }
 
     loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
@@ -711,9 +741,9 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
     if (loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
             module, source_value_id, defining_op, &lhs, &rhs)) {
       return loom_amdgpu_source_value_directly_prefers_vgpr(
-                 module, fact_table, lhs, source_value_id) ||
+                 module, fact_table, analysis, lhs, source_value_id) ||
              loom_amdgpu_source_value_directly_prefers_vgpr(
-                 module, fact_table, rhs, source_value_id);
+                 module, fact_table, analysis, rhs, source_value_id);
     }
     if (loom_amdgpu_source_producer_result_requires_vgpr(
             module, source_value_id, producer_flags)) {
@@ -724,7 +754,7 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
                module, source_value_id, defining_op, producer_flags,
                &operand) &&
            loom_amdgpu_source_value_directly_prefers_vgpr(
-               module, fact_table, operand, source_value_id);
+               module, fact_table, analysis, operand, source_value_id);
   }
 }
 
@@ -748,7 +778,8 @@ static bool loom_amdgpu_select_payload_prefers_vgpr(
     return loom_amdgpu_source_value_facts_prefer_vgpr(module, fact_table,
                                                       source_value_id) ||
            loom_amdgpu_source_value_directly_prefers_vgpr(
-               module, fact_table, source_value_id, condition_value_id);
+               module, fact_table, analysis, source_value_id,
+               condition_value_id);
   }
   return loom_amdgpu_analyzed_source_value_prefers_vgpr(
       module, fact_table, view_regions, analysis, source_value_id);
@@ -873,7 +904,7 @@ static bool loom_amdgpu_branch_arg_payload_prefers_vgpr(
   if (loom_amdgpu_source_value_facts_prefer_vgpr(module, fact_table,
                                                  incoming_value_id) ||
       loom_amdgpu_source_value_directly_prefers_vgpr(
-          module, fact_table, incoming_value_id, excluded_value_id)) {
+          module, fact_table, analysis, incoming_value_id, excluded_value_id)) {
     return true;
   }
   const loom_value_t* incoming_value =
@@ -1059,7 +1090,7 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
   const loom_amdgpu_source_producer_flags_t producer_flags =
       loom_amdgpu_source_producer_flags(defining_op->kind);
   if (loom_amdgpu_source_producer_requires_wide_vgpr(
-          module, fact_table, source_value_id, producer_flags)) {
+          module, fact_table, analysis, source_value_id, producer_flags)) {
     return true;
   }
 
