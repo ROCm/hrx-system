@@ -12,6 +12,11 @@
 #include "benchmark/benchmark.h"
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
+#include "iree/base/tooling/flags.h"
+
+IREE_FLAG(bool, hip_native_runtime, false,
+          "Benchmark native HIP selected by HRX_TEST_LIBAMDHIP64, without "
+          "requiring HRX's private hipHALDeinit entry point.");
 
 namespace {
 
@@ -38,6 +43,14 @@ struct GraphApi {
       Require(false, library.error().c_str());
     }
     Check(Resolve<decltype(&hipInit)>("hipInit")(0));
+    if (!FLAG_hip_native_runtime) {
+      deinitialize = Resolve<decltype(deinitialize)>("hipHALDeinit");
+    }
+    int runtime_version = 0;
+    Check(Resolve<decltype(&hipRuntimeGetVersion)>("hipRuntimeGetVersion")(
+        &runtime_version));
+    std::fprintf(stderr, "HIP runtime: %s, version: %d\n",
+                 FLAG_hip_native_runtime ? "native" : "HRX", runtime_version);
     create = Resolve<decltype(create)>("hipGraphCreate");
     destroy = Resolve<decltype(destroy)>("hipGraphDestroy");
     add_empty = Resolve<decltype(add_empty)>("hipGraphAddEmptyNode");
@@ -58,7 +71,9 @@ struct GraphApi {
   }
 
   ~GraphApi() {
-    Check(Resolve<decltype(&hipHALDeinit)>("hipHALDeinit")());
+    if (deinitialize) {
+      Check(deinitialize());
+    }
     if (!library.Close()) {
       Require(false, library.error().c_str());
     }
@@ -73,6 +88,8 @@ struct GraphApi {
 
   // Exact build-selected frontend; symbol lookup stays outside timing.
   hrx::hip::testing::HipDso library;
+  // HRX-specific teardown; native HIP uses its ordinary library teardown.
+  decltype(&hipHALDeinit) deinitialize = nullptr;
   // Allocates one empty template in the current context.
   decltype(&hipGraphCreate) create = nullptr;
   // Releases a template outside the measured construction/clone interval.
@@ -313,19 +330,23 @@ GRAPH_TEMPLATE_BATCH_ORDER(FanOut, BatchShuffled);
 #undef GRAPH_TEMPLATE_OPERATIONS
 #undef GRAPH_TEMPLATE_BENCHMARK
 
-template <bool accepted, Topology topology, Edges edges>
+template <bool accepted, Topology topology, Edges edges,
+          bool reorder_edges = true>
 void GraphUpdate(benchmark::State& state) {
   auto& api = Api();
   uint32_t values[3] = {};
   GraphInput original(state.range(0), topology, Edges::kBatch, &values[0]);
   GraphInput first(state.range(0), topology, edges, &values[1]);
   // Embedded predecessors and reverse batch insertion both produce ascending
-  // lists. Alternate with the opposite order so timed updates compare sets,
+  // lists. Reordered rows alternate with the opposite order to compare sets,
   // including transitions between embedded and separately attached edges.
+  // Ordered rows keep construction order identical across all three templates.
   constexpr Edges alternate_edges =
-      edges == Edges::kEmbedded || edges == Edges::kBatchReverse
-          ? Edges::kBatch
-          : Edges::kBatchReverse;
+      !reorder_edges
+          ? edges
+          : (edges == Edges::kEmbedded || edges == Edges::kBatchReverse
+                 ? Edges::kBatch
+                 : Edges::kBatchReverse);
   GraphInput second(state.range(0), topology, alternate_edges, &values[2]);
   hipGraph_t source = original.Build();
   hipGraph_t replacements[] = {first.Build(), second.Build()};
@@ -405,5 +426,23 @@ GRAPH_UPDATE_SHAPE(FanOut, BatchShuffled);
 
 #undef GRAPH_UPDATE_SHAPE
 #undef GRAPH_UPDATE_BENCHMARK
+
+#define GRAPH_ORDERED_UPDATE_BENCHMARK(topology)                              \
+  BENCHMARK_TEMPLATE(GraphUpdate, true, Topology::k##topology, Edges::kBatch, \
+                     false)                                                   \
+      ->Name("GraphUpdate/AcceptedOrdered/" #topology "/Batch")               \
+      ->ArgName("nodes")                                                      \
+      ->Arg(16)                                                               \
+      ->Arg(256)                                                              \
+      ->Arg(1024)                                                             \
+      ->Arg(4096)                                                             \
+      ->Unit(benchmark::kMicrosecond)
+
+GRAPH_ORDERED_UPDATE_BENCHMARK(Independent);
+GRAPH_ORDERED_UPDATE_BENCHMARK(Chain);
+GRAPH_ORDERED_UPDATE_BENCHMARK(FanIn);
+GRAPH_ORDERED_UPDATE_BENCHMARK(FanOut);
+
+#undef GRAPH_ORDERED_UPDATE_BENCHMARK
 
 }  // namespace
