@@ -4,9 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Executes the one-bit conversion family after public C++ projection."""
+"""Executes predicate conversions and comparisons after public C++ projection."""
 
 import json
+import operator
 import subprocess
 import sys
 
@@ -68,11 +69,95 @@ def ir_type(element: str, shape: tuple[int, ...]) -> str:
     return f"vector<{dimensions}x{element}>" if shape else element
 
 
-def programs() -> tuple[str, str, int, int]:
-    functions = []
-    observations = []
-    checks = []
+def comparison_programs() -> tuple[list[str], list[str], int]:
+    functions, checks = [], []
     expectation_count = 0
+    relations = {
+        "eq": operator.eq,
+        "ne": operator.ne,
+        "slt": operator.lt,
+        "sle": operator.le,
+        "sgt": operator.gt,
+        "sge": operator.ge,
+        "ult": operator.lt,
+        "ule": operator.le,
+        "ugt": operator.gt,
+        "uge": operator.ge,
+    }
+    for width in (1, 8, 16, 32, 64):
+        modulus = 1 << width
+        source_type = SOURCE_TYPES[f"i{width}"]
+        samples = [
+            (0, 0),
+            (modulus - 1, 0),
+            (0, modulus - 1),
+            (modulus - 1, modulus - 1),
+            (modulus // 2, modulus // 2 - 1),
+        ]
+        for predicate, relation in relations.items():
+            name = f"compare_{predicate}_i{width}"
+            functions.append(
+                f"func.def public noinline @{name}(%lhs: i{width}, %rhs: i{width}) -> (i1) {{\n"
+                f"  %signed_use = scalar.sitofp %lhs : i{width} to f64\n"
+                f"  %result = scalar.cmpi {predicate}, %lhs, %rhs : i{width}\n"
+                "  func.return %result : i1\n}\n"
+            )
+            declarations, expectations = [], []
+            for ordinal, (lhs, rhs) in enumerate(samples):
+                left = (
+                    lhs - modulus
+                    if predicate.startswith("s") and lhs >= modulus // 2
+                    else lhs
+                )
+                right = (
+                    rhs - modulus
+                    if predicate.startswith("s") and rhs >= modulus // 2
+                    else rhs
+                )
+                expected = "true" if relation(left, right) else "false"
+                declarations.append(
+                    f"  const auto actual_{ordinal} = {name}(static_cast<{source_type}>({lhs}ull), static_cast<{source_type}>({rhs}ull));"
+                )
+                expectations.append(
+                    f"  loom::check::expect_equal(actual_{ordinal}, {expected});"
+                )
+            checks.append(
+                f"LOOM_CHECK_CASE(check_{name}) {{\n"
+                + "\n".join(declarations + expectations)
+                + "\n}"
+            )
+            expectation_count += len(expectations)
+    functions.append("""
+func.def public noinline @carried_maximum(%lhs: i64, %rhs: i64) -> (i64) {
+  %result = scf.while(%value = %lhs : i64) -> (i64) {
+    %less = scalar.cmpi slt, %value, %rhs : i64
+    scf.condition %less, %value : i1, i64
+  } do(%current: i64) {
+    scf.yield %rhs : i64
+  }
+  func.return %result : i64
+}
+""")
+    checks.append("""
+static long long observe_carried_maximum(long long lhs, long long rhs) {
+  return static_cast<long long>(carried_maximum(lhs, rhs));
+}
+LOOM_CHECK_CASE(signed_comparison_of_unsigned_loop_carrier) {
+  const auto crossed = observe_carried_maximum(-7ll, 9ll);
+  const auto negative = observe_carried_maximum(-7ll, -9ll);
+  const auto unchanged = observe_carried_maximum(9ll, -7ll);
+  loom::check::expect_equal(crossed, 9ll);
+  loom::check::expect_equal(negative, -7ll);
+  loom::check::expect_equal(unchanged, 9ll);
+}
+""")
+    expectation_count += 3
+    return functions, checks, expectation_count
+
+
+def programs() -> tuple[str, str, int, int]:
+    functions, checks, expectation_count = comparison_programs()
+    observations = []
     for shape in ((), (4,), (2, 2)):
         prefix = "x".join(map(str, shape))
         dialect = "vector" if shape else "scalar"
@@ -205,7 +290,7 @@ def main(importer: str, runner: str) -> None:
         == expectation_count
     ), report
     sys.stdout.write(
-        f"{case_count} named conversion cases, {expectation_count} expectations passed\n"
+        f"{case_count} named predicate cases, {expectation_count} expectations passed\n"
     )
 
 

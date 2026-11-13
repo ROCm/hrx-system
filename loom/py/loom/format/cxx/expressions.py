@@ -1156,6 +1156,20 @@ class CxxExpressionRenderer(CxxRenderContext):
                 raise CxxRenderError(
                     operation, f"comparison predicate {predicate!r} is unsupported"
                 )
+            # Region-carried aliases and mixed signed/unsigned uses can have a
+            # different C++ type from this operation's integer interpretation.
+            signed = predicate.startswith("s")
+            arguments = []
+            for operand in operation.operands:
+                argument = self.expression(operand)
+                interpretation = self.cpp_type(operand, signed=signed)
+                if self.expression_type(operand) != interpretation:
+                    argument = f"static_cast<{interpretation}>({argument})"
+                arguments.append(argument)
+            if signed and repr(self.module.values[operation.operands[0]].type) == "i1":
+                # Signed i1 is {0, -1}; bool is {0, 1}, reversing their order.
+                token = {"<": ">", "<=": ">=", ">": "<", ">=": "<="}[token]
+            expression = f"({arguments[0]} {token} {arguments[1]})"
             statement_attribute = None
         elif name == "scalar.cmpf":
             predicate = operation.attributes.get("predicate")
@@ -1177,11 +1191,12 @@ class CxxExpressionRenderer(CxxRenderContext):
                     "native C++ binary operator",
                 )
             statement_attribute = self._fastmath_contract(operation)
+            expression = self._binary_expression(operation, token)
         else:
             return None
         self._declare(
             operation.results[0],
-            self._binary_expression(operation, token),
+            expression,
             inlineable=True,
             statement_attribute=statement_attribute,
         )
