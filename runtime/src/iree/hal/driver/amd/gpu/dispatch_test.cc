@@ -79,34 +79,6 @@ TEST_F(DispatchTest, CooperativeGridStateIsPrivateAndCompletelyReinitialized) {
   }
 }
 
-TEST(GridSyncStrategyTest, CompilerBarrierFamiliesRemainDistinctFromAdmission) {
-  const struct {
-    // Physical compiler ISA identity.
-    iree_hal_amd_gpu_gfxip_version_t gfxip;
-    // Device-library grid-barrier implementation.
-    iree_hal_amd_gpu_grid_sync_strategy_t strategy;
-  } cases[] = {
-      {{8, 0, 3}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE},
-      {{9, 0, 10}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
-      {{9, 4, 1}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
-      {{9, 4, 2}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
-      {{9, 4, 3}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
-      {{9, 5, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
-      {{10, 1, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
-      {{10, 3, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
-      {{11, 0, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
-      {{11, 5, 1}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
-      {{11, 7, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
-      {{12, 0, 1}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
-      {{12, 5, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
-      {{13, 0, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE},
-  };
-  for (const auto& test : cases) {
-    EXPECT_EQ(iree_hal_amd_gpu_grid_sync_select_strategy(test.gfxip),
-              test.strategy);
-  }
-}
-
 TEST_F(DispatchTest, DefaultGeometryUsesRequiredMetadata) {
   auto config = iree_hal_make_static_dispatch_config(7, 3, 2);
   IREE_ASSERT_OK(Prepare(config));

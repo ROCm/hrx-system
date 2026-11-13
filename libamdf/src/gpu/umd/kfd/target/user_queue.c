@@ -68,12 +68,21 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
       family->user_queue_capabilities |=
           AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION;
     }
-    // KFD exposes cooperative admission only when its scheduler/firmware
-    // prerequisites are met. The qualified GC9-11 queue writers carry that
-    // scheduling contract; later MES writers require independent qualification.
+    // Cooperative support is qualified for modern CDNA and RDNA targets.
+    // Older shader GWS protocols are not supported. KFD's GWS-named resource
+    // still supplies native cooperative scheduling on these targets; its live
+    // availability and exact GC identity qualify the queue writer independently
+    // of the compiler ISA identity. Later MES writers are not qualified here.
+    const amdf_gpu_endpoint_properties_t* properties = &topology->properties;
+    const bool cooperative_target =
+        (properties->gfx_ip.major == 9 &&
+         ((properties->gfx_ip.minor == 4 && properties->gfx_ip.stepping == 2) ||
+          (properties->gfx_ip.minor == 5 &&
+           properties->gfx_ip.stepping == 0))) ||
+        properties->gfx_ip.major == 11;
     if (topology->global_wave_sync_count != 0 && topology->gc_ip.exact &&
         topology->gc_ip.major >= 9 && topology->gc_ip.major <= 11 &&
-        (family->roles & AMDF_QUEUE_ROLE_COMPUTE) != 0) {
+        cooperative_target && (family->roles & AMDF_QUEUE_ROLE_COMPUTE) != 0) {
       family->user_queue_capabilities |=
           AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
     }

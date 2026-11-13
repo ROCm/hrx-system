@@ -44,20 +44,6 @@ iree_status_t iree_hal_amd_gpu_aql_dispatch_prepare(
       constants, binding_count, flags, out_dispatch);
 }
 
-iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_grid_sync_packet(
-    uint64_t kernel_object, uint64_t grid_sync) {
-  const iree_hal_amd_gpu_aql_dispatch_t packet = {
-      .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16) |
-                IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
-                IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM,
-      .workgroup_size = {1, 1, 1},
-      .grid_size = {1, 1, 1},
-      .kernel_object = kernel_object,
-      .kernarg_address = grid_sync,
-  };
-  return iree_hal_amd_gpu_aql_packet_dispatch(&packet);
-}
-
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_grid_sync_write_packet(
     uint32_t xcc_count, uint64_t grid_address,
     const iree_hal_amd_gpu_grid_sync_t* grid, uint64_t command_address,

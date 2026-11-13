@@ -71,10 +71,8 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
        .kernel_object = &out_pool->control[2]},
       {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
        .kernel_object = &out_pool->control[3]},
-      {.argument_length = sizeof(iree_hal_amd_gpu_grid_sync_t),
-       .kernel_object = &out_pool->grid_sync},
   };
-  uint32_t builtin_count = IREE_ARRAYSIZE(builtins) - 1;
+  const uint32_t builtin_count = IREE_ARRAYSIZE(builtins);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_blit_program_query(
       gfxip, &builtins[0].code, &builtins[0].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_fixup_program_query(
@@ -93,12 +91,6 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
         gfxip, i, &builtins[5 + i].code, &builtins[5 + i].kernel);
   }
   IREE_RETURN_IF_ERROR(status);
-  if (iree_hal_amd_gpu_grid_sync_select_strategy(gfxip) ==
-      IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS) {
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_grid_sync_program_query(
-        gfxip, &builtins[builtin_count].code, &builtins[builtin_count].kernel));
-    ++builtin_count;
-  }
   const uint64_t descriptor_length = 64;
   const uint64_t code_begin =
       iree_align_uint64(builtin_count * descriptor_length, 256);

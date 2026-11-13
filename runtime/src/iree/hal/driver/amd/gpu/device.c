@@ -392,7 +392,7 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < family_count && iree_status_is_ok(status); ++i) {
     status = iree_hal_amd_gpu_queue_family_spec_initialize(
-        device->context, device->target.version,
+        device->context,
         i == 0 ? family_ordinal
                : device->transfer_families[i - 1].native_ordinal,
         device->queue_options.publication_mode, i == 0 ? queue_count : 0,

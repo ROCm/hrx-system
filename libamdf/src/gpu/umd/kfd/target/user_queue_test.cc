@@ -97,27 +97,42 @@ TEST(KfdTargetUserQueueTest, LiveMemoryFactsDeterminePlacementAndPublication) {
 }
 
 TEST(KfdTargetUserQueueTest,
-     CooperativeAdmissionRequiresNativeSchedulingFacts) {
-  const amdf_gpu_kfd_ip_version_t identities[] = {
-      {9, 4, 3, true},   {10, 3, 0, true}, {11, 5, 1, true},
-      {11, 5, 1, false}, {12, 0, 1, true}, {12, 1, 0, true},
+     CooperativeAdmissionRequiresModernTargetAndNativeScheduling) {
+  const struct {
+    // Compiler target, with two decimal digits for minor and stepping.
+    uint32_t target;
+    // Native GC identity; CDNA's GC revision differs from its compiler target.
+    amdf_gpu_kfd_ip_version_t gc_ip;
+    // Qualified cooperative scheduling for this target and native writer.
+    bool cooperative;
+  } cases[] = {
+      {90010, {9, 0, 10, true}, false},   {90400, {9, 4, 0, true}, false},
+      {90401, {9, 4, 2, true}, false},    {90402, {9, 4, 3, true}, true},
+      {90402, {9, 4, 4, true}, true},     {90500, {9, 5, 0, true}, true},
+      {100100, {10, 1, 0, true}, false},  {100300, {10, 3, 0, true}, false},
+      {110000, {11, 0, 0, true}, true},   {110003, {11, 0, 3, true}, true},
+      {110500, {11, 5, 0, true}, true},   {110501, {11, 5, 1, true}, true},
+      {110501, {11, 5, 1, false}, false}, {120001, {12, 0, 1, true}, false},
+      {120100, {12, 1, 0, true}, false},  {120500, {12, 5, 0, true}, false},
   };
-  for (const auto& identity : identities) {
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.target);
+    SCOPED_TRACE(test.gc_ip.exact);
     for (uint32_t resource_count : {0u, 64u}) {
+      SCOPED_TRACE(resource_count);
       auto topology = MakeTopology();
-      topology.gc_ip = identity;
-      topology.properties.gfx_ip = {identity.major, identity.minor,
-                                    identity.revision};
+      topology.gc_ip = test.gc_ip;
+      topology.properties.gfx_ip = {
+          test.target / 10000, (test.target / 100) % 100, test.target % 100};
       topology.properties.compute.wavefront_size =
-          identity.major == 9 ? 64 : 32;
+          topology.properties.gfx_ip.major == 9 ? 64 : 32;
       topology.global_wave_sync_count = resource_count;
       amdf_gpu_kfd_user_queue_plans_t plans;
       amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64,
                                                       &plans);
       for (uint32_t i = 0; i < plans.count; ++i) {
         const auto& family = plans.values[i].family;
-        const bool supported = identity.exact && identity.major <= 11 &&
-                               resource_count != 0 &&
+        const bool supported = test.cooperative && resource_count != 0 &&
                                (family.roles & AMDF_QUEUE_ROLE_COMPUTE) != 0;
         EXPECT_EQ((family.user_queue_capabilities &
                    AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) != 0,

@@ -62,23 +62,30 @@ class InputsTest : public ::testing::Test {
   iree_hal_amd_gpu_command_inputs_t inputs_ = {};
 };
 
-TEST_F(InputsTest, ImmediateReplayStateUsesOneDeduplicatedValue) {
-  uint32_t first = 0, second = 0, other = 0;
+TEST_F(InputsTest, CooperativeReplaysResolveTheCurrentQueueState) {
+  uint32_t first = 0, second = 0, image = 0;
   IREE_ASSERT_OK(
-      iree_hal_amd_gpu_command_inputs_add_constant(&inputs_, 0, &first));
+      iree_hal_amd_gpu_command_inputs_add_cooperative_state(&inputs_, &first));
   IREE_ASSERT_OK(
-      iree_hal_amd_gpu_command_inputs_add_constant(&inputs_, 0, &second));
+      iree_hal_amd_gpu_command_inputs_add_cooperative_state(&inputs_, &second));
+  const uint64_t images[] = {0x1000, 0x2000};
   IREE_ASSERT_OK(
-      iree_hal_amd_gpu_command_inputs_add_constant(&inputs_, 23, &other));
+      iree_hal_amd_gpu_command_inputs_add_image(&inputs_, images, &image));
   EXPECT_EQ(first, second);
-  EXPECT_NE(first, other);
+  EXPECT_NE(first, image);
   EXPECT_EQ(inputs_.count, 2u);
   iree_hal_amd_gpu_command_inputs_seal(&inputs_);
-  uint64_t values[2] = {42, 42};
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, values));
-  EXPECT_EQ(values[first - inputs_.value_base], 0u);
-  EXPECT_EQ(values[other - inputs_.value_base], 23u);
+  EXPECT_FALSE(iree_hal_amd_gpu_command_inputs_are_fixed_addresses(&inputs_));
+  for (uint32_t queue_ordinal = 0; queue_ordinal < 2; ++queue_ordinal) {
+    for (uint64_t address :
+         {UINT64_C(0x123400005000), UINT64_C(0x567800009000)}) {
+      uint64_t values[2] = {};
+      IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_write(
+          &inputs_, nullptr, queue_ordinal, address, values));
+      EXPECT_EQ(values[first - inputs_.value_base], address);
+      EXPECT_EQ(values[image - inputs_.value_base], images[queue_ordinal]);
+    }
+  }
 }
 
 class FixedAddressesTest : public InputsTest,
@@ -107,7 +114,7 @@ TEST_P(FixedAddressesTest, SubspanUsesItsRootMemoryLifetime) {
             !transient);
   uint64_t value = 0;
   IREE_EXPECT_OK(
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, 0, &value));
   EXPECT_EQ(value, 0x1004u);
   iree_hal_buffer_release(subspan);
 }
@@ -135,8 +142,8 @@ TEST_P(ReplayInputsTest, InvocationStateCannotBecomeFixedAddressRepairs) {
           iree_hal_amd_gpu_command_inputs_add_length(&inputs_, 0, &input));
       break;
     case 3:
-      IREE_ASSERT_OK(
-          iree_hal_amd_gpu_command_inputs_add_constant(&inputs_, 0, &input));
+      IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_cooperative_state(
+          &inputs_, &input));
       break;
   }
   iree_hal_amd_gpu_command_inputs_seal(&inputs_);
@@ -190,19 +197,19 @@ TEST_F(InputsTest, IndirectAtomicUsesShareOneQualifiedInput) {
   uint64_t value = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, 0, &value));
   binding_.device_address = 0x1000;
   IREE_ASSERT_OK(
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, 0, &value));
   EXPECT_EQ(value, 0x1000u);
   binding_.device_address = 0x1004;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INCOMPATIBLE,
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, 0, &value));
   binding_.device_address = 0x1002;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, 0, &value));
   iree_hal_buffer_release(captured.buffer);
 }
 
@@ -226,14 +233,14 @@ TEST_F(InputsTest, TimestampTargetsNeedNoAtomicCapabilities) {
   uint64_t values[2] = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, values));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, 0, values));
   binding_.device_address = 0x1004;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, values));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, 0, values));
   binding_.device_address = 0x1000;
   IREE_EXPECT_OK(
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, values));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, 0, values));
   EXPECT_EQ(values[direct - inputs_.value_base], 0x1000u);
   EXPECT_EQ(values[indirect - inputs_.value_base], 0x1008u);
   iree_hal_buffer_release(captured.buffer);
@@ -286,7 +293,7 @@ TEST_F(InputsTest, MixedNativeAndShaderUsesKeepIndependentRequirements) {
   binding_.device_address = 0x1000;
   uint64_t values[2] = {};
   IREE_ASSERT_OK(
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, values));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, 0, values));
   EXPECT_EQ(values[0], 0x1000u);
   EXPECT_EQ(values[1], 0x1000u);
   iree_hal_buffer_release(captured.buffer);
@@ -314,7 +321,7 @@ TEST_F(InputsTest, DirectZeroComputeTargetIsQualifiedBeforeRecording) {
   binding_.device_address = 0x1000;
   uint64_t value = 0;
   IREE_ASSERT_OK(
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, 0, &value));
   EXPECT_EQ(value, 0x1000u);
 }
 
@@ -345,14 +352,14 @@ TEST_F(InputsTest, DirectAtomicDefersAddressResolutionUntilDependencies) {
   uint64_t value = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, 0, &value));
   binding_.device_address = 0x1002;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, 0, &value));
   binding_.device_address = 0x1000;
   IREE_ASSERT_OK(
-      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, &value));
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, 0, &value));
   EXPECT_EQ(value, 0x1000u);
 }
 

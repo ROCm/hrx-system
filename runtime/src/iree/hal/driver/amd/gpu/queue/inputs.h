@@ -117,11 +117,11 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_image(
     iree_hal_amd_gpu_command_inputs_t* inputs, const uint64_t* addresses,
     uint32_t* out_value);
 
-// Registers an immediate value shared by all fixups that consume it. A zero
-// value resets shader-owned invocation state on each replay.
-iree_status_t iree_hal_amd_gpu_command_inputs_add_constant(
-    iree_hal_amd_gpu_command_inputs_t* inputs, uint32_t value,
-    uint32_t* out_value);
+// Registers the publishing cooperative queue's state address. Recordings may
+// outlive a trimmed queue, so this value resolves anew on every invocation.
+// All cooperative dispatches share one input and ordered state owner.
+iree_status_t iree_hal_amd_gpu_command_inputs_add_cooperative_state(
+    iree_hal_amd_gpu_command_inputs_t* inputs, uint32_t* out_value);
 
 // Flattens whole-range constraints and releases the recording-only hash index.
 void iree_hal_amd_gpu_command_inputs_seal(
@@ -129,7 +129,7 @@ void iree_hal_amd_gpu_command_inputs_seal(
 
 // Returns whether every input is a captured address with an immutable prepared
 // memory view. Called during sealing, never during submission. Table bindings,
-// queue-specific images, lengths, and replay-state initializers do not qualify.
+// queue-specific images, lengths, and cooperative state do not qualify.
 bool iree_hal_amd_gpu_command_inputs_are_fixed_addresses(
     const iree_hal_amd_gpu_command_inputs_t* inputs);
 
@@ -146,11 +146,12 @@ iree_status_t iree_hal_amd_gpu_command_inputs_capture(
 // Resolves committed backing after dependencies. values has count uint64_t
 // entries and excludes the executor-provided prefix. Native slot selection and
 // aggregate alignment/extent facts come from recording/capture, with no search
-// or per-operation resolution at submission.
+// or per-operation resolution at submission. cooperative_address belongs to the
+// current native queue and is unused by recordings without cooperative work.
 iree_status_t iree_hal_amd_gpu_command_inputs_write(
     const iree_hal_amd_gpu_command_inputs_t* inputs,
     const iree_hal_amd_gpu_command_binding_t* bindings, uint32_t queue_ordinal,
-    uint64_t* values);
+    uint64_t cooperative_address, uint64_t* values);
 
 #ifdef __cplusplus
 }  // extern "C"

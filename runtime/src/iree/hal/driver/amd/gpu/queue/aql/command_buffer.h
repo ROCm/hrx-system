@@ -15,8 +15,9 @@
 extern "C" {
 #endif
 
-// One immutable native packet extent. Indirect producer/target pairs never
-// cross a block boundary. The publisher reads this descriptor, not packets.
+// One immutable native packet extent. Indirect producer/target and cooperative
+// reset/user pairs never cross a block boundary. The publisher reads this
+// descriptor, not packets.
 typedef struct iree_hal_amd_gpu_aql_program_block_t {
   // Byte offset from resident instance zero, aligned to a native packet.
   uint32_t offset;
@@ -157,6 +158,7 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
 // host template is patched in host_contents; its actual ABI and native commands
 // are copied to their separate mappings. Resident programs write their separate
 // dense value table. values is NULL when the resident instance needs no fixups.
+// cooperative_address comes from the current queue, including after trim.
 // stream_arguments selects the achieved native LOCAL publication protocol;
 // upload then owns a DWORD-rounded extent and every byte uses an NT store.
 // host_contents has preparation_byte_length bytes for a mutable host template
@@ -164,9 +166,10 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
 // The publisher borrows zero-fixup host templates directly and omits this call.
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    bool stream_arguments, uint64_t command_address, void* commands,
-    void* host_contents, uint64_t* values);
+    uint32_t queue_ordinal, uint64_t cooperative_address,
+    uint64_t upload_address, void* upload, bool stream_arguments,
+    uint64_t command_address, void* commands, void* host_contents,
+    uint64_t* values);
 
 #ifdef __cplusplus
 }  // extern "C"

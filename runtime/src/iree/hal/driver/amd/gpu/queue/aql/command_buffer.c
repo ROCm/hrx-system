@@ -190,7 +190,7 @@ iree_hal_amd_gpu_aql_command_buffer_program(iree_hal_command_buffer_t* base) {
   return ((iree_hal_amd_gpu_aql_command_buffer_t*)base)->program;
 }
 
-// Appends complete native packets without splitting an indirect pair. The
+// Appends complete native packets without splitting a producer/user pair. The
 // frozen block table is the only packet-layout metadata read at submission.
 static iree_status_t iree_hal_amd_gpu_aql_command_packets(
     iree_hal_amd_gpu_aql_command_buffer_t* buffer, uint32_t count,
@@ -534,13 +534,10 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
             executable, token, &geometry, flags));
     buffer->program->required_features |=
         IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH;
-    // Grid state is independent of the user and initializer kernel ABI.
-    buffer->requires_resident_storage = true;
   }
   const bool indirect = iree_hal_dispatch_uses_indirect_parameters(flags);
   const bool external_arguments =
       iree_hal_dispatch_uses_indirect_arguments(flags);
-  const bool initialize_grid = cooperative && buffer->pool->grid_sync;
   if (!indirect &&
       (!geometry.workgroup_count[0] || !geometry.workgroup_count[1] ||
        !geometry.workgroup_count[2])) {
@@ -552,8 +549,13 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   }
   uint32_t header = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_header(buffer, &header));
+  uint32_t grid_value = 0;
   if (cooperative) {
-    header |= IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_cooperative_state(
+        &buffer->inputs, &grid_value));
+    header = iree_hal_amd_gpu_aql_barrier_join(
+        header, IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                    IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
   }
   if (indirect) {
     header = iree_hal_amd_gpu_aql_barrier_join(
@@ -561,40 +563,18 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   }
   const iree_hal_amd_gpu_kernarg_layout_t* layout = function->base.kernarg;
   uint32_t argument_offset = 0;
-  const uint32_t grid_offset = (layout->byte_length + 7u) & ~7u;
-  const uint32_t argument_length =
-      cooperative ? grid_offset + sizeof(iree_hal_amd_gpu_grid_sync_t)
-                  : layout->byte_length;
-  if (!external_arguments && argument_length) {
+  if (!external_arguments && layout->byte_length) {
     void* arguments = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
-        &buffer->recording, argument_length,
-        cooperative ? iree_max(layout->alignment, 8u) : layout->alignment,
+        &buffer->recording, layout->byte_length, layout->alignment,
         &argument_offset, &arguments));
     iree_hal_amd_gpu_dispatch_emplace_arguments(
         &function->base, &geometry, constants, NULL, flags, arguments);
-    if (cooperative) {
-      iree_hal_amd_gpu_dispatch_emplace_grid_sync(
-          layout, &geometry, 0, arguments,
-          (void*)((uint8_t*)arguments + grid_offset));
-      if (layout->requirements &
-          IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC) {
-        IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-            buffer, argument_offset + layout->grid_sync_offset, 0,
-            argument_offset + grid_offset,
-            IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
-                IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
-      }
-      uint32_t zero = 0;
-      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_constant(
-          &buffer->inputs, 0, &zero));
-      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
-          &buffer->recording,
-          argument_offset + grid_offset +
-              offsetof(iree_hal_amd_gpu_grid_sync_t, single_grid_sync),
-          zero, 0, 0,
-          IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
-              IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
+    if (cooperative && (layout->requirements &
+                        IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC)) {
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+          buffer, argument_offset + layout->grid_sync_offset, grid_value, 0,
+          IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
     }
   }
   uint32_t argument_value = 0;
@@ -624,17 +604,34 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   }
   uint32_t offset = 0;
   iree_hal_amd_gpu_aql_packet_t* packets = NULL;
+  const bool prefix = indirect || cooperative;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_packets(
-      buffer, (indirect ? 2 : 1) + initialize_grid, &offset, &packets));
-  if (initialize_grid) {
-    packets[0] =
-        iree_hal_amd_gpu_aql_grid_sync_packet(buffer->pool->grid_sync, 0);
+      buffer, prefix ? 2 : 1, &offset, &packets));
+  if (cooperative) {
+    const uint32_t xcc_count =
+        buffer->pool->storage.context->target_info.topology.xcc_count;
+    const uint32_t predicate_words = xcc_count > 1 ? 2 : 0;
+    const iree_hal_amd_gpu_grid_sync_t grid =
+        iree_hal_amd_gpu_dispatch_grid_sync(&geometry);
+    uint32_t command_offset = 0;
+    uint32_t* commands = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_command_data(
+        &buffer->recording, sizeof(grid) + (4 + predicate_words) * 4,
+        &command_offset, (void**)&commands));
+    // The ordered reset waits for the preceding user grid. Its system release
+    // and the following user's acquire cover the separately owned state.
+    packets[0] = iree_hal_amd_gpu_aql_grid_sync_write_packet(
+        xcc_count, 0, &grid, 0, commands);
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-        buffer, offset + 40, 0, argument_offset + grid_offset,
-        IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+        buffer, command_offset + (predicate_words + 2) * 4, grid_value, 0,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_COMMAND_DATA));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+        buffer, offset + 8, 0, command_offset,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_COMMAND_DATA));
+    buffer->program->has_control = true;
   }
-  const uint32_t target_offset = offset + (indirect + initialize_grid) * 64;
-  iree_hal_amd_gpu_aql_packet_t* target = packets + indirect + initialize_grid;
+  const uint32_t target_offset = offset + prefix * 64;
+  iree_hal_amd_gpu_aql_packet_t* target = packets + prefix;
   *target = iree_hal_amd_gpu_aql_dispatch_packet(function, &geometry, header, 0,
                                                  0, flags);
   // An indirect producer is itself ordered before publishing its target.
@@ -680,10 +677,10 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
           buffer, patch_offset + 16, argument_value, argument_addend,
           IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA | argument_flags));
     }
-    packets[initialize_grid] =
+    packets[0] =
         iree_hal_amd_gpu_aql_indirect_packet(buffer->pool->indirect, 0);
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-        buffer, offset + initialize_grid * 64 + 40, 0, patch_offset,
+        buffer, offset + 40, 0, patch_offset,
         IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
     target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
     buffer->requires_resident_storage = true;
@@ -901,9 +898,9 @@ void iree_hal_amd_gpu_aql_command_invocation_deinitialize(
 static IREE_ATTRIBUTE_NOINLINE iree_status_t
 iree_hal_amd_gpu_aql_command_invocation_write_host(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    bool stream_arguments, uint64_t command_address, void* commands,
-    void* host_contents) {
+    uint32_t queue_ordinal, uint64_t cooperative_address,
+    uint64_t upload_address, void* upload, bool stream_arguments,
+    uint64_t command_address, void* commands, void* host_contents) {
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_host_template_t* host_template =
@@ -918,7 +915,8 @@ iree_hal_amd_gpu_aql_command_invocation_write_host(
         command_address - host_template->command_data_offset;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_write(
-      &buffer->inputs, invocation->bindings, queue_ordinal, values + 1));
+      &buffer->inputs, invocation->bindings, queue_ordinal, cooperative_address,
+      values + 1));
   const uint8_t* contents = (const void*)(host_template + 1);
   memcpy(host_contents, contents, host_template->byte_length);
   const iree_hal_amd_gpu_fixup_t* fixups =
@@ -953,9 +951,10 @@ iree_hal_amd_gpu_aql_command_invocation_write_host(
 
 iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
     const iree_hal_amd_gpu_aql_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t upload_address, void* upload,
-    bool stream_arguments, uint64_t command_address, void* commands,
-    void* host_contents, uint64_t* values) {
+    uint32_t queue_ordinal, uint64_t cooperative_address,
+    uint64_t upload_address, void* upload, bool stream_arguments,
+    uint64_t command_address, void* commands, void* host_contents,
+    uint64_t* values) {
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_command_program_t* program = invocation->program;
@@ -974,8 +973,8 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
   }
   if (IREE_UNLIKELY(host_template)) {
     return iree_hal_amd_gpu_aql_command_invocation_write_host(
-        invocation, queue_ordinal, upload_address, upload, stream_arguments,
-        command_address, commands, host_contents);
+        invocation, queue_ordinal, cooperative_address, upload_address, upload,
+        stream_arguments, command_address, commands, host_contents);
   }
   // An already repaired immutable instance needs no value table.
   if (!values) {
@@ -983,7 +982,8 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
   }
   values[0] = address;
   return iree_hal_amd_gpu_command_inputs_write(
-      &buffer->inputs, invocation->bindings, queue_ordinal, values + 1);
+      &buffer->inputs, invocation->bindings, queue_ordinal, cooperative_address,
+      values + 1);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_command_buffer_begin_debug_group(

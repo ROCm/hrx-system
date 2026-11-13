@@ -7,12 +7,10 @@
 #include "iree/hal/driver/amd/gpu/queue/family_spec.h"
 
 #include "iree/hal/driver/amd/fabric/memory.h"
-#include "iree/hal/driver/amd/gpu/dispatch.h"
 #include "iree/hal/driver/amd/status.h"
 
 iree_status_t iree_hal_amd_gpu_queue_family_spec_initialize(
-    iree_hal_amd_gpu_context_t* context,
-    iree_hal_amd_gpu_gfxip_version_t target_version, uint32_t family_ordinal,
+    iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
     amdf_queue_publication_modes_t publication_mode, uint32_t queue_count,
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_queue_family_spec_storage_t* out_storage,
@@ -131,15 +129,10 @@ iree_status_t iree_hal_amd_gpu_queue_family_spec_initialize(
                ? IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
                      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS
                : 0),
-      // AQL's GWS initializer still shares its ABI with mutable grid state.
-      // PM4 cooperative state has an independent resident owner.
       .supported_queue_features =
-          native_family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
-                  user_publication &&
+          compute && user_publication &&
                   (native_family->user_queue_capabilities &
-                   AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) &&
-                  iree_hal_amd_gpu_grid_sync_select_strategy(target_version) !=
-                      IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE
+                   AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH)
               ? IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH
               : 0,
       .provisioned_queue_count = queue_count,

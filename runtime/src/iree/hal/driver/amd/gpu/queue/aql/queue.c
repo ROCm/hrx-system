@@ -547,11 +547,7 @@ static void iree_hal_amd_gpu_aql_process_submission(
                                    &submission->execute),
                                iree_hal_amd_gpu_aql_execute_argument_alignment(
                                    &submission->execute))
-                    : iree_max(iree_hal_amd_gpu_aql_argument_length(
-                                   request,
-                                   queue->grid.memory
-                                       ? 0
-                                       : sizeof(iree_hal_amd_gpu_grid_sync_t)),
+                    : iree_max(iree_hal_amd_gpu_aql_argument_length(request),
                                request->function->base.kernarg->alignment));
       capacity =
           iree_max(capacity, (uint64_t)IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT);
@@ -1808,7 +1804,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       queue->options.signals->storage = signals;
     }
   }
-  if (iree_status_is_ok(status) && !options->programs->grid_sync &&
+  if (iree_status_is_ok(status) &&
       (params->features & IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH)) {
     status = iree_hal_amd_gpu_grid_storage_initialize(
         context, options->scratch_memory, &queue->grid);

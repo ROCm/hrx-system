@@ -579,7 +579,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/hal/driver/amd:status",
         "//runtime/src/iree/hal/driver/amd/gpu:code",
-        "//runtime/src/iree/hal/driver/amd/gpu:dispatch",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:control_program",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:input_memory",

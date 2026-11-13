@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <thread>
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/pool_test_util.h"
@@ -12,6 +13,8 @@
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
 #include "iree/hal/driver/amd/gpu/cts/testdata.h"
 #include "iree/hal/driver/amd/gpu/image/cooperative_images.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/queue.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/queue.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -27,7 +30,9 @@ class GpuCooperativeTest
   amdf_queue_command_type_t command_type() const override { return GetParam(); }
 };
 
-TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
+TEST_P(GpuCooperativeTest, QueueStateSurvivesMixedReplaysAndQueueReplacement) {
+  options_.queue.ring_byte_length = 4096;
+  options_.queue.retirement_capacity = 4;
   Create();
   if (HasFatalFailure() || IsSkipped()) {
     return;
@@ -35,7 +40,7 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
   const auto* family = iree_hal_queue_family(queues_[0]);
   if (!(iree_hal_queue_family_spec(family)->supported_queue_features &
         IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH)) {
-    GTEST_SKIP() << "Native family has no admitted cooperative shader strategy";
+    GTEST_SKIP() << "Native family has no cooperative launch support";
   }
 
   iree_hal_queue_params_t params;
@@ -124,6 +129,14 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
       iree_hal_make_buffer_ref(scratch, 0, kBytes),
       iree_hal_make_buffer_ref(output, 0, kBytes),
   };
+  auto empty = config;
+  empty.workgroup_count[0] = 0;
+  uint64_t empty_done = 1;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queue, {}, {1, &semaphore, &empty_done}, executable, function, empty,
+      iree_make_const_byte_span(constants.data(), sizeof(constants)),
+      {IREE_ARRAYSIZE(direct_bindings), direct_bindings}, nullptr,
+      IREE_HAL_DISPATCH_FLAG_COOPERATIVE));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
       iree_hal_queue_dispatch(
@@ -134,7 +147,7 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
   std::array<uint32_t, kGroups> direct_values = {};
   IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, direct_values.data(),
                                            sizeof(direct_values)));
-  uint64_t direct_done = 1;
+  uint64_t direct_done = 2;
   IREE_ASSERT_OK(iree_hal_queue_dispatch(
       queue, {}, {1, &semaphore, &direct_done}, executable, function, config,
       iree_make_const_byte_span(constants.data(), sizeof(constants)),
@@ -215,10 +228,11 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
       .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
   };
-  // Small and larger recordings both retain private barrier state. AQL's GWS
-  // strategy can use a bounded host template; its memory strategy keeps even
-  // the small recording resident. Replays change bindings without a CPU wait.
-  for (uint32_t dispatches : {1u, 8u}) {
+  // Exercise bounded host preparation, resident storage, and multiple native
+  // blocks. Direct and recorded launches share state and change geometry on
+  // the same queue without an intervening CPU completion wait.
+  for (uint32_t dispatches : {1u, 8u, 129u}) {
+    SCOPED_TRACE(dispatches);
     std::array<uint32_t, kGroups * kReplays> values = {};
     IREE_ASSERT_OK(
         iree_hal_buffer_map_write(output, 0, values.data(), sizeof(values)));
@@ -247,6 +261,29 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
         IREE_STATUS_FAILED_PRECONDITION,
         iree_hal_queue_execute(queues_[0], {}, {}, recording,
                                {table.size(), table.data()}, 0));
+    // A deferred invocation must release its captures without touching the
+    // shared state or output when its dependency fails. The same recording
+    // and queue remain usable for the successful replays below.
+    Ref<iree_hal_semaphore_t> dependency_gate, rejected_completion;
+    CreateSemaphore(dependency_gate.out());
+    CreateSemaphore(rejected_completion.out());
+    if (HasFatalFailure()) {
+      return;
+    }
+    auto* dependency_semaphore = dependency_gate.get();
+    auto* rejected_semaphore = rejected_completion.get();
+    uint64_t rejected_value = 1;
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queue, {1, &dependency_semaphore, &rejected_value},
+        {1, &rejected_semaphore, &rejected_value}, recording,
+        {table.size(), table.data()}, 0));
+    iree_hal_semaphore_fail(dependency_semaphore,
+                            iree_status_from_code(IREE_STATUS_ABORTED));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_ABORTED,
+        iree_hal_semaphore_wait(rejected_semaphore, rejected_value,
+                                iree_infinite_timeout(),
+                                IREE_ASYNC_WAIT_FLAG_NONE));
     for (uint32_t replay = 0; replay < kReplays; ++replay) {
       table[1].offset = replay * kBytes;
       uint64_t next = completed + 1;
@@ -254,14 +291,76 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
           queue, {completed ? 1u : 0u, &semaphore, &completed},
           {1, &semaphore, &next}, recording, {table.size(), table.data()}, 0));
       completed = next;
+      const uint32_t groups = kGroups - replay;
+      auto mixed_config = config;
+      mixed_config.workgroup_count[0] = groups;
+      const std::array<uint32_t, 2> mixed_constants = {17 + replay, groups};
+      const iree_hal_buffer_ref_t mixed_bindings[] = {
+          iree_hal_make_buffer_ref(scratch, 0, kBytes),
+          iree_hal_make_buffer_ref(output, replay * kBytes, kBytes),
+      };
+      next = completed + 1;
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queue, {1, &semaphore, &completed}, {1, &semaphore, &next},
+          executable, function, mixed_config,
+          iree_make_const_byte_span(mixed_constants.data(),
+                                    sizeof(mixed_constants)),
+          {IREE_ARRAYSIZE(mixed_bindings), mixed_bindings}, nullptr,
+          IREE_HAL_DISPATCH_FLAG_COOPERATIVE));
+      completed = next;
     }
     IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, completed,
                                            iree_infinite_timeout(),
                                            IREE_ASYNC_WAIT_FLAG_NONE));
     IREE_ASSERT_OK(
         iree_hal_buffer_map_read(output, 0, values.data(), sizeof(values)));
-    for (auto value : values) {
-      EXPECT_EQ(value, dispatches * sum);
+    for (uint32_t replay = 0; replay < kReplays; ++replay) {
+      const uint32_t groups = kGroups - replay;
+      const uint32_t extra = (17 + replay) * groups + groups * (groups - 1) / 2;
+      for (uint32_t group = 0; group < kGroups; ++group) {
+        EXPECT_EQ(values[replay * kGroups + group],
+                  dispatches * sum + (group < groups ? extra : 0u));
+      }
+    }
+
+    // The recording survives native queue teardown. Changing an available
+    // placement requires a new cached queue and catches a retained old owner.
+    const auto replacement_placement =
+        iree_hal_queue_placement(queue) == IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL
+            ? IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL
+            : IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL;
+    if (iree_hal_queue_family_spec(family)->placement_capabilities &
+        (1u << replacement_placement)) {
+      params.placement = replacement_placement;
+    }
+    // Public completion ends payload borrows before the worker's final
+    // retirement bookkeeping. Trim can replace the queue only after that
+    // separate idle predicate holds.
+    const auto is_idle = command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+                             ? iree_hal_amd_gpu_pm4_queue_is_idle
+                             : iree_hal_amd_gpu_aql_queue_is_idle;
+    while (!is_idle(queue)) {
+      std::this_thread::yield();
+    }
+    queue.reset();
+    IREE_ASSERT_OK(iree_hal_device_trim(device_));
+    IREE_ASSERT_OK(iree_hal_queue_acquire(family, &params, queue.out()));
+    if (params.placement != IREE_HAL_QUEUE_PLACEMENT_DEFAULT) {
+      EXPECT_EQ(iree_hal_queue_placement(queue), params.placement);
+    }
+    table[1].offset = 0;
+    uint64_t next = completed + 1;
+    IREE_ASSERT_OK(iree_hal_queue_execute(queue, {1, &semaphore, &completed},
+                                          {1, &semaphore, &next}, recording,
+                                          {table.size(), table.data()}, 0));
+    completed = next;
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, completed,
+                                           iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, direct_values.data(),
+                                            sizeof(direct_values)));
+    for (uint32_t group = 0; group < kGroups; ++group) {
+      EXPECT_EQ(direct_values[group], values[group] + dispatches * sum);
     }
   }
 }
