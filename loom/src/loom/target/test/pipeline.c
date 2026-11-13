@@ -234,6 +234,7 @@ static iree_status_t loom_test_pipeline_entry(
   }
   const loom_pipeline_control_options_t options = {
       .worker_engines = state->engines,
+      .diagnostic_emitter = state->pass->diagnostic_emitter,
       .emit = {.boundary = loom_test_pipeline_boundary,
                .collective_begin = loom_test_pipeline_collective_begin,
                .collective_end = loom_test_pipeline_collective_end,

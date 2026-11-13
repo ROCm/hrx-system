@@ -182,6 +182,7 @@ static iree_status_t loom_pipeline_realization_clone_workers(
       version->base.function = instance;
       version->memory_accesses = NULL;
       version->loop_execution = NULL;
+      version->pipeline_entry = NULL;
       version->loop_pipelines = (loom_source_loop_pipeline_list_t){0};
       for (const loom_source_loop_pipeline_t* source_policy =
                source_version->loop_pipelines.head;
@@ -209,7 +210,12 @@ static iree_status_t loom_pipeline_realization_clone_workers(
 iree_status_t loom_pipeline_realization_register_helper(
     loom_module_t* module, const loom_pipeline_realization_t* realization,
     iree_host_size_t worker_index, loom_func_like_t helper,
-    iree_diagnostic_emitter_t diagnostic_emitter) {
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    loom_target_function_version_t** out_version) {
+  *out_version = NULL;
+  if (realization->version_owner == NULL) {
+    return iree_ok_status();
+  }
   const loom_target_function_version_t* caller =
       realization->worker_versions[worker_index];
   if (caller == NULL) {
@@ -238,7 +244,10 @@ iree_status_t loom_pipeline_realization_register_helper(
       .target_context_ordinal = caller->target_context_ordinal,
       .function_target_facts = facts,
   };
-  return loom_function_version_owner_append(owner, &version->base);
+  IREE_RETURN_IF_ERROR(
+      loom_function_version_owner_append(owner, &version->base));
+  *out_version = version;
+  return iree_ok_status();
 }
 
 static const loom_target_facts_t* loom_pipeline_realization_child_target(

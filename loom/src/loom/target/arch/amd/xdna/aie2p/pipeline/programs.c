@@ -12,15 +12,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 #include "loom/transforms/pipeline/control.h"
 
-static iree_status_t loom_aie2p_native_program_register(
-    void* user_data, iree_host_size_t engine, loom_func_like_t function) {
-  loom_aie2p_native_context_t* context = user_data;
-  return loom_pipeline_realization_register_helper(
-      context->code.module, context->code.realization,
-      context->execution.workers[engine], function,
-      context->pass->diagnostic_emitter);
-}
-
 static iree_status_t loom_aie2p_native_program_prepare(
     void* user_data, loom_builder_t* builder, iree_host_size_t worker,
     loom_value_slice_t captures) {
@@ -154,8 +145,8 @@ iree_status_t loom_aie2p_native_emit_programs(
       .state_types = &frame_type,
       .state_count = 1,
       .worker_state_arguments = state_arguments,
-      .emit = {.function = loom_aie2p_native_program_register,
-               .prepare_worker = loom_aie2p_native_program_prepare,
+      .diagnostic_emitter = context->pass->diagnostic_emitter,
+      .emit = {.prepare_worker = loom_aie2p_native_program_prepare,
                .boundary = loom_aie2p_native_program_boundary,
                .collective_begin = loom_aie2p_native_collective_begin,
                .collective_end = loom_aie2p_native_collective_end,
@@ -204,8 +195,19 @@ iree_status_t loom_aie2p_native_emit_programs(
         NULL, 0, location, &entry));
     const loom_func_like_t function =
         loom_func_like_cast(rewriter->module, entry);
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_native_program_register(context, engine, function));
+    loom_target_function_version_t* version = NULL;
+    IREE_RETURN_IF_ERROR(loom_pipeline_realization_register_helper(
+        context->code.module, realization, representative, function,
+        context->pass->diagnostic_emitter, &version));
+    if (version != NULL) {
+      loom_pipeline_entry_binding_t* binding = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate(realization->version_owner->arena,
+                              sizeof(*binding), (void**)&binding));
+      *binding = *projected->entry;
+      binding->role = LOOM_PIPELINE_ENTRY_ROOT;
+      version->pipeline_entry = binding;
+    }
     loom_builder_enter_region(&rewriter->builder, entry,
                               loom_func_def_body(entry));
     // Physical materialization erased source buffer captures. Only the

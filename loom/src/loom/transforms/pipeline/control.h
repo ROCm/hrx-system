@@ -7,6 +7,7 @@
 #ifndef LOOM_TRANSFORMS_PIPELINE_CONTROL_H_
 #define LOOM_TRANSFORMS_PIPELINE_CONTROL_H_
 
+#include "loom/analysis/pipeline/entries.h"
 #include "loom/analysis/pipeline/execution.h"
 #include "loom/transforms/pipeline/realization.h"
 
@@ -18,9 +19,6 @@ extern "C" {
 // source CFG, argument correspondence, callable identity, and nested scopes.
 // Physical owners emit only the already selected start/retirement operations.
 typedef struct loom_pipeline_control_callback_t {
-  // Registers an ordinary helper in this engine's admitted execution context.
-  iree_status_t (*function)(void* user_data, iree_host_size_t engine,
-                            loom_func_like_t function);
   // Prepares an autonomous worker before this invocation's instruction work.
   // Captures are the actual source operands in the original worker formal
   // order, projected into this engine. Preparation cannot await its consumers.
@@ -81,7 +79,9 @@ typedef struct loom_pipeline_control_options_t {
   // same order as state_types. Entries removed by worker pruning are harmless.
   // NULL means that workers have no additional state arguments.
   const loom_value_id_t* const* worker_state_arguments;
-  // Target registration and physical child boundary mechanics.
+  // Destination for projected helper target-contract diagnostics.
+  iree_diagnostic_emitter_t diagnostic_emitter;
+  // Physical child preparation, retirement, and collective mechanics.
   loom_pipeline_control_callback_t emit;
 } loom_pipeline_control_options_t;
 
@@ -93,6 +93,8 @@ typedef struct loom_pipeline_control_function_t {
   const uint16_t* arguments;
   // Number of surviving parameters; projection removes unused captures.
   uint16_t argument_count;
+  // Source-independent role/lifetime binding shared with its function version.
+  const loom_pipeline_entry_binding_t* entry;
 } loom_pipeline_control_function_t;
 
 // Projects the retained construction graph into one ordinary call graph per

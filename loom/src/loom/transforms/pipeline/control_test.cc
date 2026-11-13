@@ -306,6 +306,24 @@ TEST_F(PipelineControlTest, NestedBoundariesKeepTheirProjectedRuntimeState) {
       &rewriter_, &realization_, &execution_, &options, &functions));
   EXPECT_EQ(boundary_count_, 8u);
   EXPECT_EQ(entry_count_, 4u);
+  const auto* scope = functions[0].entry->scope;
+  EXPECT_EQ(scope->owner_count, realization_.invocations.count);
+  EXPECT_NE(scope->lifetimes.nodes, realization_.invocations.lifetimes.nodes);
+  EXPECT_NE(scope->lifetimes.ancestry,
+            realization_.invocations.lifetimes.ancestry);
+  EXPECT_NE(scope->lifetimes.owners, realization_.invocations.lifetimes.owners);
+  EXPECT_EQ(scope->lifetimes.count, realization_.invocations.lifetimes.count);
+  for (size_t owner = 0; owner < realization_.invocations.count; ++owner) {
+    const auto& projected =
+        functions[loom_pipeline_execution_index(&execution_, owner, kEngine)];
+    ASSERT_NE(projected.entry, nullptr);
+    EXPECT_EQ(projected.entry->scope, scope);
+    EXPECT_EQ(projected.entry->owner, owner);
+    EXPECT_EQ(projected.entry->engine, kEngine);
+    EXPECT_EQ(projected.entry->role, LOOM_PIPELINE_ENTRY_COMPLETE);
+    EXPECT_EQ(scope->lifetimes.owners[owner],
+              realization_.invocations.lifetimes.owners[owner]);
+  }
   for (size_t owner : {0u, 1u, 3u}) {
     const auto& projected =
         functions[loom_pipeline_execution_index(&execution_, owner, kEngine)];

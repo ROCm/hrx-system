@@ -28,6 +28,17 @@ loom_cc_benchmark(
 )
 
 loom_cc_library(
+    name = "entries",
+    srcs = ["entries.c"],
+    hdrs = ["entries.h"],
+    deps = [
+        ":invocations",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "schedule",
     srcs = ["schedule.c"],
     hdrs = ["schedule.h"],

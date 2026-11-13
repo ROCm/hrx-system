@@ -95,11 +95,13 @@ typedef struct loom_pipeline_realization_callback_t {
 // Registers an ordinary helper in its calling worker's exact execution context.
 // The helper owns its own function contract; it inherits no entry retention,
 // source schedules or memory proofs. Normal IR projection materializes the
-// shared context at a saved compilation boundary.
+// shared context at a saved compilation boundary. Returns the stable version
+// created in the compilation owner, or NULL when versions are not tracked.
 iree_status_t loom_pipeline_realization_register_helper(
     loom_module_t* module, const loom_pipeline_realization_t* realization,
     iree_host_size_t worker_index, loom_func_like_t helper,
-    iree_diagnostic_emitter_t diagnostic_emitter);
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    loom_target_function_version_t** out_version);
 
 // Consumes an already analyzed occurrence within its enclosing execution.
 // The caller has closed source-stability proofs over all concurrent children.

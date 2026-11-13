@@ -35,6 +35,8 @@ typedef struct loom_aie2p_program_source_function_t {
   const loom_low_memory_access_map_t* memory_accesses;
   // Optional source loop execution facts.
   const loom_low_loop_execution_map_t* loop_execution;
+  // Retained phase lifetime/role, borrowing the prepared compilation owner.
+  const loom_pipeline_entry_binding_t* pipeline_entry;
   // Source imports, storage, data, and direct calls.
   loom_low_function_requirements_t requirements;
   // Unique immutable definitions used by this entry and its admitted helpers.

@@ -88,6 +88,7 @@ iree_status_t loom_aie2p_program_source_table_resolve(
       .target = target,
       .memory_accesses = version != NULL ? version->memory_accesses : NULL,
       .loop_execution = version != NULL ? version->loop_execution : NULL,
+      .pipeline_entry = version != NULL ? version->pipeline_entry : NULL,
   };
   IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
       table->module, target.descriptor_set, loom_low_func_def_body(function_op),

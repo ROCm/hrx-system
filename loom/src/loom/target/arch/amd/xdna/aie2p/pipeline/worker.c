@@ -75,10 +75,11 @@ iree_status_t loom_aie2p_worker_helper(
       loom_named_attr_slice_empty(), *out_symbol, arguments, argument_count,
       results, result_count, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN,
       out_function));
+  loom_target_function_version_t* version = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_realization_register_helper(
       context->module, context->realization, context->worker_index,
       loom_func_like_cast(context->module, *out_function),
-      context->diagnostic_emitter));
+      context->diagnostic_emitter, &version));
   loom_builder_enter_region(builder, *out_function,
                             loom_low_func_def_body(*out_function));
   return iree_ok_status();
