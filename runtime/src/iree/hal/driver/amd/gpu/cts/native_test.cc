@@ -907,13 +907,11 @@ TEST_P(GpuNativeCompletionTest, IndependentCompletionDuringHostCallback) {
     return;
   }
   using iree::hal::cts::Ref;
-  Ref<iree_hal_semaphore_t> callback, independent, marker;
+  Ref<iree_hal_semaphore_t> callback, independent;
   CreateSemaphore(callback.out());
   CreateSemaphore(independent.out());
-  CreateSemaphore(marker.out());
   iree_hal_semaphore_t* callback_handle = callback;
   iree_hal_semaphore_t* independent_handle = independent;
-  iree_hal_semaphore_t* marker_handle = marker;
   uint64_t one = 1;
   CompletionPause pause{
       reinterpret_cast<iree_async_semaphore_t*>(callback_handle)};
@@ -923,15 +921,11 @@ TEST_P(GpuNativeCompletionTest, IndependentCompletionDuringHostCallback) {
   pause.entered.acquire();
   IREE_ASSERT_OK(iree_hal_queue_barrier(
       queues_[1], {}, {1, &independent_handle, &one}, nullptr, 0));
-  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1],
-                                        {1, &independent_handle, &one},
-                                        {1, &marker_handle, &one}, nullptr, 0));
-  // The native semaphore point precedes the PM4 host retirement record. Join
-  // a later point on the same FIFO before testing the single retirement-assist
-  // attempt, so this tests source ownership rather than that publication gap.
+  // The native signal establishes completion for both GPU dependencies and
+  // CPU retirement; no later submission is needed to join a second record.
   iree_hal_amd_gpu_semaphore_wait_t producer = {};
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
-      marker, one, native_domain, &producer));
+      independent, one, native_domain, &producer));
   std::unique_ptr<iree_hal_amd_gpu_signal_t,
                   decltype(&iree_hal_amd_gpu_signal_release)>
       signal(producer.signal, iree_hal_amd_gpu_signal_release);
@@ -950,6 +944,34 @@ TEST_P(GpuNativeCompletionTest, IndependentCompletionDuringHostCallback) {
   IREE_EXPECT_OK(iree_hal_semaphore_query(independent, &value));
   EXPECT_EQ(value, one);
   pause.Join();
+}
+
+TEST_P(GpuNativeCompletionTest, SleepingWorkerObservesReleaseOnlyCompletion) {
+  options_.completion_spin_ns = 0;
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  iree::hal::cts::Ref<iree_hal_semaphore_t> completion;
+  CreateSemaphore(completion.out());
+  auto* handle = completion.get();
+  const iree_hal_barrier_list_t empty = {};
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  const iree_hal_barrier_list_t after = {1, &release};
+  const iree_hal_queue_barriers_t barriers = {&empty, &after};
+  for (uint64_t value = 1; value <= 64; ++value) {
+    CompletionPause pause{reinterpret_cast<iree_async_semaphore_t*>(handle)};
+    IREE_ASSERT_OK(pause.Arm(value));
+    IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {}, {1, &handle, &value},
+                                          &barriers, 0));
+    // No HAL waiter assists retirement. With active observation disabled,
+    // the native notification must wake the worker after the release is ready.
+    pause.entered.acquire();
+    pause.Join();
+  }
 }
 
 TEST_P(GpuNativeCompletionTest, HostCallbackCanAcquireAndReleaseAnIdleQueue) {

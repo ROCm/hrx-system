@@ -518,30 +518,6 @@ TEST_P(BarrierTest, InstructionPublicationSurvivesEmptyPayload) {
                                             0, 0xa, 1}));
 }
 
-TEST_P(BarrierTest, SplitCompletionWaitsOnlyForReleaseTail) {
-  const iree_hal_amd_gpu_pm4_barrier_t release = {
-      .release_cache_control = GetParam().release,
-  };
-  const iree_hal_amd_gpu_pm4_barrier_t acquire = {
-      .acquire_cache_control = GetParam().acquire,
-  };
-  const iree_hal_amd_gpu_pm4_barrier_t mixed = {
-      .release_cache_control = GetParam().release,
-      .acquire_cache_control = GetParam().acquire,
-  };
-  EXPECT_EQ(
-      iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(release, false),
-      0u);
-  EXPECT_EQ(
-      iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(release, true),
-      7u);
-  EXPECT_EQ(
-      iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(acquire, true),
-      0u);
-  EXPECT_EQ(
-      iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(mixed, true), 0u);
-}
-
 INSTANTIATE_TEST_SUITE_P(
     PhysicalTargets, BarrierTest,
     ::testing::Values(

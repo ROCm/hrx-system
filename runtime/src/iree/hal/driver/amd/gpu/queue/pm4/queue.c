@@ -1236,13 +1236,27 @@ static bool iree_hal_amd_gpu_pm4_retire(
       break;
     }
     iree_hal_amd_gpu_pm4_retirement_t* action =
-        iree_hal_amd_gpu_pm4_retirement_poll(&queue->retirement, position);
-    if (!action) {
-      break;
-    }
+        &queue->issued[position & queue->retirement.capacity_mask].action;
     iree_hal_amd_gpu_pm4_submission_t* submission =
         iree_hal_amd_gpu_pm4_retirement_submission(action);
     const bool terminal = iree_hal_amd_gpu_pm4_retirement_is_terminal(action);
+    // Only terminal publication freezes the capture's signal. Earlier pieces
+    // keep their private witness while the producer prepares the suffix.
+    if (terminal && submission->signal) {
+      if (iree_atomic_load((iree_atomic_int32_t*)submission->signal->host_value,
+                           iree_memory_order_acquire) != 1) {
+        *out_wait = (iree_hal_amd_gpu_completion_wait_t){
+            .address = submission->signal->host_value,
+            .value = 0,
+            .signal = submission->signal,
+            .pending = true,
+        };
+        break;
+      }
+    } else if (!iree_hal_amd_gpu_pm4_retirement_poll(&queue->retirement,
+                                                     position)) {
+      break;
+    }
     iree_status_code_t completion_code = IREE_STATUS_OK;
     if (terminal && !iree_hal_amd_gpu_pm4_submission_retirement_ready(
                         submission, &completion_code)) {
@@ -1369,7 +1383,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
         (iree_hal_amd_gpu_completion_wait_t){.address = &queue->producer.count,
                                              .value = (int64_t)published,
                                              .is_64_bit = true};
-  } else if (!queue->kernel && !waiting_for_producer) {
+  } else if (!queue->kernel && !waiting_for_producer && !out_wait->pending) {
     // Capacity credit prevents record reuse until this consumer advances it.
     out_wait->address =
         &queue->retirement.records[position & queue->retirement.capacity_mask]

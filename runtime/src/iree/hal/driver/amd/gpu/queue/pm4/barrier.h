@@ -104,17 +104,6 @@ static inline uint32_t iree_hal_amd_gpu_pm4_barrier_tail_word_count(
               : 0u);
 }
 
-// DWORD count for joining a cache-bearing completion RELEASE_MEM before a
-// distinct retirement RELEASE_MEM. No wait is required when retirement is the
-// only completion or when cache work completed synchronously in the tail.
-static inline uint32_t iree_hal_amd_gpu_pm4_barrier_completion_wait_word_count(
-    iree_hal_amd_gpu_pm4_barrier_t barrier, bool split_completion) {
-  return split_completion && barrier.release_cache_control &&
-                 !barrier.acquire_cache_control
-             ? 7u
-             : 0u;
-}
-
 // Joins producers and prepares the caller's completion RELEASE_MEM. Acquire or
 // mixed cache actions complete synchronously after a compute join and return
 // zero release control. Release-only cache actions are converted to unshifted
