@@ -424,6 +424,68 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     test->source_ = test->replacement_;
   }
 
+  void CheckPitchedCopyClone(bool implicit_slice_height, bool registered_host) {
+    ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+    void* source = source_.data();
+    void* destination = destination_.data();
+    if (registered_host) {
+      ASSERT_EQ(hipSuccess,
+                api_.allocate_host(&host_buffers_[0], source_.size(), 0));
+      ASSERT_EQ(hipSuccess,
+                api_.allocate_host(&host_buffers_[1], source_.size(), 0));
+      source = host_buffers_[0];
+      destination = host_buffers_[1];
+      std::memcpy(source, source_.data(), source_.size());
+      std::memset(destination, 0, source_.size());
+    }
+    const size_t y_origin = implicit_slice_height ? 1 : 0;
+    const size_t slice_height = implicit_slice_height ? 0 : 3;
+    const hipMemcpy3DParms upload = {
+        .srcArray = nullptr,
+        .srcPos = {1, y_origin, 0},
+        .srcPtr = {source, 8, 8, slice_height},
+        .dstArray = nullptr,
+        .dstPos = {1, y_origin, 0},
+        .dstPtr = {device_, 8, 8, slice_height},
+        .extent = {4, 2, 2},
+        .kind = hipMemcpyHostToDevice,
+    };
+    hipGraphNode_t upload_node = nullptr;
+    ASSERT_EQ(hipSuccess,
+              api_.add_copy(&upload_node, graph_, nullptr, 0, &upload));
+    hipMemcpy3DParms download = upload;
+    download.srcPtr.ptr = device_;
+    download.dstPtr.ptr = destination;
+    download.kind = hipMemcpyDeviceToHost;
+    hipGraphNode_t download_node = nullptr;
+    ASSERT_EQ(hipSuccess, api_.add_copy(&download_node, graph_, &upload_node, 1,
+                                        &download));
+    ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
+    ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+    graph_ = nullptr;
+    ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, clone_, 0));
+    for (int replay = 0; replay < 2; ++replay) {
+      Replay();
+      ASSERT_FALSE(HasFatalFailure());
+      for (size_t i = 0; i < source_.size(); ++i) {
+        const size_t row_origin = y_origin * 8 + 1;
+        const size_t slice_offset = i % 24;
+        const bool copied =
+            i < 48 &&
+            ((slice_offset >= row_origin && slice_offset < row_origin + 4) ||
+             (slice_offset >= row_origin + 8 &&
+              slice_offset < row_origin + 12));
+        EXPECT_EQ(static_cast<uint8_t*>(destination)[i],
+                  copied ? source_[i] : 0)
+            << i;
+      }
+      source_ = replacement_;
+      if (registered_host) {
+        std::memcpy(source, source_.data(), source_.size());
+      }
+    }
+  }
+
   // Exact frontend shared object and API reused for the whole suite.
   static hrx::hip::testing::HipDso dso_;
   // Function table resolved only from that shared object.
@@ -1384,41 +1446,16 @@ TEST_F(HipGraphMemoryApiTest,
 }
 
 TEST_F(HipGraphMemoryApiTest, PitchedCopyCloneReplaysItsOwnStaging) {
-  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
-  const hipMemcpy3DParms upload = {
-      .srcArray = nullptr,
-      .srcPos = {1, 0, 0},
-      .srcPtr = {source_.data(), 8, 8, 3},
-      .dstArray = nullptr,
-      .dstPos = {1, 0, 0},
-      .dstPtr = {device_, 8, 8, 3},
-      .extent = {4, 2, 2},
-      .kind = hipMemcpyHostToDevice,
-  };
-  hipGraphNode_t upload_node = nullptr;
-  ASSERT_EQ(hipSuccess,
-            api_.add_copy(&upload_node, graph_, nullptr, 0, &upload));
-  hipMemcpy3DParms download = upload;
-  download.srcPtr.ptr = device_;
-  download.dstPtr.ptr = destination_.data();
-  download.kind = hipMemcpyDeviceToHost;
-  hipGraphNode_t download_node = nullptr;
-  ASSERT_EQ(hipSuccess,
-            api_.add_copy(&download_node, graph_, &upload_node, 1, &download));
-  ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
-  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
-  graph_ = nullptr;
-  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, clone_, 0));
-  for (int replay = 0; replay < 2; ++replay) {
-    Replay();
-    ASSERT_FALSE(HasFatalFailure());
-    for (size_t i = 0; i < source_.size(); ++i) {
-      const bool copied = (i >= 1 && i < 5) || (i >= 9 && i < 13) ||
-                          (i >= 25 && i < 29) || (i >= 33 && i < 37);
-      EXPECT_EQ(destination_[i], copied ? source_[i] : 0) << i;
-    }
-    source_ = replacement_;
-  }
+  CheckPitchedCopyClone(false, false);
+}
+
+TEST_F(HipGraphMemoryApiTest, ImplicitSliceHeightIncludesStagedCopyOrigins) {
+  CheckPitchedCopyClone(true, false);
+}
+
+TEST_F(HipGraphMemoryApiTest,
+       ImplicitSliceHeightIncludesRegisteredCopyOrigins) {
+  CheckPitchedCopyClone(true, true);
 }
 
 TEST_F(HipGraphMemoryApiTest, StagedCopiesFollowPublicEnableAndDeletion) {

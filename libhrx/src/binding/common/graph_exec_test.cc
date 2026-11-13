@@ -1448,22 +1448,22 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
       sizeof(public_params), &public_operation, sizeof(public_operation),
       &operation, &owner, /*operation_count=*/1, &node));
   ASSERT_NE(node, nullptr);
-  ASSERT_EQ(1u,
-            iree_hal_streaming_graph_node_batch_mem_op(node)->operation_count);
+  ASSERT_EQ(1u, iree_hal_streaming_graph_node_batch_mem_op(node)
+                    ->command.operation_count);
   EXPECT_EQ(store_params.flags, iree_hal_streaming_graph_node_batch_mem_op(node)
-                                    ->operations[0]
+                                    ->command.operations[0]
                                     .params.store.flags);
   EXPECT_EQ(store_params.width, iree_hal_streaming_graph_node_batch_mem_op(node)
-                                    ->operations[0]
+                                    ->command.operations[0]
                                     .params.store.width);
   EXPECT_EQ(store_params.value, iree_hal_streaming_graph_node_batch_mem_op(node)
-                                    ->operations[0]
+                                    ->command.operations[0]
                                     .params.store.value);
   EXPECT_EQ(target.buffer, iree_hal_streaming_graph_node_batch_mem_op(node)
-                               ->operations[0]
+                               ->command.operations[0]
                                .target_buffer);
   EXPECT_EQ(target.offset, iree_hal_streaming_graph_node_batch_mem_op(node)
-                               ->operations[0]
+                               ->command.operations[0]
                                .target_offset);
 
   IREE_ASSERT_OK(iree_hal_streaming_graph_clone(

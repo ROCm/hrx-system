@@ -141,6 +141,9 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
       analysis.dependencies[analysis.order[i]++] = dependency->from->node_index;
       is_topologically_ordered &= dependency->from->node_index < i;
     }
+    if (analysis.flags[i] == HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
+      analysis.sources[i] = (void*)node->data;
+    }
   }
   for (const iree_hal_streaming_graph_edge_t* edge = extra_edges; edge;
        edge = edge->next) {

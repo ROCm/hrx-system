@@ -1324,28 +1324,40 @@ TEST_F(CpuStreamingMemoryTest, ExecutableCopiesOwnDistinctStaging) {
       const bool upload =
           iree_hal_streaming_graph_node_memcpy(node)->staging.direction ==
           IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD;
-      EXPECT_EQ(
-          nullptr,
-          upload ? iree_hal_streaming_graph_node_memcpy(node)->src_ref.buffer
-                 : iree_hal_streaming_graph_node_memcpy(node)->dst_ref.buffer);
+      EXPECT_EQ(nullptr, upload ? iree_hal_streaming_graph_node_memcpy(node)
+                                      ->command.copy.source_buffer
+                                : iree_hal_streaming_graph_node_memcpy(node)
+                                      ->command.copy.target_buffer);
       auto* first_node = iree_hal_streaming_graph_exec_lock_node(first, node);
       auto* second_node = iree_hal_streaming_graph_exec_lock_node(second, node);
       auto* first_buffer =
-          upload
-              ? iree_hal_streaming_graph_node_memcpy(first_node)->src_ref.buffer
-              : iree_hal_streaming_graph_node_memcpy(first_node)
-                    ->dst_ref.buffer;
+          upload ? iree_hal_streaming_graph_node_memcpy(first_node)
+                       ->command.copy.source_buffer
+                 : iree_hal_streaming_graph_node_memcpy(first_node)
+                       ->command.copy.target_buffer;
       auto* second_buffer =
           upload ? iree_hal_streaming_graph_node_memcpy(second_node)
-                       ->src_ref.buffer
+                       ->command.copy.source_buffer
                  : iree_hal_streaming_graph_node_memcpy(second_node)
-                       ->dst_ref.buffer;
+                       ->command.copy.target_buffer;
       EXPECT_NE(nullptr, first_buffer);
       EXPECT_NE(nullptr, second_buffer);
       EXPECT_NE(first_buffer, second_buffer);
-      EXPECT_NE(first_buffer->host_ptr, second_buffer->host_ptr);
       iree_hal_streaming_graph_exec_unlock(second);
       iree_hal_streaming_graph_exec_unlock(first);
+      iree_hal_buffer_mapping_t first_mapping = {};
+      iree_hal_buffer_mapping_t second_mapping = {};
+      IREE_EXPECT_OK(iree_hal_buffer_map_range(
+          first_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+          IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_MAP_FLAG_NONE, 0,
+          IREE_HAL_WHOLE_BUFFER, &first_mapping));
+      IREE_EXPECT_OK(iree_hal_buffer_map_range(
+          second_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+          IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_MAP_FLAG_NONE, 0,
+          IREE_HAL_WHOLE_BUFFER, &second_mapping));
+      EXPECT_NE(first_mapping.contents.data, second_mapping.contents.data);
+      IREE_EXPECT_OK(iree_hal_buffer_unmap_range(&second_mapping));
+      IREE_EXPECT_OK(iree_hal_buffer_unmap_range(&first_mapping));
     }
   }
   EXPECT_EQ(staged_copies, 2u);

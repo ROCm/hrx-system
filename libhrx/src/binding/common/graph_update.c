@@ -148,17 +148,18 @@ static bool iree_hal_streaming_graph_memcpy_update_is_compatible(
     const iree_hal_streaming_graph_memcpy_node_attrs_t* old_attrs,
     const iree_hal_streaming_graph_memcpy_node_attrs_t* new_attrs) {
   return old_attrs->hip_kind == new_attrs->hip_kind &&
-         old_attrs->size == new_attrs->size &&
-         old_attrs->execution_extent_width ==
-             new_attrs->execution_extent_width &&
-         old_attrs->execution_extent_height ==
-             new_attrs->execution_extent_height &&
-         old_attrs->execution_extent_depth ==
-             new_attrs->execution_extent_depth &&
-         old_attrs->execution_dst_pitch == new_attrs->execution_dst_pitch &&
-         old_attrs->execution_src_pitch == new_attrs->execution_src_pitch &&
-         old_attrs->execution_dst_ysize == new_attrs->execution_dst_ysize &&
-         old_attrs->execution_src_ysize == new_attrs->execution_src_ysize &&
+         old_attrs->command.copy.strided == new_attrs->command.copy.strided &&
+         old_attrs->command.copy.length == new_attrs->command.copy.length &&
+         old_attrs->command.row_count == new_attrs->command.row_count &&
+         old_attrs->command.slice_count == new_attrs->command.slice_count &&
+         old_attrs->command.source_row_stride ==
+             new_attrs->command.source_row_stride &&
+         old_attrs->command.target_row_stride ==
+             new_attrs->command.target_row_stride &&
+         old_attrs->command.source_slice_stride ==
+             new_attrs->command.source_slice_stride &&
+         old_attrs->command.target_slice_stride ==
+             new_attrs->command.target_slice_stride &&
          old_attrs->hip_extent_width == new_attrs->hip_extent_width &&
          old_attrs->hip_extent_height == new_attrs->hip_extent_height &&
          old_attrs->hip_extent_depth == new_attrs->hip_extent_depth &&
@@ -173,8 +174,8 @@ static bool iree_hal_streaming_graph_memcpy_update_is_compatible(
 static bool iree_hal_streaming_graph_memset_update_is_compatible(
     const iree_hal_streaming_graph_memset_node_attrs_t* old_attrs,
     const iree_hal_streaming_graph_memset_node_attrs_t* new_attrs) {
-  return old_attrs->pattern_size == new_attrs->pattern_size &&
-         old_attrs->count == new_attrs->count &&
+  return old_attrs->command.pattern_size == new_attrs->command.pattern_size &&
+         old_attrs->command.target.length == new_attrs->command.target.length &&
          old_attrs->hip_width == new_attrs->hip_width &&
          old_attrs->hip_height == new_attrs->hip_height &&
          old_attrs->hip_pitch == new_attrs->hip_pitch;

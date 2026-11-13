@@ -11,10 +11,10 @@
 extern "C" {
 #endif
 
-// Producer-resolved commands stored inline in frontend graph nodes. Buffers,
-// executables, and argument bytes remain owned by the frontend until recording;
-// retaining HAL command buffers capture their usual resource references. These
-// records add no owner, allocation, or replay-time translation.
+// Producer-resolved commands stored inline in frontend graph nodes. Resources
+// are borrowed under each producer's lifetime contract; argument storage is
+// graph-owned. Retaining HAL command buffers capture their usual references.
+// These records add no owner, allocation, or replay-time translation.
 enum hrx_command_kind_e {
   HRX_COMMAND_DISPATCH = 0,
   HRX_COMMAND_COPY,
@@ -168,7 +168,7 @@ iree_status_t hrx_command_record_atomics(
 
 // Records one scheduled workstream into an already open command buffer. The
 // source table contains resolved commands for recordable nodes and opaque
-// frontend nodes otherwise. Entry/exit synchronization and debug groups stay
+// frontend payloads otherwise. Entry/exit synchronization and debug groups stay
 // with the frontend; this walk emits only the analyzed dependency barriers and
 // accumulates the publication requirements of its commands.
 iree_status_t hrx_graph_record_commands(
