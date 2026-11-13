@@ -6,11 +6,9 @@ kernel.def @uniform_vector_unsigned_pair() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input_buffer: buffer, %divisor: i32, %result_buffer_0: buffer) {
+} launch(%input: f32, %divisor: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input_buffer[%fixture_base] : buffer -> view<64xf32>
-  %input = view.load %input_view[%fixture_lane] : view<64xf32> -> f32
   %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi32>
   %dividend = scalar.fptoui %input : f32 to i32
   %quotient, %remainder = scalar.divremui %dividend, %divisor : i32
@@ -20,37 +18,36 @@ kernel.def @uniform_vector_unsigned_pair() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "divisor"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_unsigned_pair(%divisor: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "input", arg1 = "divisor"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_unsigned_pair(%input: reg<amdgpu.sgpr>, %divisor: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %20 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  %input = global_load_b32_saddr %20, %input_view
-  %dividend = v_cvt_u32_f32 %input
-  %23 = v_mov_b32_copy %divisor
-  %24 = v_mov_b32 0
-  %25 = v_mov_b32 1
-  %26 = v_cvt_f32_u32 %23
-  %27 = v_rcp_f32 %26
-  %28 = v_mul_f32_lit %27, 1333788670
-  %29 = v_cvt_u32_f32 %28
-  %30 = v_mul_lo_u32 %23, %29
-  %31 = v_sub_nc_u32 %24, %30
-  %32 = v_mul_hi_u32 %29, %31
-  %33 = v_add_u32 %29, %32
-  %34 = v_mul_hi_u32 %dividend, %33
-  %35 = v_mul_lo_u32 %34, %23
-  %36 = v_sub_nc_u32 %dividend, %35
-  %37 = v_add_u32 %34, %25
-  %38, %39 = v_sub_co_u32 %36, %23
-  %40 = v_cndmask_b32 %37, %34, %39
-  %41 = v_cndmask_b32 %38, %36, %39
-  %42 = v_add_u32 %40, %25
-  %43, %44 = v_sub_co_u32 %41, %23
-  %quotient = v_cndmask_b32 %42, %40, %44
-  %remainder = v_cndmask_b32 %43, %41, %44
-  global_store_b32_saddr %20, %quotient, %result_view_0
-  global_store_b32_saddr %20, %remainder, %result_view_0 {offset = 256}
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = v_mov_b32_copy %input
+  %dividend = v_cvt_u32_f32 %18
+  %20 = v_mov_b32_copy %divisor
+  %21 = v_mov_b32 0
+  %22 = v_mov_b32 1
+  %23 = v_cvt_f32_u32 %20
+  %24 = v_rcp_f32 %23
+  %25 = v_mul_f32_lit %24, 1333788670
+  %26 = v_cvt_u32_f32 %25
+  %27 = v_mul_lo_u32 %20, %26
+  %28 = v_sub_nc_u32 %21, %27
+  %29 = v_mul_hi_u32 %26, %28
+  %30 = v_add_u32 %26, %29
+  %31 = v_mul_hi_u32 %dividend, %30
+  %32 = v_mul_lo_u32 %31, %20
+  %33 = v_sub_nc_u32 %dividend, %32
+  %34 = v_add_u32 %31, %22
+  %35, %36 = v_sub_co_u32 %33, %20
+  %37 = v_cndmask_b32 %34, %31, %36
+  %38 = v_cndmask_b32 %35, %33, %36
+  %39 = v_add_u32 %37, %22
+  %40, %41 = v_sub_co_u32 %38, %20
+  %quotient = v_cndmask_b32 %39, %37, %41
+  %remainder = v_cndmask_b32 %40, %38, %41
+  %44 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %44, %quotient, %result_view_0
+  global_store_b32_saddr %44, %remainder, %result_view_0 {offset = 256}
   return
 }
 
@@ -62,11 +59,9 @@ kernel.def @uniform_vector_signed_pair() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input_buffer: buffer, %divisor: i32, %result_buffer_0: buffer) {
+} launch(%input: f32, %divisor: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input_buffer[%fixture_base] : buffer -> view<64xf32>
-  %input = view.load %input_view[%fixture_lane] : view<64xf32> -> f32
   %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi32>
   %dividend = scalar.fptosi %input : f32 to i32
   %quotient, %remainder = scalar.divremsi %dividend, %divisor : i32
@@ -76,48 +71,47 @@ kernel.def @uniform_vector_signed_pair() {
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "divisor"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_signed_pair(%divisor: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "input", arg1 = "divisor"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_signed_pair(%input: reg<amdgpu.sgpr>, %divisor: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %20 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  %input = global_load_dword_saddr %20, %input_view : reg<amdgpu.vgpr>
-  %dividend = v_cvt_i32_f32 %input
-  %23 = v_mov_b32_copy %divisor
-  %24 = v_ashrrev_i32_src0_inline %dividend, 31
-  %25 = v_ashrrev_i32_src0_inline %23, 31
-  %26 = v_xor_b32 %dividend, %24
-  %27 = v_sub_u32 %26, %24
-  %28 = v_xor_b32 %23, %25
-  %29 = v_sub_u32 %28, %25
-  %30 = v_mov_b32 0
-  %31 = v_mov_b32 1
-  %32 = v_cvt_f32_u32 %29
-  %33 = v_rcp_f32 %32
-  %34 = v_mul_f32_lit %33, 1333788670
-  %35 = v_cvt_u32_f32 %34
-  %36 = v_mul_lo_u32 %29, %35
-  %37 = v_sub_u32 %30, %36
-  %38 = v_mul_hi_u32 %35, %37
-  %39 = v_add_u32 %35, %38
-  %40 = v_mul_hi_u32 %27, %39
-  %41 = v_mul_lo_u32 %40, %29
-  %42 = v_sub_u32 %27, %41
-  %43 = v_add_u32 %40, %31
-  %44, %45 = v_sub_co_u32 %42, %29
-  %46 = v_cndmask_b32 %43, %40, %45
-  %47 = v_cndmask_b32 %44, %42, %45
-  %48 = v_add_u32 %46, %31
-  %49, %50 = v_sub_co_u32 %47, %29
-  %51 = v_cndmask_b32 %48, %46, %50
-  %52 = v_cndmask_b32 %49, %47, %50
-  %53 = v_xor_b32 %24, %25
-  %54 = v_xor_b32 %51, %53
-  %quotient = v_sub_u32 %54, %53
-  %56 = v_xor_b32 %52, %24
-  %remainder = v_sub_u32 %56, %24
-  global_store_dword_saddr %20, %quotient, %result_view_0
-  global_store_dword_saddr %20, %remainder, %result_view_0 {offset = 256}
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = v_mov_b32_copy %input
+  %dividend = v_cvt_i32_f32 %18
+  %20 = v_mov_b32_copy %divisor
+  %21 = v_ashrrev_i32_src0_inline %dividend, 31
+  %22 = v_ashrrev_i32_src0_inline %20, 31
+  %23 = v_xor_b32 %dividend, %21
+  %24 = v_sub_u32 %23, %21
+  %25 = v_xor_b32 %20, %22
+  %26 = v_sub_u32 %25, %22
+  %27 = v_mov_b32 0
+  %28 = v_mov_b32 1
+  %29 = v_cvt_f32_u32 %26
+  %30 = v_rcp_f32 %29
+  %31 = v_mul_f32_lit %30, 1333788670
+  %32 = v_cvt_u32_f32 %31
+  %33 = v_mul_lo_u32 %26, %32
+  %34 = v_sub_u32 %27, %33
+  %35 = v_mul_hi_u32 %32, %34
+  %36 = v_add_u32 %32, %35
+  %37 = v_mul_hi_u32 %24, %36
+  %38 = v_mul_lo_u32 %37, %26
+  %39 = v_sub_u32 %24, %38
+  %40 = v_add_u32 %37, %28
+  %41, %42 = v_sub_co_u32 %39, %26
+  %43 = v_cndmask_b32 %40, %37, %42
+  %44 = v_cndmask_b32 %41, %39, %42
+  %45 = v_add_u32 %43, %28
+  %46, %47 = v_sub_co_u32 %44, %26
+  %48 = v_cndmask_b32 %45, %43, %47
+  %49 = v_cndmask_b32 %46, %44, %47
+  %50 = v_xor_b32 %21, %22
+  %51 = v_xor_b32 %48, %50
+  %quotient = v_sub_u32 %51, %50
+  %53 = v_xor_b32 %49, %21
+  %remainder = v_sub_u32 %53, %21
+  %55 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %55, %quotient, %result_view_0
+  global_store_dword_saddr %55, %remainder, %result_view_0 {offset = 256}
   return
 }
 
@@ -129,11 +123,9 @@ kernel.def @uniform_vector_index_pair() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input_buffer: buffer, %divisor_input: i32, %result_buffer_0: buffer) {
+} launch(%input: f64, %divisor_input: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input_buffer[%fixture_base] : buffer -> view<64xf64>
-  %input = view.load %input_view[%fixture_lane] : view<64xf64> -> f64
   %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi64>
   %converted = scalar.fptoui %input : f64 to i32
   %mask = scalar.constant 65535 : i32
@@ -152,41 +144,39 @@ kernel.def @uniform_vector_index_pair() {
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "divisor_input"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_index_pair(%divisor_input: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "input", arg1 = "divisor_input"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 4], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_index_pair(%input: reg<amdgpu.sgpr x2>, %divisor_input: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %input_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %29 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  %input = global_load_b64_saddr %29, %input_view
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %converted = v_cvt_u32_f64 %input
   %dividend = v_and_b32_lit %converted, 65535
   %divisor_masked = s_and_b32_lit %divisor_input, 65535
   %divisor = s_or_b32_rhs_inline %divisor_masked, 1
-  %35 = v_mov_b32_copy %divisor
-  %36 = v_mov_b32 0
-  %37 = v_mov_b32 1
-  %38 = v_cvt_f32_u32 %35
-  %39 = v_rcp_f32 %38
-  %40 = v_mul_f32_lit %39, 1333788670
-  %41 = v_cvt_u32_f32 %40
-  %42 = v_mul_lo_u32 %35, %41
-  %43 = v_sub_nc_u32 %36, %42
-  %44 = v_mul_hi_u32 %41, %43
-  %45 = v_add_u32 %41, %44
-  %46 = v_mul_hi_u32 %dividend, %45
-  %47 = v_mul_lo_u32 %46, %35
-  %48 = v_sub_nc_u32 %dividend, %47
-  %49 = v_add_u32 %46, %37
-  %50, %51 = v_sub_co_u32 %48, %35
-  %52 = v_cndmask_b32 %49, %46, %51
-  %53 = v_cndmask_b32 %50, %48, %51
-  %54 = v_add_u32 %52, %37
-  %55, %56 = v_sub_co_u32 %53, %35
-  %quotient = v_cndmask_b32 %54, %52, %56
-  %remainder = v_cndmask_b32 %55, %53, %56
-  %result_storage_0 = concat(%quotient, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %29, %result_storage_0, %result_view_0
-  %result_storage_1 = concat(%remainder, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %29, %result_storage_1, %result_view_0 {offset = 512}
+  %31 = v_mov_b32_copy %divisor
+  %32 = v_mov_b32 0
+  %33 = v_mov_b32 1
+  %34 = v_cvt_f32_u32 %31
+  %35 = v_rcp_f32 %34
+  %36 = v_mul_f32_lit %35, 1333788670
+  %37 = v_cvt_u32_f32 %36
+  %38 = v_mul_lo_u32 %31, %37
+  %39 = v_sub_nc_u32 %32, %38
+  %40 = v_mul_hi_u32 %37, %39
+  %41 = v_add_u32 %37, %40
+  %42 = v_mul_hi_u32 %dividend, %41
+  %43 = v_mul_lo_u32 %42, %31
+  %44 = v_sub_nc_u32 %dividend, %43
+  %45 = v_add_u32 %42, %33
+  %46, %47 = v_sub_co_u32 %44, %31
+  %48 = v_cndmask_b32 %45, %42, %47
+  %49 = v_cndmask_b32 %46, %44, %47
+  %50 = v_add_u32 %48, %33
+  %51, %52 = v_sub_co_u32 %49, %31
+  %quotient = v_cndmask_b32 %50, %48, %52
+  %remainder = v_cndmask_b32 %51, %49, %52
+  %result_storage_0 = concat(%quotient, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %57 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %57, %result_storage_0, %result_view_0
+  %result_storage_1 = concat(%remainder, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %57, %result_storage_1, %result_view_0 {offset = 512}
   return
 }

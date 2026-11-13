@@ -17,6 +17,7 @@ loom_corpus_test(
     name = "execution",
     allowed_failures = {
         X86_TASK_HARDWARE_PROFILE.name: {
+            "control/loop/vector_recurrence.loom:@packed_history_values": "TARGET/001,TARGET/002,TARGET/004,TARGET/031,TARGET/032",
             "function/rodata.loom:@immutable_gather_values": "X86/005",
             "numeric/conversion/f32_narrowing.loom:@f32_narrowing_values": "TARGET/031",
         },
@@ -27,6 +28,7 @@ loom_corpus_test(
         X86_TASK_HARDWARE_PROFILE.name: [
             "control/branch/convergence.loom",
             "control/loop/scalar_state.loom",
+            "control/loop/vector_recurrence.loom",
             "function/call/calls.loom",
             "function/call/direct.loom",
             "function/rodata.loom",

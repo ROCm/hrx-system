@@ -17,5 +17,6 @@ loom_check_test_suite(
         "call_policy.loom-test",
         "integer_division.loom-test",
         "native_invocation_facts.loom-test",
+        "vector_boundaries.loom-test",
     ],
 )

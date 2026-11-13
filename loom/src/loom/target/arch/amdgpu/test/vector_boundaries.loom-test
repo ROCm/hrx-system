@@ -1,0 +1,255 @@
+// RUN: pass specialize-target-callgraph,project-boundary-representations
+
+// Every AMDGPU vector storage family projects an unsupported callable carrier
+// into the largest admitted physical packets plus its exact irregular tail.
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_callable_family(%i1_value: vector<33xi1>, %i8_value: vector<129xi8>, %i16_value: vector<65xi16>, %i32_value: vector<33xi32>, %i64_value: vector<17xi64>, %f8e4m3_value: vector<129xf8E4M3>, %f8e5m2_value: vector<129xf8E5M2>, %f16_value: vector<65xf16>, %bf16_value: vector<65xbf16>, %f32_value: vector<33xf32>, %f64_value: vector<17xf64>) -> (vector<33xi1>, vector<129xi8>, vector<65xi16>, vector<33xi32>, vector<17xi64>, vector<129xf8E4M3>, vector<129xf8E5M2>, vector<65xf16>, vector<65xbf16>, vector<33xf32>, vector<17xf64>) {
+  func.return %i1_value, %i8_value, %i16_value, %i32_value, %i64_value, %f8e4m3_value, %f8e5m2_value, %f16_value, %bf16_value, %f32_value, %f64_value : vector<33xi1>, vector<129xi8>, vector<65xi16>, vector<33xi32>, vector<17xi64>, vector<129xf8E4M3>, vector<129xf8E5M2>, vector<65xf16>, vector<65xbf16>, vector<33xf32>, vector<17xf64>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_callable_family(%48: vector<32xi1>, %49: vector<1xi1>, %50: vector<64xi8>, %51: vector<64xi8>, %52: vector<1xi8>, %53: vector<32xi16>, %54: vector<32xi16>, %55: vector<1xi16>, %56: vector<32xi32>, %57: vector<1xi32>, %58: vector<16xi64>, %59: vector<1xi64>, %60: vector<64xf8E4M3>, %61: vector<64xf8E4M3>, %62: vector<1xf8E4M3>, %63: vector<64xf8E5M2>, %64: vector<64xf8E5M2>, %65: vector<1xf8E5M2>, %66: vector<64xf16>, %67: vector<1xf16>, %68: vector<64xbf16>, %69: vector<1xbf16>, %70: vector<32xf32>, %71: vector<1xf32>, %72: vector<16xf64>, %73: vector<1xf64>) -> (vector<32xi1>, vector<1xi1>, vector<64xi8>, vector<64xi8>, vector<1xi8>, vector<32xi16>, vector<32xi16>, vector<1xi16>, vector<32xi32>, vector<1xi32>, vector<16xi64>, vector<1xi64>, vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3>, vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2>, vector<64xf16>, vector<1xf16>, vector<64xbf16>, vector<1xbf16>, vector<32xf32>, vector<1xf32>, vector<16xf64>, vector<1xf64>) {
+  %i1_value = vector.concat<0> %48, %49 : vector<32xi1>, vector<1xi1> -> vector<33xi1>
+  %i8_value = vector.concat<0> %50, %51, %52 : vector<64xi8>, vector<64xi8>, vector<1xi8> -> vector<129xi8>
+  %i16_value = vector.concat<0> %53, %54, %55 : vector<32xi16>, vector<32xi16>, vector<1xi16> -> vector<65xi16>
+  %i32_value = vector.concat<0> %56, %57 : vector<32xi32>, vector<1xi32> -> vector<33xi32>
+  %i64_value = vector.concat<0> %58, %59 : vector<16xi64>, vector<1xi64> -> vector<17xi64>
+  %f8e4m3_value = vector.concat<0> %60, %61, %62 : vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3> -> vector<129xf8E4M3>
+  %f8e5m2_value = vector.concat<0> %63, %64, %65 : vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2> -> vector<129xf8E5M2>
+  %f16_value = vector.concat<0> %66, %67 : vector<64xf16>, vector<1xf16> -> vector<65xf16>
+  %bf16_value = vector.concat<0> %68, %69 : vector<64xbf16>, vector<1xbf16> -> vector<65xbf16>
+  %f32_value = vector.concat<0> %70, %71 : vector<32xf32>, vector<1xf32> -> vector<33xf32>
+  %f64_value = vector.concat<0> %72, %73 : vector<16xf64>, vector<1xf64> -> vector<17xf64>
+  func.return %48, %49, %50, %51, %52, %53, %54, %55, %56, %57, %58, %59, %60, %61, %62, %63, %64, %65, %66, %67, %68, %69, %70, %71, %72, %73 : vector<32xi1>, vector<1xi1>, vector<64xi8>, vector<64xi8>, vector<1xi8>, vector<32xi16>, vector<32xi16>, vector<1xi16>, vector<32xi32>, vector<1xi32>, vector<16xi64>, vector<1xi64>, vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3>, vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2>, vector<64xf16>, vector<1xf16>, vector<64xbf16>, vector<1xbf16>, vector<32xf32>, vector<1xf32>, vector<16xf64>, vector<1xf64>
+}
+
+// ====
+
+// Retained calls transport the same packet schema through caller operands,
+// callee arguments, call results, and both function result boundaries.
+// RUN: pass specialize-target-callgraph,project-boundary-representations,canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline target(@target) @wide_identity(%value: vector<36xf32>) -> (vector<36xf32>) {
+  func.return %value : vector<36xf32>
+}
+
+func.def public target(@target) @wide_call(%value: vector<36xf32>) -> (vector<36xf32>) {
+  %result = func.call noinline @wide_identity(%value) : (vector<36xf32>) -> (vector<36xf32>)
+  func.return %result : vector<36xf32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline target(@target) @wide_identity(%12: vector<32xf32>, %13: vector<4xf32>) -> (vector<32xf32>, vector<4xf32>) {
+  func.return %12, %13 : vector<32xf32>, vector<4xf32>
+}
+
+func.def public target(@target) @wide_call(%16: vector<32xf32>, %17: vector<4xf32>) -> (vector<32xf32>, vector<4xf32>) {
+  %5, %6 = func.call pure noinline @wide_identity(%16, %17) : (vector<32xf32>, vector<4xf32>) -> (vector<32xf32>, vector<4xf32>)
+  func.return %5, %6 : vector<32xf32>, vector<4xf32>
+}
+
+// ====
+
+// Projected function and CFG carriers feed the shared component planner
+// directly. Arithmetic keeps the 32-lane packet and four-lane tail rather
+// than reconstructing a 36-lane carrier at either branch edge.
+// RUN: pass specialize-target-callgraph,project-boundary-representations,target-legalize{mode=complete,boundaries=projected},canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_cfg_arithmetic(%lhs: vector<36xf32>, %rhs: vector<36xf32>, %condition: i1) -> (vector<36xf32>) {
+  cfg.cond_br %condition, ^add, ^subtract
+^add:
+  %sum = vector.addf %lhs, %rhs : vector<36xf32>
+  cfg.br ^join(%sum: vector<36xf32>)
+^subtract:
+  %difference = vector.subf %lhs, %rhs : vector<36xf32>
+  cfg.br ^join(%difference: vector<36xf32>)
+^join(%result: vector<36xf32>):
+  func.return %result : vector<36xf32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_cfg_arithmetic(%17: vector<32xf32>, %18: vector<4xf32>, %19: vector<32xf32>, %20: vector<4xf32>, %condition: i1) -> (vector<32xf32>, vector<4xf32>) {
+  cfg.br ^_bb1(%17: vector<32xf32>, %18: vector<4xf32>, %19: vector<32xf32>, %20: vector<4xf32>, %condition: i1)
+^_bb1(%7: vector<32xf32>, %0: vector<4xf32>, %9: vector<32xf32>, %1: vector<4xf32>, %2: i1):
+  cfg.cond_br %2, ^_bb2, ^_bb3
+^_bb2:
+  %24 = vector.addf %7, %9 : vector<32xf32>
+  %25 = vector.addf %0, %1 : vector<4xf32>
+  cfg.br ^_bb4(%24: vector<32xf32>, %25: vector<4xf32>)
+^_bb3:
+  %27 = vector.subf %7, %9 : vector<32xf32>
+  %28 = vector.subf %0, %1 : vector<4xf32>
+  cfg.br ^_bb4(%27: vector<32xf32>, %28: vector<4xf32>)
+^_bb4(%11: vector<32xf32>, %6: vector<4xf32>):
+  func.return %11, %6 : vector<32xf32>, vector<4xf32>
+}
+
+// ====
+
+// Callable boundaries still project into bounded packets. A native bitcast
+// keeps the full logical value between those boundaries; its concatenation,
+// alias, and slices lower as register wiring without arithmetic instructions.
+// RUN: pass specialize-target-callgraph,project-boundary-representations,target-legalize{mode=complete,boundaries=projected},canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_bitcast(%input: vector<64xf32>) -> (vector<64xi32>) {
+  %bits = vector.bitcast %input : vector<64xf32> to vector<64xi32>
+  func.return %bits : vector<64xi32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_bitcast(%7: vector<32xf32>, %8: vector<32xf32>) -> (vector<32xi32>, vector<32xi32>) {
+  %input = vector.concat<0> %7, %8 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+  %bits = vector.bitcast %input : vector<64xf32> to vector<64xi32>
+  %5 = vector.slice %bits[0] : vector<64xi32> -> vector<32xi32>
+  %6 = vector.slice %bits[32] : vector<64xi32> -> vector<32xi32>
+  func.return %5, %6 : vector<32xi32>, vector<32xi32>
+}
+
+// ====
+
+// Packed conversions project both their logical-lane and packed-storage
+// widths. Unsigned and signed unpacking retain exact tails, while packing a
+// wide logical input produces target-native packed fragments.
+// RUN: pass specialize-target-callgraph,project-boundary-representations,target-legalize{mode=complete,boundaries=projected},canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_bitunpacku(%packed: vector<65xi8>) -> (vector<65xi32>) {
+  %unpacked = vector.bitunpacku<8> %packed : vector<65xi8> -> vector<65xi32>
+  func.return %unpacked : vector<65xi32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_bitunpacku(%8: vector<64xi8>, %9: vector<1xi8>) -> (vector<32xi32>, vector<32xi32>, vector<1xi32>) {
+  %21 = vector.slice %8[0] : vector<64xi8> -> vector<32xi8>
+  %14 = vector.bitunpacku<8> %21 : vector<32xi8> -> vector<32xi32>
+  %20 = vector.slice %8[32] : vector<64xi8> -> vector<32xi8>
+  %16 = vector.bitunpacku<8> %20 : vector<32xi8> -> vector<32xi32>
+  %18 = vector.bitunpacku<8> %9 : vector<1xi8> -> vector<1xi32>
+  func.return %14, %16, %18 : vector<32xi32>, vector<32xi32>, vector<1xi32>
+}
+
+// ====
+
+// RUN: pass specialize-target-callgraph,project-boundary-representations,target-legalize{mode=complete,boundaries=projected},canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_bitunpacks_tail(%packed: vector<17xi8>) -> (vector<34xi32>) {
+  %unpacked = vector.bitunpacks<4> %packed : vector<17xi8> -> vector<34xi32>
+  func.return %unpacked : vector<34xi32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_bitunpacks_tail(%packed: vector<17xi8>) -> (vector<32xi32>, vector<2xi32>) {
+  %8 = vector.slice %packed[0] : vector<17xi8> -> vector<16xi8>
+  %9 = vector.bitunpacks<4> %8 : vector<16xi8> -> vector<32xi32>
+  %10 = vector.slice %packed[16] : vector<17xi8> -> vector<1xi8>
+  %11 = vector.bitunpacks<4> %10 : vector<1xi8> -> vector<2xi32>
+  func.return %9, %11 : vector<32xi32>, vector<2xi32>
+}
+
+// ====
+
+// RUN: pass specialize-target-callgraph,project-boundary-representations,target-legalize{mode=complete,boundaries=projected},canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_bitpack(%values: vector<64xi32>) -> (vector<32xi8>) {
+  %packed = vector.bitpack<4> %values : vector<64xi32> -> vector<32xi8>
+  func.return %packed : vector<32xi8>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_bitpack(%5: vector<32xi32>, %6: vector<32xi32>) -> (vector<32xi8>) {
+  %9 = vector.bitpack<4> %5 : vector<32xi32> -> vector<16xi8>
+  %11 = vector.bitpack<4> %6 : vector<32xi32> -> vector<16xi8>
+  %packed = vector.concat<0> %9, %11 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  func.return %packed : vector<32xi8>
+}
+
+// ====
+
+// Packet preparation rewrites an oversized load immediately before its
+// consumer component. Reporting retains the load's authored contract result
+// even though the load is not itself a component member.
+// RUN: with-checks compile-report specialize-target-callgraph,project-boundary-representations,target-legalize{mode=complete,boundaries=projected},canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @report_packetized_load_root(%input: buffer, %rhs: vector<36xf32>) -> (vector<36xf32>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<36xf32>
+  %values = vector.load %input_view[0] : view<36xf32> -> vector<36xf32>
+  %result = vector.addf %values, %rhs : vector<36xf32>
+  func.return %result : vector<36xf32>
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization[*] function=report_packetized_load_root source_op=vector.load mode=final policy=prefer-native action=rewritten outcome=target-rewrite contract=unhandled legalizer=vector-packet strategy=target bundle=target config=target scalarized=false source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=10 erased_ops=2
+
+// ====
+
+// Predicate bitstreams split at the native 32-mask carrier boundary while
+// preserving packed byte tails in both directions.
+// RUN: pass specialize-target-callgraph,project-boundary-representations,target-legalize{mode=complete,boundaries=projected},canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_predicate_bitunpack(%packed: vector<5xi8>) -> (vector<40xi1>) {
+  %unpacked = vector.bitunpacku<1> %packed : vector<5xi8> -> vector<40xi1>
+  func.return %unpacked : vector<40xi1>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_predicate_bitunpack(%packed: vector<5xi8>) -> (vector<32xi1>, vector<8xi1>) {
+  %8 = vector.slice %packed[0] : vector<5xi8> -> vector<4xi8>
+  %9 = vector.bitunpacku<1> %8 : vector<4xi8> -> vector<32xi1>
+  %10 = vector.slice %packed[4] : vector<5xi8> -> vector<1xi8>
+  %11 = vector.bitunpacku<1> %10 : vector<1xi8> -> vector<8xi1>
+  func.return %9, %11 : vector<32xi1>, vector<8xi1>
+}
+
+// ====
+
+// RUN: pass specialize-target-callgraph,project-boundary-representations,target-legalize{mode=complete,boundaries=projected},canonicalize,dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_predicate_bitpack(%predicates: vector<40xi1>) -> (vector<5xi8>) {
+  %packed = vector.bitpack<1> %predicates : vector<40xi1> -> vector<5xi8>
+  func.return %packed : vector<5xi8>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @wide_predicate_bitpack(%5: vector<32xi1>, %6: vector<8xi1>) -> (vector<5xi8>) {
+  %9 = vector.bitpack<1> %5 : vector<32xi1> -> vector<4xi8>
+  %11 = vector.bitpack<1> %6 : vector<8xi1> -> vector<1xi8>
+  %packed = vector.concat<0> %9, %11 : vector<4xi8>, vector<1xi8> -> vector<5xi8>
+  func.return %packed : vector<5xi8>
+}

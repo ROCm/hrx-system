@@ -1,6 +1,7 @@
 // RUN: emit source-low target=amdgpu:gfx90a output=low
 
-// Integer carriers preserve uniform storage through the floating-point bitcast.
+// Launch arguments preserve uniform storage through the floating-point bitcast.
+// Repeated reads of one scalar tuple consume only one source slot.
 kernel.def @uniform_binary() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
@@ -8,36 +9,48 @@ kernel.def @uniform_binary() {
 } launch(%lhs_bits: i64, %rhs_bits: i64, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<3x64xf64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<6x64xf64>
   %lhs = scalar.bitcast %lhs_bits : i64 to f64
   %rhs = scalar.bitcast %rhs_bits : i64 to f64
   %sum = scalar.addf %lhs, %rhs : f64
   %difference = scalar.subf %lhs, %rhs : f64
   %product = scalar.mulf %lhs, %rhs : f64
-  view.store %sum, %result_view_0[0, %fixture_lane] : f64, view<3x64xf64>
-  view.store %difference, %result_view_0[1, %fixture_lane] : f64, view<3x64xf64>
-  view.store %product, %result_view_0[2, %fixture_lane] : f64, view<3x64xf64>
+  view.store %sum, %result_view_0[0, %fixture_lane] : f64, view<6x64xf64>
+  view.store %difference, %result_view_0[1, %fixture_lane] : f64, view<6x64xf64>
+  view.store %product, %result_view_0[2, %fixture_lane] : f64, view<6x64xf64>
+  %repeated_sum = scalar.addf %lhs, %lhs : f64
+  %repeated_product = scalar.mulf %lhs, %lhs : f64
+  %repeated_fma = scalar.fmaf %lhs, %lhs, %lhs : f64
+  view.store %repeated_sum, %result_view_0[3, %fixture_lane] : f64, view<6x64xf64>
+  view.store %repeated_product, %result_view_0[4, %fixture_lane] : f64, view<6x64xf64>
+  view.store %repeated_fma, %result_view_0[5, %fixture_lane] : f64, view<6x64xf64>
   kernel.return
 }
 
 // ----
 low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 4, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs_bits", arg1 = "rhs_bits"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 8], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_binary(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 1536, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %22 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = v_mov_b32_copy %22
-  %24 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %25 = v_mov_b32_copy %24
-  %26 = concat(%23, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %sum = v_add_f64 %lhs, %26
-  %32 = concat(%23, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %difference = v_sub_f64 %lhs, %32
-  %38 = concat(%23, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %product = v_mul_f64 %lhs, %38
-  %40 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_dwordx2_saddr %40, %sum, %result_view_0
-  global_store_dwordx2_saddr %40, %difference, %result_view_0 {offset = 512}
-  global_store_dwordx2_saddr %40, %product, %result_view_0 {offset = 1024}
+  %result_view_0 = resource<hal_binding> {extent = 3072, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %31 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %31
+  %33 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = v_mov_b32_copy %33
+  %35 = concat(%32, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %sum = v_add_f64 %lhs, %35
+  %41 = concat(%32, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %difference = v_sub_f64 %lhs, %41
+  %47 = concat(%32, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %product = v_mul_f64 %lhs, %47
+  %49 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_dwordx2_saddr %49, %sum, %result_view_0
+  global_store_dwordx2_saddr %49, %difference, %result_view_0 {offset = 512}
+  global_store_dwordx2_saddr %49, %product, %result_view_0 {offset = 1024}
+  %repeated_sum = v_add_f64 %lhs, %lhs
+  %repeated_product = v_mul_f64 %lhs, %lhs
+  %repeated_fma = v_fma_f64 %lhs, %lhs, %lhs
+  global_store_dwordx2_saddr %49, %repeated_sum, %result_view_0 {offset = 1536}
+  global_store_dwordx2_saddr %49, %repeated_product, %result_view_0 {offset = 2048}
+  global_store_dwordx2_saddr %49, %repeated_fma, %result_view_0 {offset = 2560}
   return
 }
 
@@ -84,27 +97,6 @@ low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 2, direct_
   global_store_dwordx2_saddr %26, %right_difference, %captured {offset = 1024}
   global_store_dwordx2_saddr %26, %product, %captured {offset = 1536}
   return
-}
-
-// ====
-
-// RUN: emit source-low target=amdgpu:gfx90a output=low
-
-// Repeated reads of the same scalar tuple consume one source slot.
-func.def @repeated_source(%bits: i64) -> (f64, f64, f64) {
-  %value = scalar.bitcast %bits : i64 to f64
-  %sum = scalar.addf %value, %value : f64
-  %product = scalar.mulf %value, %value : f64
-  %fused = scalar.fmaf %value, %value, %value : f64
-  func.return %sum, %product, %fused : f64, f64, f64
-}
-
-// ----
-low.func.def target<amdgpu.cdna2.core> abi(hal_kernel) @repeated_source(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
-  %sum = v_add_f64 %value, %value
-  %product = v_mul_f64 %value, %value
-  %fused = v_fma_f64 %value, %value, %value
-  return %sum, %product, %fused
 }
 
 // ====

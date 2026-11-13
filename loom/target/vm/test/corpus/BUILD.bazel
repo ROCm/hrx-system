@@ -162,6 +162,7 @@ loom_corpus_test(
     profile_sources = {
         VM_REFERENCE_PROFILE.name: [
             "control/loop/scalar_state.loom",
+            "control/loop/vector_recurrence.loom",
             "function/call/calls.loom",
             "function/call/direct.loom",
             "function/template/library.loom",
