@@ -14,6 +14,7 @@ package(
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
+        "artifact_diagnostics.loom-test",
         "assembly.loom-test",
         "loop_termination.loom-test",
         "memory_offsets.loom-test",

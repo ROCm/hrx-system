@@ -1,0 +1,93 @@
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+// ERROR@+1: TARGET/056 {export="tuple_i32", value_kind="parameter", value_name="value", actual_type="reg<wasm.i32 x2>", expected_constraint="one register unit"}
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @tuple_i32(%value: reg<wasm.i32 x2>) asm {
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+// ERROR@+1: TARGET/056 {export="tuple_i64", value_kind="parameter", value_name="value", actual_type="reg<wasm.i64 x2>", expected_constraint="one register unit"}
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @tuple_i64(%value: reg<wasm.i64 x2>) asm {
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+// ERROR@+1: TARGET/056 {export="tuple_f32", value_kind="parameter", value_name="value", actual_type="reg<wasm.f32 x2>", expected_constraint="one register unit"}
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @tuple_f32(%value: reg<wasm.f32 x2>) asm {
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+// ERROR@+1: TARGET/056 {export="tuple_f64", value_kind="parameter", value_name="value", actual_type="reg<wasm.f64 x2>", expected_constraint="one register unit"}
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @tuple_f64(%value: reg<wasm.f64 x2>) asm {
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+// ERROR@+1: TARGET/056 {export="tuple_v128", value_kind="parameter", value_name="value", actual_type="reg<wasm.v128 x2>", expected_constraint="one register unit"}
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @tuple_v128(%value: reg<wasm.v128 x2>) asm {
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+// ERROR@+1: TARGET/056 {export="tuple_result", value_kind="result", actual_type="reg<wasm.i32 x2>", expected_constraint="one register unit"}
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @tuple_result(%left: reg<wasm.i32>, %right: reg<wasm.i32>) -> (reg<wasm.i32 x2>) asm {
+  %pair = concat(%left, %right) : (reg<wasm.i32>, reg<wasm.i32>) -> reg<wasm.i32 x2>
+  return %pair
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+// ERROR@+1: BACKEND/055 {format="Wasm", constraint="function definitions; module imports are not supported"}
+low.func.decl target<wasm.core.simd128>(@target) @external()
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @caller() asm {
+  low.func.call @external() : ()
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @local_storage() asm {
+  // ERROR@+1: BACKEND/055 {format="Wasm", export="local_storage", constraint="an operation supported by Wasm instruction emission"}
+  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  return
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @valid_sibling() asm {
+  return
+}
+
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @nested_storage(%condition: reg<wasm.i32>) asm {
+  low.scf.if %condition {
+    // ERROR@+1: BACKEND/055 {format="Wasm", export="nested_storage", constraint="an operation supported by Wasm instruction emission"}
+    %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  }
+  return
+}

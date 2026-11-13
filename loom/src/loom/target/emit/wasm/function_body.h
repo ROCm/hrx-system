@@ -15,6 +15,7 @@
 #define LOOM_TARGET_EMIT_WASM_FUNCTION_BODY_H_
 
 #include "iree/base/api.h"
+#include "loom/error/emitter.h"
 #include "loom/target/emit/wasm/program.h"
 
 #ifdef __cplusplus
@@ -51,10 +52,13 @@ void loom_wasm_function_body_deinitialize(loom_wasm_function_body_t* body,
 // Emits a size-prefixed Wasm code-section function body from one planned
 // function plan. Physical locals and direct-call targets are trusted facts in
 // |program|; the writer may append private locals required by Wasm encoding.
+// Rejection emits source diagnostics and leaves |out_accepted| false. Statuses
+// report only allocation or diagnostic-sink failures.
 iree_status_t loom_wasm_emit_function_body(
     const loom_wasm_program_plan_t* program,
-    const loom_wasm_function_plan_t* function, iree_allocator_t allocator,
-    loom_wasm_function_body_t* out_body);
+    const loom_wasm_function_plan_t* function,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_allocator_t allocator,
+    bool* out_accepted, loom_wasm_function_body_t* out_body);
 
 #ifdef __cplusplus
 }  // extern "C"

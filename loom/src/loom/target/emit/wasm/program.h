@@ -50,6 +50,8 @@ typedef struct loom_wasm_function_plan_t {
   loom_value_ordinal_t value_count;
   // Borrowed module symbol name.
   iree_string_view_t name;
+  // Original export identity, or the authored export for direct Low input.
+  iree_string_view_t source_export_name;
   // Borrowed export name, or empty when the function is module-private.
   iree_string_view_t export_name;
   // WebAssembly function index assigned by module symbol order.

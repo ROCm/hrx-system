@@ -25,8 +25,8 @@ typedef enum loom_wasm_value_type_e {
 
 // Resolves a descriptor-set-local Wasm register class ID to the Wasm binary
 // value-type byte used in local declarations and allocated value emission.
-iree_status_t loom_wasm_value_type_from_descriptor_register_class(
-    uint16_t descriptor_reg_class_id, loom_wasm_value_type_t* out_value_type);
+loom_wasm_value_type_t loom_wasm_value_type_from_descriptor_register_class(
+    uint16_t descriptor_reg_class_id);
 
 #ifdef __cplusplus
 }  // extern "C"
