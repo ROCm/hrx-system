@@ -6,15 +6,11 @@ kernel.def target(@target) @scalar_float_uniform() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs_i32: i32, %rhs_i32: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer) {
+} launch(%lhs_i32: i32, %rhs_i32: i32, %result_buffer_0: buffer, %result_buffer_4: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xf32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xf32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xf32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xf32>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<4x64xf32>
+  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<2x64xi32>
   %lhs = scalar.sitofp %lhs_i32 : i32 to f32
   %rhs = scalar.uitofp %rhs_i32 : i32 to f32
   %sum = scalar.addf %lhs, %rhs : f32
@@ -34,35 +30,31 @@ kernel.def target(@target) @scalar_float_uniform() {
   %selected = scf.select %condition, %ceil, %floor : f32
   %signed = scalar.fptosi %rounded : f32 to i32
   %unsigned = scalar.fptoui %truncated : f32 to i32
-  view.store %selected, %result_view_0[%fixture_lane] : f32, view<64xf32>
-  view.store %rounded, %result_view_1[%fixture_lane] : f32, view<64xf32>
-  view.store %truncated, %result_view_2[%fixture_lane] : f32, view<64xf32>
-  view.store %sum_from_f16, %result_view_3[%fixture_lane] : f32, view<64xf32>
-  view.store %signed, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %unsigned, %result_view_5[%fixture_lane] : i32, view<64xi32>
+  view.store %selected, %result_view_0[0, %fixture_lane] : f32, view<4x64xf32>
+  view.store %rounded, %result_view_0[1, %fixture_lane] : f32, view<4x64xf32>
+  view.store %truncated, %result_view_0[2, %fixture_lane] : f32, view<4x64xf32>
+  view.store %sum_from_f16, %result_view_0[3, %fixture_lane] : f32, view<4x64xf32>
+  view.store %signed, %result_view_4[0, %fixture_lane] : i32, view<2x64xi32>
+  view.store %unsigned, %result_view_4[1, %fixture_lane] : i32, view<2x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs_i32", arg1 = "rhs_i32"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 8, resource_count = 6, resource_offsets = [8, 16, 24, 32, 40, 48], resource_parameter_indices = [2, 3, 4, 5, 6, 7], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_float_uniform(%lhs_i32: reg<amdgpu.sgpr>, %rhs_i32: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs_i32", arg1 = "rhs_i32"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_float_uniform(%lhs_i32: reg<amdgpu.sgpr>, %rhs_i32: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_4 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %lhs = s_cvt_f32_i32 %lhs_i32
   %rhs = s_cvt_f32_u32 %rhs_i32
   %sum = s_add_f32 %lhs, %rhs
   %difference = s_sub_f32 %sum, %lhs
   %product = s_mul_f32 %sum, %difference
-  %51 = s_max_f32 %product, %product
-  %52 = s_max_f32 %sum, %sum
-  %minimum = s_min_f32 %51, %52
-  %54 = s_max_f32 %minimum, %minimum
-  %55 = s_max_f32 %difference, %difference
-  %maximum = s_max_f32 %54, %55
+  %47 = s_max_f32 %product, %product
+  %48 = s_max_f32 %sum, %sum
+  %minimum = s_min_f32 %47, %48
+  %50 = s_max_f32 %minimum, %minimum
+  %51 = s_max_f32 %difference, %difference
+  %maximum = s_max_f32 %50, %51
   %ceil = s_ceil_f32 %maximum
   %floor = s_floor_f32 %maximum
   %rounded = s_rndne_f32 %maximum
@@ -75,19 +67,19 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count =
   %selected = s_cselect_b32 %ceil, %floor, %condition
   %signed = s_cvt_i32_f32 %rounded
   %unsigned = s_cvt_u32_f32 %truncated
-  %69 = v_mov_b32_copy %selected
-  %70 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %70, %69, %result_view_0
-  %71 = v_mov_b32_copy %rounded
-  global_store_b32_saddr %70, %71, %result_view_1
-  %73 = v_mov_b32_copy %truncated
-  global_store_b32_saddr %70, %73, %result_view_2
-  %75 = v_mov_b32_copy %sum_from_f16
-  global_store_b32_saddr %70, %75, %result_view_3
-  %77 = v_mov_b32_copy %signed
-  global_store_b32_saddr %70, %77, %result_view_4
-  %79 = v_mov_b32_copy %unsigned
-  global_store_b32_saddr %70, %79, %result_view_5
+  %65 = v_mov_b32_copy %selected
+  %66 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %66, %65, %result_view_0
+  %67 = v_mov_b32_copy %rounded
+  global_store_b32_saddr %66, %67, %result_view_0 {offset = 256}
+  %69 = v_mov_b32_copy %truncated
+  global_store_b32_saddr %66, %69, %result_view_0 {offset = 512}
+  %71 = v_mov_b32_copy %sum_from_f16
+  global_store_b32_saddr %66, %71, %result_view_0 {offset = 768}
+  %73 = v_mov_b32_copy %signed
+  global_store_b32_saddr %66, %73, %result_view_4
+  %75 = v_mov_b32_copy %unsigned
+  global_store_b32_saddr %66, %75, %result_view_4 {offset = 256}
   return
 }
 

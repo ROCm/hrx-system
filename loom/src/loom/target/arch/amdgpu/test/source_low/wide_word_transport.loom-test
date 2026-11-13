@@ -7,46 +7,40 @@ kernel.def target(@target) @uniform_words() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%low_input: i32, %high_input: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer) {
+} launch(%low_input: i32, %high_input: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<4x64xi64>
   %c32 = scalar.constant 32 : i64
   %low = scalar.extui %low_input : i32 to i64
   %high_word = scalar.extui %high_input : i32 to i64
   %high = scalar.shli %high_word, %c32 : i64
   %joined_or = scalar.ori %high, %low : i64
   %joined_xor = scalar.xori %low, %high : i64
-  view.store %joined_or, %result_view_0[%fixture_lane] : i64, view<64xi64>
-  view.store %joined_xor, %result_view_1[%fixture_lane] : i64, view<64xi64>
-  view.store %low, %result_view_2[%fixture_lane] : i64, view<64xi64>
-  view.store %high, %result_view_3[%fixture_lane] : i64, view<64xi64>
+  view.store %joined_or, %result_view_0[0, %fixture_lane] : i64, view<4x64xi64>
+  view.store %joined_xor, %result_view_0[1, %fixture_lane] : i64, view<4x64xi64>
+  view.store %low, %result_view_0[2, %fixture_lane] : i64, view<4x64xi64>
+  view.store %high, %result_view_0[3, %fixture_lane] : i64, view<4x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "low_input", arg1 = "high_input"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 6, resource_count = 4, resource_offsets = [8, 16, 24, 32], resource_parameter_indices = [2, 3, 4, 5], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_words(%low_input: reg<amdgpu.sgpr>, %high_input: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "low_input", arg1 = "high_input"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_words(%low_input: reg<amdgpu.sgpr>, %high_input: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %27 = s_mov_b32 0
-  %41 = v_mov_b32_copy %low_input
-  %43 = v_mov_b32_copy %high_input
-  %44 = concat(%41, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %45 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_dwordx2_saddr %45, %44, %result_view_0
-  %50 = concat(%41, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_dwordx2_saddr %45, %50, %result_view_1
-  %55 = v_mov_b32_copy %27
-  %56 = concat(%41, %55) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_dwordx2_saddr %45, %56, %result_view_2
-  %62 = concat(%55, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_dwordx2_saddr %45, %62, %result_view_3
+  %result_view_0 = resource<hal_binding> {extent = 2048, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %25 = s_mov_b32 0
+  %39 = v_mov_b32_copy %low_input
+  %41 = v_mov_b32_copy %high_input
+  %42 = concat(%39, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %43 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_dwordx2_saddr %43, %42, %result_view_0
+  %48 = concat(%39, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %43, %48, %result_view_0 {offset = 512}
+  %53 = v_mov_b32_copy %25
+  %54 = concat(%39, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %43, %54, %result_view_0 {offset = 1024}
+  %60 = concat(%53, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %43, %60, %result_view_0 {offset = 1536}
   return
 }
 
@@ -123,15 +117,10 @@ kernel.def target(@target) @uniform_shifts() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%value: i64, %count_input: i64, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer) {
+} launch(%value: i64, %count_input: i64, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi64>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<6x64xi64>
   %count = scalar.assume %count_input [range(%count_input, 0, 63)] : i64
   %c32 = scalar.constant 32 : i64
   %left = scalar.shli %value, %count : i64
@@ -140,65 +129,60 @@ kernel.def target(@target) @uniform_shifts() {
   %word_left = scalar.shli %value, %c32 : i64
   %word_logical = scalar.shrui %value, %c32 : i64
   %word_signed = scalar.shrsi %value, %c32 : i64
-  view.store %left, %result_view_0[%fixture_lane] : i64, view<64xi64>
-  view.store %logical, %result_view_1[%fixture_lane] : i64, view<64xi64>
-  view.store %signed, %result_view_2[%fixture_lane] : i64, view<64xi64>
-  view.store %word_left, %result_view_3[%fixture_lane] : i64, view<64xi64>
-  view.store %word_logical, %result_view_4[%fixture_lane] : i64, view<64xi64>
-  view.store %word_signed, %result_view_5[%fixture_lane] : i64, view<64xi64>
+  view.store %left, %result_view_0[0, %fixture_lane] : i64, view<6x64xi64>
+  view.store %logical, %result_view_0[1, %fixture_lane] : i64, view<6x64xi64>
+  view.store %signed, %result_view_0[2, %fixture_lane] : i64, view<6x64xi64>
+  view.store %word_left, %result_view_0[3, %fixture_lane] : i64, view<6x64xi64>
+  view.store %word_logical, %result_view_0[4, %fixture_lane] : i64, view<6x64xi64>
+  view.store %word_signed, %result_view_0[5, %fixture_lane] : i64, view<6x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 4, direct_arg_count = 2, direct_arg_names = {arg0 = "value", arg1 = "count_input"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 8], parameter_count = 8, resource_count = 6, resource_offsets = [16, 24, 32, 40, 48, 56], resource_parameter_indices = [2, 3, 4, 5, 6, 7], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_shifts(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) asm {
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 4, direct_arg_count = 2, direct_arg_names = {arg0 = "value", arg1 = "count_input"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [8, 8], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_shifts(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 512, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 512, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %35 = s_mov_b32 32
-  %38 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %left = s_lshl_b64 %value, %38
-  %logical = s_lshr_b64 %value, %38
-  %signed = s_ashr_i64 %value, %38
-  %44 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %45 = s_mov_b32 0
-  %47 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %word_signed = s_ashr_i64 %value, %35
-  %52 = slice %left[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %53 = v_mov_b32_copy %52
-  %54 = slice %left[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %result_view_0 = resource<hal_binding> {extent = 3072, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %31 = s_mov_b32 32
+  %34 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %left = s_lshl_b64 %value, %34
+  %logical = s_lshr_b64 %value, %34
+  %signed = s_ashr_i64 %value, %34
+  %40 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = s_mov_b32 0
+  %43 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %word_signed = s_ashr_i64 %value, %31
+  %48 = slice %left[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = v_mov_b32_copy %48
+  %50 = slice %left[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %51 = v_mov_b32_copy %50
+  %52 = concat(%49, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %53 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_dwordx2_saddr %53, %52, %result_view_0
+  %54 = slice %logical[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %55 = v_mov_b32_copy %54
-  %56 = concat(%53, %55) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %57 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_dwordx2_saddr %57, %56, %result_view_0
-  %58 = slice %logical[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %59 = v_mov_b32_copy %58
-  %60 = slice %logical[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = slice %logical[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57 = v_mov_b32_copy %56
+  %58 = concat(%55, %57) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %53, %58, %result_view_0 {offset = 512}
+  %60 = slice %signed[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %61 = v_mov_b32_copy %60
-  %62 = concat(%59, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_dwordx2_saddr %57, %62, %result_view_1
-  %64 = slice %signed[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %65 = v_mov_b32_copy %64
-  %66 = slice %signed[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %67 = v_mov_b32_copy %66
-  %68 = concat(%65, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_dwordx2_saddr %57, %68, %result_view_2
-  %71 = v_mov_b32_copy %45
-  %73 = v_mov_b32_copy %44
-  %74 = concat(%71, %73) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_dwordx2_saddr %57, %74, %result_view_3
-  %77 = v_mov_b32_copy %47
-  %80 = concat(%77, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_dwordx2_saddr %57, %80, %result_view_4
-  %82 = slice %word_signed[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %83 = v_mov_b32_copy %82
-  %84 = slice %word_signed[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %85 = v_mov_b32_copy %84
-  %86 = concat(%83, %85) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_dwordx2_saddr %57, %86, %result_view_5
+  %62 = slice %signed[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = v_mov_b32_copy %62
+  %64 = concat(%61, %63) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %53, %64, %result_view_0 {offset = 1024}
+  %67 = v_mov_b32_copy %41
+  %69 = v_mov_b32_copy %40
+  %70 = concat(%67, %69) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %53, %70, %result_view_0 {offset = 1536}
+  %73 = v_mov_b32_copy %43
+  %76 = concat(%73, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %53, %76, %result_view_0 {offset = 2048}
+  %78 = slice %word_signed[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %79 = v_mov_b32_copy %78
+  %80 = slice %word_signed[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %81 = v_mov_b32_copy %80
+  %82 = concat(%79, %81) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %53, %82, %result_view_0 {offset = 2560}
   return
 }
 

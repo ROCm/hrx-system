@@ -4,14 +4,10 @@ kernel.def @uniform_lhs_index_operands() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input: buffer, %uniform: index, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer) {
+} launch(%input: buffer, %uniform: index, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<5x64xi64>
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<64xi32>
@@ -23,50 +19,46 @@ kernel.def @uniform_lhs_index_operands() {
   %xor = index.xori %uniform, %value : index
   %subtract = index.sub %uniform, %value : index
   %multiply_stored = index.cast %multiply : index to i64
-  view.store %multiply_stored, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %multiply_stored, %result_view_0[0, %fixture_lane] : i64, view<5x64xi64>
   %and_stored = index.cast %and : index to i64
-  view.store %and_stored, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %and_stored, %result_view_0[1, %fixture_lane] : i64, view<5x64xi64>
   %or_stored = index.cast %or : index to i64
-  view.store %or_stored, %result_view_2[%fixture_lane] : i64, view<64xi64>
+  view.store %or_stored, %result_view_0[2, %fixture_lane] : i64, view<5x64xi64>
   %xor_stored = index.cast %xor : index to i64
-  view.store %xor_stored, %result_view_3[%fixture_lane] : i64, view<64xi64>
+  view.store %xor_stored, %result_view_0[3, %fixture_lane] : i64, view<5x64xi64>
   %subtract_stored = index.cast %subtract : index to i64
-  view.store %subtract_stored, %result_view_4[%fixture_lane] : i64, view<64xi64>
+  view.store %subtract_stored, %result_view_0[4, %fixture_lane] : i64, view<5x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 7, resource_count = 6, resource_offsets = [0, 16, 24, 32, 40, 48], resource_parameter_indices = [0, 2, 3, 4, 5, 6], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_lhs_index_operands(%uniform: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_lhs_index_operands(%uniform: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 512, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 512, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %39 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  %value = global_load_b32_saddr %39, %input_view
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %27 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  %value = global_load_b32_saddr %27, %input_view
   %multiply = v_mul_lo_u32 %uniform, %value
   %and = v_and_b32 %uniform, %value
   %or = v_or_b32 %uniform, %value
   %xor = v_xor_b32 %uniform, %value
   %subtract = v_sub_nc_u32 %uniform, %value
-  %46 = v_ashrrev_i32_src0_inline %multiply, 31
-  %multiply_stored = concat(%multiply, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %48 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_b64_saddr %48, %multiply_stored, %result_view_0
-  %49 = v_ashrrev_i32_src0_inline %and, 31
-  %and_stored = concat(%and, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %48, %and_stored, %result_view_1
-  %52 = v_ashrrev_i32_src0_inline %or, 31
-  %or_stored = concat(%or, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %48, %or_stored, %result_view_2
-  %55 = v_ashrrev_i32_src0_inline %xor, 31
-  %xor_stored = concat(%xor, %55) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %48, %xor_stored, %result_view_3
-  %58 = v_ashrrev_i32_src0_inline %subtract, 31
-  %subtract_stored = concat(%subtract, %58) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %48, %subtract_stored, %result_view_4
+  %34 = v_ashrrev_i32_src0_inline %multiply, 31
+  %multiply_stored = concat(%multiply, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %36 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %36, %multiply_stored, %result_view_0
+  %37 = v_ashrrev_i32_src0_inline %and, 31
+  %and_stored = concat(%and, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %36, %and_stored, %result_view_0 {offset = 512}
+  %40 = v_ashrrev_i32_src0_inline %or, 31
+  %or_stored = concat(%or, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %36, %or_stored, %result_view_0 {offset = 1024}
+  %43 = v_ashrrev_i32_src0_inline %xor, 31
+  %xor_stored = concat(%xor, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %36, %xor_stored, %result_view_0 {offset = 1536}
+  %46 = v_ashrrev_i32_src0_inline %subtract, 31
+  %subtract_stored = concat(%subtract, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %36, %subtract_stored, %result_view_0 {offset = 2048}
   return
 }
 
@@ -76,14 +68,10 @@ kernel.def @uniform_rhs_index_operands() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input: buffer, %uniform: index, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer) {
+} launch(%input: buffer, %uniform: index, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<5x64xi64>
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<64xi32>
@@ -95,51 +83,47 @@ kernel.def @uniform_rhs_index_operands() {
   %xor = index.xori %value, %uniform : index
   %subtract = index.sub %value, %uniform : index
   %multiply_stored = index.cast %multiply : index to i64
-  view.store %multiply_stored, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %multiply_stored, %result_view_0[0, %fixture_lane] : i64, view<5x64xi64>
   %and_stored = index.cast %and : index to i64
-  view.store %and_stored, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %and_stored, %result_view_0[1, %fixture_lane] : i64, view<5x64xi64>
   %or_stored = index.cast %or : index to i64
-  view.store %or_stored, %result_view_2[%fixture_lane] : i64, view<64xi64>
+  view.store %or_stored, %result_view_0[2, %fixture_lane] : i64, view<5x64xi64>
   %xor_stored = index.cast %xor : index to i64
-  view.store %xor_stored, %result_view_3[%fixture_lane] : i64, view<64xi64>
+  view.store %xor_stored, %result_view_0[3, %fixture_lane] : i64, view<5x64xi64>
   %subtract_stored = index.cast %subtract : index to i64
-  view.store %subtract_stored, %result_view_4[%fixture_lane] : i64, view<64xi64>
+  view.store %subtract_stored, %result_view_0[4, %fixture_lane] : i64, view<5x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 7, resource_count = 6, resource_offsets = [0, 16, 24, 32, 40, 48], resource_parameter_indices = [0, 2, 3, 4, 5, 6], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_rhs_index_operands(%uniform: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "uniform"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_rhs_index_operands(%uniform: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 512, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 512, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %39 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  %value = global_load_b32_saddr %39, %input_view
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %27 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  %value = global_load_b32_saddr %27, %input_view
   %multiply = v_mul_lo_u32 %uniform, %value
   %and = v_and_b32 %uniform, %value
   %or = v_or_b32 %uniform, %value
   %xor = v_xor_b32 %uniform, %value
-  %45 = v_mov_b32_copy %uniform
-  %subtract = v_sub_nc_u32 %value, %45
-  %47 = v_ashrrev_i32_src0_inline %multiply, 31
-  %multiply_stored = concat(%multiply, %47) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %49 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_b64_saddr %49, %multiply_stored, %result_view_0
-  %50 = v_ashrrev_i32_src0_inline %and, 31
-  %and_stored = concat(%and, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %49, %and_stored, %result_view_1
-  %53 = v_ashrrev_i32_src0_inline %or, 31
-  %or_stored = concat(%or, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %49, %or_stored, %result_view_2
-  %56 = v_ashrrev_i32_src0_inline %xor, 31
-  %xor_stored = concat(%xor, %56) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %49, %xor_stored, %result_view_3
-  %59 = v_ashrrev_i32_src0_inline %subtract, 31
-  %subtract_stored = concat(%subtract, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %49, %subtract_stored, %result_view_4
+  %33 = v_mov_b32_copy %uniform
+  %subtract = v_sub_nc_u32 %value, %33
+  %35 = v_ashrrev_i32_src0_inline %multiply, 31
+  %multiply_stored = concat(%multiply, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %37 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %37, %multiply_stored, %result_view_0
+  %38 = v_ashrrev_i32_src0_inline %and, 31
+  %and_stored = concat(%and, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %37, %and_stored, %result_view_0 {offset = 512}
+  %41 = v_ashrrev_i32_src0_inline %or, 31
+  %or_stored = concat(%or, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %37, %or_stored, %result_view_0 {offset = 1024}
+  %44 = v_ashrrev_i32_src0_inline %xor, 31
+  %xor_stored = concat(%xor, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %37, %xor_stored, %result_view_0 {offset = 1536}
+  %47 = v_ashrrev_i32_src0_inline %subtract, 31
+  %subtract_stored = concat(%subtract, %47) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %37, %subtract_stored, %result_view_0 {offset = 2048}
   return
 }
 
@@ -149,13 +133,10 @@ kernel.def @constant_index_operands() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input: buffer, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer) {
+} launch(%input: buffer, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<4x64xi64>
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<64xi32>
@@ -170,43 +151,40 @@ kernel.def @constant_index_operands() {
   %toggled = index.xori %value, %negative : index
   %scaled = index.mul %factor, %value : index
   %masked_stored = index.cast %masked : index to i64
-  view.store %masked_stored, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %masked_stored, %result_view_0[0, %fixture_lane] : i64, view<4x64xi64>
   %tagged_stored = index.cast %tagged : index to i64
-  view.store %tagged_stored, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %tagged_stored, %result_view_0[1, %fixture_lane] : i64, view<4x64xi64>
   %toggled_stored = index.cast %toggled : index to i64
-  view.store %toggled_stored, %result_view_2[%fixture_lane] : i64, view<64xi64>
+  view.store %toggled_stored, %result_view_0[2, %fixture_lane] : i64, view<4x64xi64>
   %scaled_stored = index.cast %scaled : index to i64
-  view.store %scaled_stored, %result_view_3[%fixture_lane] : i64, view<64xi64>
+  view.store %scaled_stored, %result_view_0[3, %fixture_lane] : i64, view<4x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 5, resource_count = 5, resource_offsets = [0, 8, 16, 24, 32], resource_parameter_indices = [0, 1, 2, 3, 4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @constant_index_operands() asm {
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @constant_index_operands() asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 512, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %36 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  %value = global_load_b32_saddr %36, %input_view
+  %result_view_0 = resource<hal_binding> {extent = 2048, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %27 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  %value = global_load_b32_saddr %27, %input_view
   %masked = v_and_b32_src0_inline %value, 64
   %tagged = v_or_b32_lit %value, 128
   %toggled = v_xor_b32_lit %value, 4294967280
   %scaled = v_mul_lo_u32_src0_lit %value, 65
-  %46 = v_mov_b32 0
-  %masked_stored = concat(%masked, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %48 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_b64_saddr %48, %masked_stored, %result_view_0
-  %49 = v_ashrrev_i32_src0_inline %tagged, 31
-  %tagged_stored = concat(%tagged, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %48, %tagged_stored, %result_view_1
-  %52 = v_ashrrev_i32_src0_inline %toggled, 31
-  %toggled_stored = concat(%toggled, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %48, %toggled_stored, %result_view_2
-  %55 = v_ashrrev_i32_src0_inline %scaled, 31
-  %scaled_stored = concat(%scaled, %55) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %48, %scaled_stored, %result_view_3
+  %37 = v_mov_b32 0
+  %masked_stored = concat(%masked, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %39, %masked_stored, %result_view_0
+  %40 = v_ashrrev_i32_src0_inline %tagged, 31
+  %tagged_stored = concat(%tagged, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %39, %tagged_stored, %result_view_0 {offset = 512}
+  %43 = v_ashrrev_i32_src0_inline %toggled, 31
+  %toggled_stored = concat(%toggled, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %39, %toggled_stored, %result_view_0 {offset = 1024}
+  %46 = v_ashrrev_i32_src0_inline %scaled, 31
+  %scaled_stored = concat(%scaled, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %39, %scaled_stored, %result_view_0 {offset = 1536}
   return
 }
 
@@ -216,86 +194,78 @@ kernel.def @uniform_index_operands() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs: index, %rhs: index, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer) {
+} launch(%lhs: index, %rhs: index, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<5x64xi64>
   %multiply = index.mul %lhs, %rhs : index
   %and = index.andi %lhs, %rhs : index
   %or = index.ori %lhs, %rhs : index
   %xor = index.xori %lhs, %rhs : index
   %subtract = index.sub %lhs, %rhs : index
   %multiply_stored = index.cast %multiply : index to i64
-  view.store %multiply_stored, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %multiply_stored, %result_view_0[0, %fixture_lane] : i64, view<5x64xi64>
   %and_stored = index.cast %and : index to i64
-  view.store %and_stored, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %and_stored, %result_view_0[1, %fixture_lane] : i64, view<5x64xi64>
   %or_stored = index.cast %or : index to i64
-  view.store %or_stored, %result_view_2[%fixture_lane] : i64, view<64xi64>
+  view.store %or_stored, %result_view_0[2, %fixture_lane] : i64, view<5x64xi64>
   %xor_stored = index.cast %xor : index to i64
-  view.store %xor_stored, %result_view_3[%fixture_lane] : i64, view<64xi64>
+  view.store %xor_stored, %result_view_0[3, %fixture_lane] : i64, view<5x64xi64>
   %subtract_stored = index.cast %subtract : index to i64
-  view.store %subtract_stored, %result_view_4[%fixture_lane] : i64, view<64xi64>
+  view.store %subtract_stored, %result_view_0[4, %fixture_lane] : i64, view<5x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs", arg1 = "rhs"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 7, resource_count = 5, resource_offsets = [8, 16, 24, 32, 40], resource_parameter_indices = [2, 3, 4, 5, 6], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_index_operands(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs", arg1 = "rhs"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_index_operands(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 512, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %multiply = s_mul_i32 %lhs, %rhs
   %and = s_and_b32 %lhs, %rhs
   %or = s_or_b32 %lhs, %rhs
   %xor = s_xor_b32 %lhs, %rhs
   %subtract = s_sub_u32 %lhs, %rhs
-  %39 = s_ashr_i32_rhs_inline %multiply, 31
-  %multiply_stored = concat(%multiply, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %41 = slice %multiply_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %42 = v_mov_b32_copy %41
-  %43 = slice %multiply_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %44 = v_mov_b32_copy %43
-  %45 = concat(%42, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %46 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_b64_saddr %46, %45, %result_view_0
-  %47 = s_ashr_i32_rhs_inline %and, 31
-  %and_stored = concat(%and, %47) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %49 = slice %and_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %50 = v_mov_b32_copy %49
-  %51 = slice %and_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %52 = v_mov_b32_copy %51
-  %53 = concat(%50, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %46, %53, %result_view_1
-  %55 = s_ashr_i32_rhs_inline %or, 31
-  %or_stored = concat(%or, %55) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %57 = slice %or_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %58 = v_mov_b32_copy %57
-  %59 = slice %or_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %60 = v_mov_b32_copy %59
-  %61 = concat(%58, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %46, %61, %result_view_2
-  %63 = s_ashr_i32_rhs_inline %xor, 31
-  %xor_stored = concat(%xor, %63) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %65 = slice %xor_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %66 = v_mov_b32_copy %65
-  %67 = slice %xor_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %68 = v_mov_b32_copy %67
-  %69 = concat(%66, %68) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %46, %69, %result_view_3
-  %71 = s_ashr_i32_rhs_inline %subtract, 31
-  %subtract_stored = concat(%subtract, %71) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %73 = slice %subtract_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %74 = v_mov_b32_copy %73
-  %75 = slice %subtract_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %76 = v_mov_b32_copy %75
-  %77 = concat(%74, %76) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %46, %77, %result_view_4
+  %27 = s_ashr_i32_rhs_inline %multiply, 31
+  %multiply_stored = concat(%multiply, %27) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %29 = slice %multiply_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = v_mov_b32_copy %29
+  %31 = slice %multiply_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %31
+  %33 = concat(%30, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %34 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %34, %33, %result_view_0
+  %35 = s_ashr_i32_rhs_inline %and, 31
+  %and_stored = concat(%and, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %37 = slice %and_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = v_mov_b32_copy %37
+  %39 = slice %and_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = v_mov_b32_copy %39
+  %41 = concat(%38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %34, %41, %result_view_0 {offset = 512}
+  %43 = s_ashr_i32_rhs_inline %or, 31
+  %or_stored = concat(%or, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %45 = slice %or_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %46 = v_mov_b32_copy %45
+  %47 = slice %or_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %48 = v_mov_b32_copy %47
+  %49 = concat(%46, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %34, %49, %result_view_0 {offset = 1024}
+  %51 = s_ashr_i32_rhs_inline %xor, 31
+  %xor_stored = concat(%xor, %51) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %53 = slice %xor_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = v_mov_b32_copy %53
+  %55 = slice %xor_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = v_mov_b32_copy %55
+  %57 = concat(%54, %56) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %34, %57, %result_view_0 {offset = 1536}
+  %59 = s_ashr_i32_rhs_inline %subtract, 31
+  %subtract_stored = concat(%subtract, %59) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %61 = slice %subtract_stored[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %62 = v_mov_b32_copy %61
+  %63 = slice %subtract_stored[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %64 = v_mov_b32_copy %63
+  %65 = concat(%62, %64) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %34, %65, %result_view_0 {offset = 2048}
   return
 }
 
@@ -305,14 +275,10 @@ kernel.def @varying_index_operands() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input: buffer, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer) {
+} launch(%input: buffer, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<5x64xi64>
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<64x2xi32>
@@ -326,50 +292,46 @@ kernel.def @varying_index_operands() {
   %xor = index.xori %lhs, %rhs : index
   %subtract = index.sub %lhs, %rhs : index
   %multiply_stored = index.cast %multiply : index to i64
-  view.store %multiply_stored, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %multiply_stored, %result_view_0[0, %fixture_lane] : i64, view<5x64xi64>
   %and_stored = index.cast %and : index to i64
-  view.store %and_stored, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %and_stored, %result_view_0[1, %fixture_lane] : i64, view<5x64xi64>
   %or_stored = index.cast %or : index to i64
-  view.store %or_stored, %result_view_2[%fixture_lane] : i64, view<64xi64>
+  view.store %or_stored, %result_view_0[2, %fixture_lane] : i64, view<5x64xi64>
   %xor_stored = index.cast %xor : index to i64
-  view.store %xor_stored, %result_view_3[%fixture_lane] : i64, view<64xi64>
+  view.store %xor_stored, %result_view_0[3, %fixture_lane] : i64, view<5x64xi64>
   %subtract_stored = index.cast %subtract : index to i64
-  view.store %subtract_stored, %result_view_4[%fixture_lane] : i64, view<64xi64>
+  view.store %subtract_stored, %result_view_0[4, %fixture_lane] : i64, view<5x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 6, resource_count = 6, resource_offsets = [0, 8, 16, 24, 32, 40], resource_parameter_indices = [0, 1, 2, 3, 4, 5], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_index_operands() asm {
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_index_operands() asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 512, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 512, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %39 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  %lhs = global_load_b32_saddr %39, %input_view
-  %rhs = global_load_b32_saddr %39, %input_view {offset = 4}
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %27 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  %lhs = global_load_b32_saddr %27, %input_view
+  %rhs = global_load_b32_saddr %27, %input_view {offset = 4}
   %multiply = v_mul_lo_u32 %lhs, %rhs
   %and = v_and_b32 %lhs, %rhs
   %or = v_or_b32 %lhs, %rhs
   %xor = v_xor_b32 %lhs, %rhs
   %subtract = v_sub_nc_u32 %lhs, %rhs
-  %48 = v_ashrrev_i32_src0_inline %multiply, 31
-  %multiply_stored = concat(%multiply, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %39, %multiply_stored, %result_view_0
-  %51 = v_ashrrev_i32_src0_inline %and, 31
-  %and_stored = concat(%and, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %39, %and_stored, %result_view_1
-  %54 = v_ashrrev_i32_src0_inline %or, 31
-  %or_stored = concat(%or, %54) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %39, %or_stored, %result_view_2
-  %57 = v_ashrrev_i32_src0_inline %xor, 31
-  %xor_stored = concat(%xor, %57) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %39, %xor_stored, %result_view_3
-  %60 = v_ashrrev_i32_src0_inline %subtract, 31
-  %subtract_stored = concat(%subtract, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %39, %subtract_stored, %result_view_4
+  %36 = v_ashrrev_i32_src0_inline %multiply, 31
+  %multiply_stored = concat(%multiply, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %27, %multiply_stored, %result_view_0
+  %39 = v_ashrrev_i32_src0_inline %and, 31
+  %and_stored = concat(%and, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %27, %and_stored, %result_view_0 {offset = 512}
+  %42 = v_ashrrev_i32_src0_inline %or, 31
+  %or_stored = concat(%or, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %27, %or_stored, %result_view_0 {offset = 1024}
+  %45 = v_ashrrev_i32_src0_inline %xor, 31
+  %xor_stored = concat(%xor, %45) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %27, %xor_stored, %result_view_0 {offset = 1536}
+  %48 = v_ashrrev_i32_src0_inline %subtract, 31
+  %subtract_stored = concat(%subtract, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %27, %subtract_stored, %result_view_0 {offset = 2048}
   return
 }
 

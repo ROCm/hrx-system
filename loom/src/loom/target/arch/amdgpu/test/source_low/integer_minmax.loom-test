@@ -4,44 +4,38 @@ kernel.def @uniform_integer_extrema() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs: i32, %rhs: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer) {
+} launch(%lhs: i32, %rhs: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<4x64xi32>
   %signed_minimum = scalar.minsi %lhs, %rhs : i32
   %signed_maximum = scalar.maxsi %lhs, %rhs : i32
   %unsigned_minimum = scalar.minui %lhs, %rhs : i32
   %unsigned_maximum = scalar.maxui %lhs, %rhs : i32
-  view.store %signed_minimum, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %signed_maximum, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %unsigned_minimum, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %unsigned_maximum, %result_view_3[%fixture_lane] : i32, view<64xi32>
+  view.store %signed_minimum, %result_view_0[0, %fixture_lane] : i32, view<4x64xi32>
+  view.store %signed_maximum, %result_view_0[1, %fixture_lane] : i32, view<4x64xi32>
+  view.store %unsigned_minimum, %result_view_0[2, %fixture_lane] : i32, view<4x64xi32>
+  view.store %unsigned_maximum, %result_view_0[3, %fixture_lane] : i32, view<4x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs", arg1 = "rhs"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 6, resource_count = 4, resource_offsets = [8, 16, 24, 32], resource_parameter_indices = [2, 3, 4, 5], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_integer_extrema(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "lhs", arg1 = "rhs"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_integer_extrema(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %signed_minimum = s_min_i32 %lhs, %rhs
   %signed_maximum = s_max_i32 %lhs, %rhs
   %unsigned_minimum = s_min_u32 %lhs, %rhs
   %unsigned_maximum = s_max_u32 %lhs, %rhs
-  %29 = v_mov_b32_copy %signed_minimum
-  %30 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %30, %29, %result_view_0
-  %31 = v_mov_b32_copy %signed_maximum
-  global_store_b32_saddr %30, %31, %result_view_1
-  %33 = v_mov_b32_copy %unsigned_minimum
-  global_store_b32_saddr %30, %33, %result_view_2
-  %35 = v_mov_b32_copy %unsigned_maximum
-  global_store_b32_saddr %30, %35, %result_view_3
+  %27 = v_mov_b32_copy %signed_minimum
+  %28 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %28, %27, %result_view_0
+  %29 = v_mov_b32_copy %signed_maximum
+  global_store_b32_saddr %28, %29, %result_view_0 {offset = 256}
+  %31 = v_mov_b32_copy %unsigned_minimum
+  global_store_b32_saddr %28, %31, %result_view_0 {offset = 512}
+  %33 = v_mov_b32_copy %unsigned_maximum
+  global_store_b32_saddr %28, %33, %result_view_0 {offset = 768}
   return
 }
 
@@ -87,46 +81,40 @@ kernel.def @uniform_constant_integer_extrema() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%value: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer) {
+} launch(%value: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<4x64xi32>
   %inline = scalar.constant 7 : i32
   %literal = scalar.constant 305419896 : i32
   %signed_minimum = scalar.minsi %value, %inline : i32
   %signed_maximum = scalar.maxsi %inline, %value : i32
   %unsigned_minimum = scalar.minui %value, %literal : i32
   %unsigned_maximum = scalar.maxui %literal, %value : i32
-  view.store %signed_minimum, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %signed_maximum, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %unsigned_minimum, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %unsigned_maximum, %result_view_3[%fixture_lane] : i32, view<64xi32>
+  view.store %signed_minimum, %result_view_0[0, %fixture_lane] : i32, view<4x64xi32>
+  view.store %signed_maximum, %result_view_0[1, %fixture_lane] : i32, view<4x64xi32>
+  view.store %unsigned_minimum, %result_view_0[2, %fixture_lane] : i32, view<4x64xi32>
+  view.store %unsigned_maximum, %result_view_0[3, %fixture_lane] : i32, view<4x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 5, resource_count = 4, resource_offsets = [8, 16, 24, 32], resource_parameter_indices = [1, 2, 3, 4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_constant_integer_extrema(%value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_constant_integer_extrema(%value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %signed_minimum = s_min_i32_rhs_inline %value, 7
   %signed_maximum = s_max_i32_rhs_inline %value, 7
   %unsigned_minimum = s_min_u32_lit %value, 305419896
   %unsigned_maximum = s_max_u32_lit %value, 305419896
-  %29 = v_mov_b32_copy %signed_minimum
-  %30 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %30, %29, %result_view_0
-  %31 = v_mov_b32_copy %signed_maximum
-  global_store_b32_saddr %30, %31, %result_view_1
-  %33 = v_mov_b32_copy %unsigned_minimum
-  global_store_b32_saddr %30, %33, %result_view_2
-  %35 = v_mov_b32_copy %unsigned_maximum
-  global_store_b32_saddr %30, %35, %result_view_3
+  %27 = v_mov_b32_copy %signed_minimum
+  %28 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %28, %27, %result_view_0
+  %29 = v_mov_b32_copy %signed_maximum
+  global_store_b32_saddr %28, %29, %result_view_0 {offset = 256}
+  %31 = v_mov_b32_copy %unsigned_minimum
+  global_store_b32_saddr %28, %31, %result_view_0 {offset = 512}
+  %33 = v_mov_b32_copy %unsigned_maximum
+  global_store_b32_saddr %28, %33, %result_view_0 {offset = 768}
   return
 }
 

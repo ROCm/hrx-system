@@ -8,25 +8,23 @@ kernel.def target(@target) @uniform_wide_signed_division() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%value: i64, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+} launch(%value: i64, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi64>
   %c5 = scalar.constant 5 : i64
   %cn3 = scalar.constant -3 : i64
   %quotient = scalar.divsi %value, %c5 : i64
   %remainder = scalar.remsi %value, %cn3 : i64
-  view.store %quotient, %result_view_0[%fixture_lane] : i64, view<64xi64>
-  view.store %remainder, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %quotient, %result_view_0[0, %fixture_lane] : i64, view<2x64xi64>
+  view.store %remainder, %result_view_0[1, %fixture_lane] : i64, view<2x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_wide_signed_division(%value: reg<amdgpu.sgpr x2>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_wide_signed_division(%value: reg<amdgpu.sgpr x2>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %17 = s_mov_b32 1717986919
   %18 = s_mov_b32 1717986918
   %19 = concat(%17, %18) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
@@ -113,7 +111,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %230 = v_mov_b32_copy %218
   %232 = v_mov_b32_copy %220
   %233 = concat(%230, %232) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %228, %233, %result_view_1
+  global_store_b64_saddr %228, %233, %result_view_0 {offset = 512}
   return
 }
 

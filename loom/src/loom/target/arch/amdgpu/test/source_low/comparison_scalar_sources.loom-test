@@ -188,13 +188,12 @@ kernel.def @uniform_vector_sources() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input: buffer, %varying_buffer: buffer, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+} launch(%input: buffer, %varying_buffer: buffer, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
   %varying_view = buffer.view %varying_buffer[%fixture_base] : buffer -> view<64x4xi32>
   %varying = vector.load %varying_view[%fixture_lane, 0] : view<64x4xi32> -> vector<4xi32>
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64x4xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64x4xi32>
   %base = index.constant 0 : offset
   %constant_input = buffer.assume.memory_space<constant> %input : buffer
   %view = buffer.view %constant_input[%base] : buffer -> view<8xi32>
@@ -203,51 +202,50 @@ kernel.def @uniform_vector_sources() {
   %reverse = vector.cmpi uge, %varying, %uniform : vector<4xi32> -> vector<4xi1>
   %forward_words = vector.extui %forward : vector<4xi1> to vector<4xi32>
   %reverse_words = vector.extui %reverse : vector<4xi1> to vector<4xi32>
-  vector.store %forward_words, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
-  vector.store %reverse_words, %result_view_1[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  vector.store %forward_words, %result_view_0[0, %fixture_lane, 0] : vector<4xi32>, view<2x64x4xi32>
+  vector.store %reverse_words, %result_view_0[1, %fixture_lane, 0] : vector<4xi32>, view<2x64x4xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 4, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_sources() asm {
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_sources() asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %varying_view = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 1024, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 1024, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %37 = v_lshlrev_b32_src0_inline %fixture_lane, 4
-  %varying = global_load_dwordx4_saddr %37, %varying_view : reg<amdgpu.vgpr x4>
-  %39 = s_mov_b32 0
-  %uniform = s_load_dwordx4 %view, %39
-  %41 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %42 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %43 = v_cmp_lt_i32 %41, %42
-  %44 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %45 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %46 = v_cmp_lt_i32 %44, %45
-  %47 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %48 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %49 = v_cmp_lt_i32 %47, %48
-  %50 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %51 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %52 = v_cmp_lt_i32 %50, %51
-  %56 = v_cmp_ge_u32 %42, %41
-  %59 = v_cmp_ge_u32 %45, %44
-  %62 = v_cmp_ge_u32 %48, %47
-  %65 = v_cmp_ge_u32 %51, %50
-  %72 = v_mov_b32 0
-  %79 = v_cndmask_b32_src1_inline %72, %43 {true_value = 1}
-  %82 = v_cndmask_b32_src1_inline %72, %46 {true_value = 1}
-  %85 = v_cndmask_b32_src1_inline %72, %49 {true_value = 1}
-  %88 = v_cndmask_b32_src1_inline %72, %52 {true_value = 1}
-  %forward_words = concat(%79, %82, %85, %88) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %92 = v_cndmask_b32_src1_inline %72, %56 {true_value = 1}
-  %95 = v_cndmask_b32_src1_inline %72, %59 {true_value = 1}
-  %98 = v_cndmask_b32_src1_inline %72, %62 {true_value = 1}
-  %101 = v_cndmask_b32_src1_inline %72, %65 {true_value = 1}
-  %reverse_words = concat(%92, %95, %98, %101) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_dwordx4_saddr %37, %forward_words, %result_view_0
-  global_store_dwordx4_saddr %37, %reverse_words, %result_view_1
+  %result_view_0 = resource<hal_binding> {extent = 2048, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %35 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  %varying = global_load_dwordx4_saddr %35, %varying_view : reg<amdgpu.vgpr x4>
+  %37 = s_mov_b32 0
+  %uniform = s_load_dwordx4 %view, %37
+  %39 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %40 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = v_cmp_lt_i32 %39, %40
+  %42 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %43 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %44 = v_cmp_lt_i32 %42, %43
+  %45 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %46 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %47 = v_cmp_lt_i32 %45, %46
+  %48 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %49 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %50 = v_cmp_lt_i32 %48, %49
+  %54 = v_cmp_ge_u32 %40, %39
+  %57 = v_cmp_ge_u32 %43, %42
+  %60 = v_cmp_ge_u32 %46, %45
+  %63 = v_cmp_ge_u32 %49, %48
+  %70 = v_mov_b32 0
+  %77 = v_cndmask_b32_src1_inline %70, %41 {true_value = 1}
+  %80 = v_cndmask_b32_src1_inline %70, %44 {true_value = 1}
+  %83 = v_cndmask_b32_src1_inline %70, %47 {true_value = 1}
+  %86 = v_cndmask_b32_src1_inline %70, %50 {true_value = 1}
+  %forward_words = concat(%77, %80, %83, %86) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %90 = v_cndmask_b32_src1_inline %70, %54 {true_value = 1}
+  %93 = v_cndmask_b32_src1_inline %70, %57 {true_value = 1}
+  %96 = v_cndmask_b32_src1_inline %70, %60 {true_value = 1}
+  %99 = v_cndmask_b32_src1_inline %70, %63 {true_value = 1}
+  %reverse_words = concat(%90, %93, %96, %99) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_dwordx4_saddr %35, %forward_words, %result_view_0
+  global_store_dwordx4_saddr %35, %reverse_words, %result_view_0 {offset = 1024}
   return
 }
 
@@ -259,13 +257,12 @@ kernel.def @uniform_vector_sources() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input: buffer, %varying_buffer: buffer, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+} launch(%input: buffer, %varying_buffer: buffer, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
   %varying_view = buffer.view %varying_buffer[%fixture_base] : buffer -> view<64x4xi32>
   %varying = vector.load %varying_view[%fixture_lane, 0] : view<64x4xi32> -> vector<4xi32>
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64x4xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64x4xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64x4xi32>
   %base = index.constant 0 : offset
   %constant_input = buffer.assume.memory_space<constant> %input : buffer
   %view = buffer.view %constant_input[%base] : buffer -> view<8xi32>
@@ -274,49 +271,48 @@ kernel.def @uniform_vector_sources() {
   %reverse = vector.cmpi uge, %varying, %uniform : vector<4xi32> -> vector<4xi1>
   %forward_words = vector.extui %forward : vector<4xi1> to vector<4xi32>
   %reverse_words = vector.extui %reverse : vector<4xi1> to vector<4xi32>
-  vector.store %forward_words, %result_view_0[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
-  vector.store %reverse_words, %result_view_1[%fixture_lane, 0] : vector<4xi32>, view<64x4xi32>
+  vector.store %forward_words, %result_view_0[0, %fixture_lane, 0] : vector<4xi32>, view<2x64x4xi32>
+  vector.store %reverse_words, %result_view_0[1, %fixture_lane, 0] : vector<4xi32>, view<2x64x4xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 4, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_sources() asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_vector_sources() asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %varying_view = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_0 = resource<hal_binding> {extent = 1024, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 1024, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %37 = v_lshlrev_b32_src0_inline %fixture_lane, 4
-  %varying = global_load_b128_saddr %37, %varying_view
-  %39 = s_mov_b32 0
-  %uniform = s_load_dwordx4 %view, %39
-  %41 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %42 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %43 = v_cmp_lt_i32 %41, %42
-  %44 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %45 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %46 = v_cmp_lt_i32 %44, %45
-  %47 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %48 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %49 = v_cmp_lt_i32 %47, %48
-  %50 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %51 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %52 = v_cmp_lt_i32 %50, %51
-  %56 = v_cmp_ge_u32 %42, %41
-  %59 = v_cmp_ge_u32 %45, %44
-  %62 = v_cmp_ge_u32 %48, %47
-  %65 = v_cmp_ge_u32 %51, %50
-  %78 = v_cndmask_b32_src0_lit_src1_inline %43 {imm32 = 0, true_value = 1}
-  %80 = v_cndmask_b32_src0_lit_src1_inline %46 {imm32 = 0, true_value = 1}
-  %82 = v_cndmask_b32_src0_lit_src1_inline %49 {imm32 = 0, true_value = 1}
-  %84 = v_cndmask_b32_src0_lit_src1_inline %52 {imm32 = 0, true_value = 1}
-  %forward_words = concat(%78, %80, %82, %84) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %87 = v_cndmask_b32_src0_lit_src1_inline %56 {imm32 = 0, true_value = 1}
-  %89 = v_cndmask_b32_src0_lit_src1_inline %59 {imm32 = 0, true_value = 1}
-  %91 = v_cndmask_b32_src0_lit_src1_inline %62 {imm32 = 0, true_value = 1}
-  %93 = v_cndmask_b32_src0_lit_src1_inline %65 {imm32 = 0, true_value = 1}
-  %reverse_words = concat(%87, %89, %91, %93) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %37, %forward_words, %result_view_0
-  global_store_b128_saddr %37, %reverse_words, %result_view_1
+  %result_view_0 = resource<hal_binding> {extent = 2048, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %35 = v_lshlrev_b32_src0_inline %fixture_lane, 4
+  %varying = global_load_b128_saddr %35, %varying_view
+  %37 = s_mov_b32 0
+  %uniform = s_load_dwordx4 %view, %37
+  %39 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %40 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = v_cmp_lt_i32 %39, %40
+  %42 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %43 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %44 = v_cmp_lt_i32 %42, %43
+  %45 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %46 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %47 = v_cmp_lt_i32 %45, %46
+  %48 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %49 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %50 = v_cmp_lt_i32 %48, %49
+  %54 = v_cmp_ge_u32 %40, %39
+  %57 = v_cmp_ge_u32 %43, %42
+  %60 = v_cmp_ge_u32 %46, %45
+  %63 = v_cmp_ge_u32 %49, %48
+  %76 = v_cndmask_b32_src0_lit_src1_inline %41 {imm32 = 0, true_value = 1}
+  %78 = v_cndmask_b32_src0_lit_src1_inline %44 {imm32 = 0, true_value = 1}
+  %80 = v_cndmask_b32_src0_lit_src1_inline %47 {imm32 = 0, true_value = 1}
+  %82 = v_cndmask_b32_src0_lit_src1_inline %50 {imm32 = 0, true_value = 1}
+  %forward_words = concat(%76, %78, %80, %82) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %85 = v_cndmask_b32_src0_lit_src1_inline %54 {imm32 = 0, true_value = 1}
+  %87 = v_cndmask_b32_src0_lit_src1_inline %57 {imm32 = 0, true_value = 1}
+  %89 = v_cndmask_b32_src0_lit_src1_inline %60 {imm32 = 0, true_value = 1}
+  %91 = v_cndmask_b32_src0_lit_src1_inline %63 {imm32 = 0, true_value = 1}
+  %reverse_words = concat(%85, %87, %89, %91) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %35, %forward_words, %result_view_0
+  global_store_b128_saddr %35, %reverse_words, %result_view_0 {offset = 1024}
   return
 }

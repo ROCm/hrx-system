@@ -9,16 +9,10 @@ kernel.def target(@target) @uniform_signed_division() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%value: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer, %result_buffer_6: buffer) {
+} launch(%value: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
-  %result_view_6 = buffer.view %result_buffer_6[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<7x64xi32>
   %c2 = scalar.constant 2 : i32
   %c3 = scalar.constant 3 : i32
   %c4 = scalar.constant 4 : i32
@@ -32,72 +26,66 @@ kernel.def target(@target) @uniform_signed_division() {
   %quotient_negative_two = scalar.divsi %value, %cn2 : i32
   %quotient_negative_three = scalar.divsi %value, %cn3 : i32
   %remainder_positive_five = scalar.remsi %value, %c5 : i32
-  view.store %quotient_positive_two, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %quotient_positive_three, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %quotient_positive_four, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %quotient_positive_five, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %quotient_negative_two, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %quotient_negative_three, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %remainder_positive_five, %result_view_6[%fixture_lane] : i32, view<64xi32>
+  view.store %quotient_positive_two, %result_view_0[0, %fixture_lane] : i32, view<7x64xi32>
+  view.store %quotient_positive_three, %result_view_0[1, %fixture_lane] : i32, view<7x64xi32>
+  view.store %quotient_positive_four, %result_view_0[2, %fixture_lane] : i32, view<7x64xi32>
+  view.store %quotient_positive_five, %result_view_0[3, %fixture_lane] : i32, view<7x64xi32>
+  view.store %quotient_negative_two, %result_view_0[4, %fixture_lane] : i32, view<7x64xi32>
+  view.store %quotient_negative_three, %result_view_0[5, %fixture_lane] : i32, view<7x64xi32>
+  view.store %remainder_positive_five, %result_view_0[6, %fixture_lane] : i32, view<7x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 8, resource_count = 7, resource_offsets = [8, 16, 24, 32, 40, 48, 56], resource_parameter_indices = [1, 2, 3, 4, 5, 6, 7], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_signed_division(%value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_signed_division(%value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_6 = resource<hal_binding> {extent = 256, index = 6, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1792, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %c5 = s_mov_b32 5
-  %48 = s_mov_b32 2147483649
+  %43 = s_mov_b32 2147483649
+  %44 = s_mul_hi_i32 %value, %43
+  %45 = s_add_u32 %44, %value
+  %46 = s_lshr_b32_rhs_inline %45, 31
+  %quotient_positive_two = s_add_u32 %45, %46
+  %48 = s_mov_b32 1431655766
   %49 = s_mul_hi_i32 %value, %48
-  %50 = s_add_u32 %49, %value
-  %51 = s_lshr_b32_rhs_inline %50, 31
-  %quotient_positive_two = s_add_u32 %50, %51
-  %53 = s_mov_b32 1431655766
-  %54 = s_mul_hi_i32 %value, %53
-  %55 = s_lshr_b32_rhs_inline %54, 31
-  %quotient_positive_three = s_add_u32 %54, %55
-  %60 = s_ashr_i32_rhs_inline %50, 1
+  %50 = s_lshr_b32_rhs_inline %49, 31
+  %quotient_positive_three = s_add_u32 %49, %50
+  %55 = s_ashr_i32_rhs_inline %45, 1
+  %56 = s_lshr_b32_rhs_inline %55, 31
+  %quotient_positive_four = s_add_u32 %55, %56
+  %58 = s_mov_b32 1717986919
+  %59 = s_mul_hi_i32 %value, %58
+  %60 = s_ashr_i32_rhs_inline %59, 1
   %61 = s_lshr_b32_rhs_inline %60, 31
-  %quotient_positive_four = s_add_u32 %60, %61
-  %63 = s_mov_b32 1717986919
-  %64 = s_mul_hi_i32 %value, %63
-  %65 = s_ashr_i32_rhs_inline %64, 1
-  %66 = s_lshr_b32_rhs_inline %65, 31
-  %quotient_positive_five = s_add_u32 %65, %66
-  %68 = s_mul_i32 %quotient_positive_five, %c5
-  %remainder_positive_five = s_sub_u32 %value, %68
-  %70 = s_mov_b32 2147483647
+  %quotient_positive_five = s_add_u32 %60, %61
+  %63 = s_mul_i32 %quotient_positive_five, %c5
+  %remainder_positive_five = s_sub_u32 %value, %63
+  %65 = s_mov_b32 2147483647
+  %66 = s_mul_hi_i32 %value, %65
+  %67 = s_sub_u32 %66, %value
+  %68 = s_lshr_b32_rhs_inline %67, 31
+  %quotient_negative_two = s_add_u32 %67, %68
+  %70 = s_mov_b32 1431655765
   %71 = s_mul_hi_i32 %value, %70
   %72 = s_sub_u32 %71, %value
-  %73 = s_lshr_b32_rhs_inline %72, 31
-  %quotient_negative_two = s_add_u32 %72, %73
-  %75 = s_mov_b32 1431655765
-  %76 = s_mul_hi_i32 %value, %75
-  %77 = s_sub_u32 %76, %value
-  %78 = s_ashr_i32_rhs_inline %77, 1
-  %79 = s_lshr_b32_rhs_inline %78, 31
-  %quotient_negative_three = s_add_u32 %78, %79
-  %81 = v_mov_b32_copy %quotient_positive_two
-  %82 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %82, %81, %result_view_0
-  %83 = v_mov_b32_copy %quotient_positive_three
-  global_store_b32_saddr %82, %83, %result_view_1
-  %85 = v_mov_b32_copy %quotient_positive_four
-  global_store_b32_saddr %82, %85, %result_view_2
-  %87 = v_mov_b32_copy %quotient_positive_five
-  global_store_b32_saddr %82, %87, %result_view_3
-  %89 = v_mov_b32_copy %quotient_negative_two
-  global_store_b32_saddr %82, %89, %result_view_4
-  %91 = v_mov_b32_copy %quotient_negative_three
-  global_store_b32_saddr %82, %91, %result_view_5
-  %93 = v_mov_b32_copy %remainder_positive_five
-  global_store_b32_saddr %82, %93, %result_view_6
+  %73 = s_ashr_i32_rhs_inline %72, 1
+  %74 = s_lshr_b32_rhs_inline %73, 31
+  %quotient_negative_three = s_add_u32 %73, %74
+  %76 = v_mov_b32_copy %quotient_positive_two
+  %77 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %77, %76, %result_view_0
+  %78 = v_mov_b32_copy %quotient_positive_three
+  global_store_b32_saddr %77, %78, %result_view_0 {offset = 256}
+  %80 = v_mov_b32_copy %quotient_positive_four
+  global_store_b32_saddr %77, %80, %result_view_0 {offset = 512}
+  %82 = v_mov_b32_copy %quotient_positive_five
+  global_store_b32_saddr %77, %82, %result_view_0 {offset = 768}
+  %84 = v_mov_b32_copy %quotient_negative_two
+  global_store_b32_saddr %77, %84, %result_view_0 {offset = 1024}
+  %86 = v_mov_b32_copy %quotient_negative_three
+  global_store_b32_saddr %77, %86, %result_view_0 {offset = 1280}
+  %88 = v_mov_b32_copy %remainder_positive_five
+  global_store_b32_saddr %77, %88, %result_view_0 {offset = 1536}
   return
 }
 

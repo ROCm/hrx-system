@@ -94,27 +94,25 @@ kernel.def @uniform_predicate_casts() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input: i32, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+} launch(%input: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi64>
   %sign_boundary = scalar.constant 0 : i32
   %negative = scalar.cmpi slt, %input, %sign_boundary : i32
   %coordinate = index.cast %negative : i1 to index
   %byte_offset = index.cast %negative : i1 to offset
   %result_storage_0 = index.cast %coordinate : index to i64
-  view.store %result_storage_0, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_0, %result_view_0[0, %fixture_lane] : i64, view<2x64xi64>
   %result_storage_1 = index.cast %byte_offset : offset to i64
-  view.store %result_storage_1, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_1, %result_view_0[1, %fixture_lane] : i64, view<2x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicate_casts(%input: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicate_casts(%input: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %sign_boundary = s_mov_b32 0
   %negative = s_cmp_lt_i32 %input, %sign_boundary
   %22 = s_mov_b32 1
@@ -125,7 +123,7 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direc
   %34 = v_lshlrev_b32_src0_inline %fixture_lane, 3
   global_store_b64_saddr %34, %33, %result_view_0
   %41 = concat(%30, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %34, %41, %result_view_1
+  global_store_b64_saddr %34, %41, %result_view_0 {offset = 512}
   return
 }
 

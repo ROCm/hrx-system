@@ -480,15 +480,12 @@ kernel.def target(@target) @uniform_partial_i16_consumers() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%input: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer) {
+} launch(%input: i32, %result_buffer_0: buffer, %result_buffer_2: buffer, %result_buffer_4: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi64>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xf32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xf32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi32>
+  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<2x64xi64>
+  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<2x64xf32>
   %value = scalar.bitcast %input : i32 to f32
   %half = scalar.fptrunc %value : f32 to f16
   %bits = scalar.bitcast %half : f16 to i16
@@ -498,41 +495,38 @@ kernel.def target(@target) @uniform_partial_i16_consumers() {
   %unsigned64 = scalar.extui %bits : i16 to i64
   %signed_float = scalar.sitofp %bits : i16 to f32
   %unsigned_float = scalar.uitofp %bits : i16 to f32
-  view.store %signed32, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %unsigned32, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %signed64, %result_view_2[%fixture_lane] : i64, view<64xi64>
-  view.store %unsigned64, %result_view_3[%fixture_lane] : i64, view<64xi64>
-  view.store %signed_float, %result_view_4[%fixture_lane] : f32, view<64xf32>
-  view.store %unsigned_float, %result_view_5[%fixture_lane] : f32, view<64xf32>
+  view.store %signed32, %result_view_0[0, %fixture_lane] : i32, view<2x64xi32>
+  view.store %unsigned32, %result_view_0[1, %fixture_lane] : i32, view<2x64xi32>
+  view.store %signed64, %result_view_2[0, %fixture_lane] : i64, view<2x64xi64>
+  view.store %unsigned64, %result_view_2[1, %fixture_lane] : i64, view<2x64xi64>
+  view.store %signed_float, %result_view_4[0, %fixture_lane] : f32, view<2x64xf32>
+  view.store %unsigned_float, %result_view_4[1, %fixture_lane] : f32, view<2x64xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 7, resource_count = 6, resource_offsets = [8, 16, 24, 32, 40, 48], resource_parameter_indices = [1, 2, 3, 4, 5, 6], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_partial_i16_consumers(%value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 4, resource_count = 3, resource_offsets = [8, 16, 24], resource_parameter_indices = [1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_partial_i16_consumers(%value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 512, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_2 = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_4 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %half = s_cvt_f16_f32 %value
   %signed32 = v_bfe_i32_offset_0_width_inline_low16 %half
   %unsigned32 = v_and_b32_lit %signed32, 65535
-  %37 = v_ashrrev_i32_src0_inline %signed32, 31
-  %signed64 = concat(%signed32, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %40 = v_mov_b32 0
-  %unsigned64 = concat(%unsigned32, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %33 = v_ashrrev_i32_src0_inline %signed32, 31
+  %signed64 = concat(%signed32, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %36 = v_mov_b32 0
+  %unsigned64 = concat(%unsigned32, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %signed_float = v_cvt_f32_i32 %signed32
   %unsigned_float = v_cvt_f32_u32 %unsigned32
-  %45 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %45, %signed32, %result_view_0
-  global_store_b32_saddr %45, %unsigned32, %result_view_1
-  %47 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_b64_saddr %47, %signed64, %result_view_2
-  global_store_b64_saddr %47, %unsigned64, %result_view_3
-  global_store_b32_saddr %45, %signed_float, %result_view_4
-  global_store_b32_saddr %45, %unsigned_float, %result_view_5
+  %41 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %41, %signed32, %result_view_0
+  global_store_b32_saddr %41, %unsigned32, %result_view_0 {offset = 256}
+  %43 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %43, %signed64, %result_view_2
+  global_store_b64_saddr %43, %unsigned64, %result_view_2 {offset = 512}
+  global_store_b32_saddr %41, %signed_float, %result_view_4
+  global_store_b32_saddr %41, %unsigned_float, %result_view_4 {offset = 256}
   return
 }
 

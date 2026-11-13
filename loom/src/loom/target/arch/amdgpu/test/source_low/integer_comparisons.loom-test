@@ -121,19 +121,10 @@ kernel.def @uniform_predicates() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer, %result_buffer_6: buffer, %result_buffer_7: buffer, %result_buffer_8: buffer, %result_buffer_9: buffer) {
+} launch(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
-  %result_view_6 = buffer.view %result_buffer_6[%fixture_base] : buffer -> view<64xi32>
-  %result_view_7 = buffer.view %result_buffer_7[%fixture_base] : buffer -> view<64xi32>
-  %result_view_8 = buffer.view %result_buffer_8[%fixture_base] : buffer -> view<64xi32>
-  %result_view_9 = buffer.view %result_buffer_9[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<10x64xi32>
   %eq = scalar.cmpi eq, %lhs, %rhs : i64
   %ne = scalar.cmpi ne, %lhs, %rhs : i64
   %slt = scalar.cmpi slt, %lhs, %rhs : i64
@@ -156,139 +147,130 @@ kernel.def @uniform_predicates() {
   %ule_word = scalar.extui %ule : i1 to i32
   %ugt_word = scalar.extui %ugt : i1 to i32
   %uge_word = scalar.extui %uge : i1 to i32
-  view.store %eq_word, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %ne_word, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %slt_word, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %sle_word, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %sgt_word, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %sge_word, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %ult_word, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %ule_word, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %ugt_word, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %uge_word, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %eq_word, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ne_word, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %slt_word, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sle_word, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sgt_word, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sge_word, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ult_word, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ule_word, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ugt_word, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %uge_word, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 ^fallback:
-  view.store %fallback, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %fallback, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "take", arg3 = "fallback"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [8, 8, 1, 4], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 14, resource_count = 10, resource_offsets = [24, 32, 40, 48, 56, 64, 72, 80, 88, 96], resource_parameter_indices = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take$80: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "take", arg3 = "fallback"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [8, 8, 1, 4], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 5, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take$99: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_6 = resource<hal_binding> {extent = 256, index = 6, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_7 = resource<hal_binding> {extent = 256, index = 7, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_8 = resource<hal_binding> {extent = 256, index = 8, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_9 = resource<hal_binding> {extent = 256, index = 9, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %take$93 = s_bfe_u32_lit %take$80, 524288
-  %94 = s_cmp_eq_u64 %lhs, %rhs
-  %95 = s_mov_b32 0
-  %96 = s_mov_b32 1
-  %eq = s_cselect_b32 %96, %95, %94
-  %98 = s_cmp_lg_u64 %lhs, %rhs
-  %ne = s_cselect_b32 %96, %95, %98
-  %102 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %103 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %104 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %105 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %106 = s_xor_b32_lit %103, 2147483648
-  %107 = s_xor_b32_lit %105, 2147483648
-  %108 = s_cmp_lt_u32 %102, %104
-  %109, %110 = s_subb_u32 %106, %107, %108
-  %slt = s_cselect_b32 %96, %95, %110
-  %120 = s_cmp_le_u32 %102, %104
-  %121, %122 = s_subb_u32 %106, %107, %120
-  %sle = s_cselect_b32 %96, %95, %122
-  %132 = s_cmp_gt_u32 %102, %104
-  %133, %134 = s_subb_u32 %107, %106, %132
-  %sgt = s_cselect_b32 %96, %95, %134
-  %144 = s_cmp_ge_u32 %102, %104
-  %145, %146 = s_subb_u32 %107, %106, %144
-  %sge = s_cselect_b32 %96, %95, %146
-  %154 = s_cmp_lt_u32 %102, %104
-  %155, %156 = s_subb_u32 %103, %105, %154
-  %ult = s_cselect_b32 %96, %95, %156
-  %164 = s_cmp_le_u32 %102, %104
-  %165, %166 = s_subb_u32 %103, %105, %164
-  %ule = s_cselect_b32 %96, %95, %166
-  %174 = s_cmp_gt_u32 %102, %104
-  %175, %176 = s_subb_u32 %105, %103, %174
-  %ugt = s_cselect_b32 %96, %95, %176
-  %184 = s_cmp_ge_u32 %102, %104
-  %185, %186 = s_subb_u32 %105, %103, %184
-  %uge = s_cselect_b32 %96, %95, %186
-  %191 = s_cmp_lg_i32 %take$93, %95
-  low.cond_br %191, ^observed, ^fallback : reg<amdgpu.scc>
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %take$103 = s_bfe_u32_lit %take$99, 524288
+  %104 = s_cmp_eq_u64 %lhs, %rhs
+  %105 = s_mov_b32 0
+  %106 = s_mov_b32 1
+  %eq = s_cselect_b32 %106, %105, %104
+  %108 = s_cmp_lg_u64 %lhs, %rhs
+  %ne = s_cselect_b32 %106, %105, %108
+  %112 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %113 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %114 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %115 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %116 = s_xor_b32_lit %113, 2147483648
+  %117 = s_xor_b32_lit %115, 2147483648
+  %118 = s_cmp_lt_u32 %112, %114
+  %119, %120 = s_subb_u32 %116, %117, %118
+  %slt = s_cselect_b32 %106, %105, %120
+  %130 = s_cmp_le_u32 %112, %114
+  %131, %132 = s_subb_u32 %116, %117, %130
+  %sle = s_cselect_b32 %106, %105, %132
+  %142 = s_cmp_gt_u32 %112, %114
+  %143, %144 = s_subb_u32 %117, %116, %142
+  %sgt = s_cselect_b32 %106, %105, %144
+  %154 = s_cmp_ge_u32 %112, %114
+  %155, %156 = s_subb_u32 %117, %116, %154
+  %sge = s_cselect_b32 %106, %105, %156
+  %164 = s_cmp_lt_u32 %112, %114
+  %165, %166 = s_subb_u32 %113, %115, %164
+  %ult = s_cselect_b32 %106, %105, %166
+  %174 = s_cmp_le_u32 %112, %114
+  %175, %176 = s_subb_u32 %113, %115, %174
+  %ule = s_cselect_b32 %106, %105, %176
+  %184 = s_cmp_gt_u32 %112, %114
+  %185, %186 = s_subb_u32 %115, %113, %184
+  %ugt = s_cselect_b32 %106, %105, %186
+  %194 = s_cmp_ge_u32 %112, %114
+  %195, %196 = s_subb_u32 %115, %113, %194
+  %uge = s_cselect_b32 %106, %105, %196
+  %201 = s_cmp_lg_i32 %take$103, %105
+  low.cond_br %201, ^observed, ^fallback : reg<amdgpu.scc>
 ^observed:
-  %194 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
-  %eq_word = s_cselect_b32 %96, %95, %194
-  %196 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
-  %ne_word = s_cselect_b32 %96, %95, %196
-  %198 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
-  %slt_word = s_cselect_b32 %96, %95, %198
-  %200 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
-  %sle_word = s_cselect_b32 %96, %95, %200
-  %202 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
-  %sgt_word = s_cselect_b32 %96, %95, %202
-  %204 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
-  %sge_word = s_cselect_b32 %96, %95, %204
-  %206 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
-  %ult_word = s_cselect_b32 %96, %95, %206
-  %208 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
-  %ule_word = s_cselect_b32 %96, %95, %208
-  %210 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
-  %ugt_word = s_cselect_b32 %96, %95, %210
-  %212 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
-  %uge_word = s_cselect_b32 %96, %95, %212
-  %214 = v_mov_b32_copy %eq_word
-  %215 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_dword_saddr %215, %214, %result_view_0
-  %216 = v_mov_b32_copy %ne_word
-  global_store_dword_saddr %215, %216, %result_view_1
-  %218 = v_mov_b32_copy %slt_word
-  global_store_dword_saddr %215, %218, %result_view_2
-  %220 = v_mov_b32_copy %sle_word
-  global_store_dword_saddr %215, %220, %result_view_3
-  %222 = v_mov_b32_copy %sgt_word
-  global_store_dword_saddr %215, %222, %result_view_4
-  %224 = v_mov_b32_copy %sge_word
-  global_store_dword_saddr %215, %224, %result_view_5
-  %226 = v_mov_b32_copy %ult_word
-  global_store_dword_saddr %215, %226, %result_view_6
-  %228 = v_mov_b32_copy %ule_word
-  global_store_dword_saddr %215, %228, %result_view_7
-  %230 = v_mov_b32_copy %ugt_word
-  global_store_dword_saddr %215, %230, %result_view_8
-  %232 = v_mov_b32_copy %uge_word
-  global_store_dword_saddr %215, %232, %result_view_9
+  %204 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
+  %eq_word = s_cselect_b32 %106, %105, %204
+  %206 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
+  %ne_word = s_cselect_b32 %106, %105, %206
+  %208 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
+  %slt_word = s_cselect_b32 %106, %105, %208
+  %210 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
+  %sle_word = s_cselect_b32 %106, %105, %210
+  %212 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
+  %sgt_word = s_cselect_b32 %106, %105, %212
+  %214 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
+  %sge_word = s_cselect_b32 %106, %105, %214
+  %216 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
+  %ult_word = s_cselect_b32 %106, %105, %216
+  %218 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
+  %ule_word = s_cselect_b32 %106, %105, %218
+  %220 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
+  %ugt_word = s_cselect_b32 %106, %105, %220
+  %222 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
+  %uge_word = s_cselect_b32 %106, %105, %222
+  %224 = v_mov_b32_copy %eq_word
+  %225 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %225, %224, %result_view_0
+  %226 = v_mov_b32_copy %ne_word
+  global_store_dword_saddr %225, %226, %result_view_0 {offset = 256}
+  %228 = v_mov_b32_copy %slt_word
+  global_store_dword_saddr %225, %228, %result_view_0 {offset = 512}
+  %230 = v_mov_b32_copy %sle_word
+  global_store_dword_saddr %225, %230, %result_view_0 {offset = 768}
+  %232 = v_mov_b32_copy %sgt_word
+  global_store_dword_saddr %225, %232, %result_view_0 {offset = 1024}
+  %234 = v_mov_b32_copy %sge_word
+  global_store_dword_saddr %225, %234, %result_view_0 {offset = 1280}
+  %236 = v_mov_b32_copy %ult_word
+  global_store_dword_saddr %225, %236, %result_view_0 {offset = 1536}
+  %238 = v_mov_b32_copy %ule_word
+  global_store_dword_saddr %225, %238, %result_view_0 {offset = 1792}
+  %240 = v_mov_b32_copy %ugt_word
+  global_store_dword_saddr %225, %240, %result_view_0 {offset = 2048}
+  %242 = v_mov_b32_copy %uge_word
+  global_store_dword_saddr %225, %242, %result_view_0 {offset = 2304}
   return
 ^fallback:
-  %234 = v_mov_b32_copy %fallback
-  %235 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_dword_saddr %235, %234, %result_view_0
-  global_store_dword_saddr %235, %234, %result_view_1
-  global_store_dword_saddr %235, %234, %result_view_2
-  global_store_dword_saddr %235, %234, %result_view_3
-  global_store_dword_saddr %235, %234, %result_view_4
-  global_store_dword_saddr %235, %234, %result_view_5
-  global_store_dword_saddr %235, %234, %result_view_6
-  global_store_dword_saddr %235, %234, %result_view_7
-  global_store_dword_saddr %235, %234, %result_view_8
-  global_store_dword_saddr %235, %234, %result_view_9
+  %244 = v_mov_b32_copy %fallback
+  %245 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %245, %244, %result_view_0
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 256}
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 512}
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 768}
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 1024}
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 1280}
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 1536}
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 1792}
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 2048}
+  global_store_dword_saddr %245, %244, %result_view_0 {offset = 2304}
   return
 }
 
@@ -300,19 +282,10 @@ kernel.def @uniform_selections() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer, %result_buffer_6: buffer, %result_buffer_7: buffer, %result_buffer_8: buffer, %result_buffer_9: buffer) {
+} launch(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
-  %result_view_6 = buffer.view %result_buffer_6[%fixture_base] : buffer -> view<64xi32>
-  %result_view_7 = buffer.view %result_buffer_7[%fixture_base] : buffer -> view<64xi32>
-  %result_view_8 = buffer.view %result_buffer_8[%fixture_base] : buffer -> view<64xi32>
-  %result_view_9 = buffer.view %result_buffer_9[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<10x64xi32>
   %eq = scalar.cmpi eq, %lhs, %rhs : i64
   %selected_eq = scf.select %eq, %then_value, %else_value : i32
   %ne = scalar.cmpi ne, %lhs, %rhs : i64
@@ -333,87 +306,78 @@ kernel.def @uniform_selections() {
   %selected_ugt = scf.select %ugt, %then_value, %else_value : i32
   %uge = scalar.cmpi uge, %lhs, %rhs : i64
   %selected_uge = scf.select %uge, %then_value, %else_value : i32
-  view.store %selected_eq, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ne, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_slt, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sle, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sgt, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sge, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ult, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ule, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ugt, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_uge, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %selected_eq, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ne, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_slt, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sle, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sgt, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sge, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ult, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ule, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ugt, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_uge, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "then_value", arg3 = "else_value"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 14, resource_count = 10, resource_offsets = [24, 32, 40, 48, 56, 64, 72, 80, 88, 96], resource_parameter_indices = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "then_value", arg3 = "else_value"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 5, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_6 = resource<hal_binding> {extent = 256, index = 6, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_7 = resource<hal_binding> {extent = 256, index = 7, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_8 = resource<hal_binding> {extent = 256, index = 8, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_9 = resource<hal_binding> {extent = 256, index = 9, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %eq = s_cmp_eq_u64 %lhs, %rhs
   %selected_eq = s_cselect_b32 %then_value, %else_value, %eq
   %ne = s_cmp_lg_u64 %lhs, %rhs
   %selected_ne = s_cselect_b32 %then_value, %else_value, %ne
-  %67 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %68 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %69 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %70 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %71 = s_xor_b32_lit %68, 2147483648
-  %72 = s_xor_b32_lit %70, 2147483648
-  %73 = s_cmp_lt_u32 %67, %69
-  %74, %slt = s_subb_u32 %71, %72, %73
+  %59 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %60 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %61 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %62 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = s_xor_b32_lit %60, 2147483648
+  %64 = s_xor_b32_lit %62, 2147483648
+  %65 = s_cmp_lt_u32 %59, %61
+  %66, %slt = s_subb_u32 %63, %64, %65
   %selected_slt = s_cselect_b32 %then_value, %else_value, %slt
-  %83 = s_cmp_le_u32 %67, %69
-  %84, %sle = s_subb_u32 %71, %72, %83
+  %75 = s_cmp_le_u32 %59, %61
+  %76, %sle = s_subb_u32 %63, %64, %75
   %selected_sle = s_cselect_b32 %then_value, %else_value, %sle
-  %93 = s_cmp_gt_u32 %67, %69
-  %94, %sgt = s_subb_u32 %72, %71, %93
+  %85 = s_cmp_gt_u32 %59, %61
+  %86, %sgt = s_subb_u32 %64, %63, %85
   %selected_sgt = s_cselect_b32 %then_value, %else_value, %sgt
-  %103 = s_cmp_ge_u32 %67, %69
-  %104, %sge = s_subb_u32 %72, %71, %103
+  %95 = s_cmp_ge_u32 %59, %61
+  %96, %sge = s_subb_u32 %64, %63, %95
   %selected_sge = s_cselect_b32 %then_value, %else_value, %sge
-  %111 = s_cmp_lt_u32 %67, %69
-  %112, %ult = s_subb_u32 %68, %70, %111
+  %103 = s_cmp_lt_u32 %59, %61
+  %104, %ult = s_subb_u32 %60, %62, %103
   %selected_ult = s_cselect_b32 %then_value, %else_value, %ult
-  %119 = s_cmp_le_u32 %67, %69
-  %120, %ule = s_subb_u32 %68, %70, %119
+  %111 = s_cmp_le_u32 %59, %61
+  %112, %ule = s_subb_u32 %60, %62, %111
   %selected_ule = s_cselect_b32 %then_value, %else_value, %ule
-  %127 = s_cmp_gt_u32 %67, %69
-  %128, %ugt = s_subb_u32 %70, %68, %127
+  %119 = s_cmp_gt_u32 %59, %61
+  %120, %ugt = s_subb_u32 %62, %60, %119
   %selected_ugt = s_cselect_b32 %then_value, %else_value, %ugt
-  %135 = s_cmp_ge_u32 %67, %69
-  %136, %uge = s_subb_u32 %70, %68, %135
+  %127 = s_cmp_ge_u32 %59, %61
+  %128, %uge = s_subb_u32 %62, %60, %127
   %selected_uge = s_cselect_b32 %then_value, %else_value, %uge
-  %139 = v_mov_b32_copy %selected_eq
-  %140 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_dword_saddr %140, %139, %result_view_0
-  %141 = v_mov_b32_copy %selected_ne
-  global_store_dword_saddr %140, %141, %result_view_1
-  %143 = v_mov_b32_copy %selected_slt
-  global_store_dword_saddr %140, %143, %result_view_2
-  %145 = v_mov_b32_copy %selected_sle
-  global_store_dword_saddr %140, %145, %result_view_3
-  %147 = v_mov_b32_copy %selected_sgt
-  global_store_dword_saddr %140, %147, %result_view_4
-  %149 = v_mov_b32_copy %selected_sge
-  global_store_dword_saddr %140, %149, %result_view_5
-  %151 = v_mov_b32_copy %selected_ult
-  global_store_dword_saddr %140, %151, %result_view_6
-  %153 = v_mov_b32_copy %selected_ule
-  global_store_dword_saddr %140, %153, %result_view_7
-  %155 = v_mov_b32_copy %selected_ugt
-  global_store_dword_saddr %140, %155, %result_view_8
-  %157 = v_mov_b32_copy %selected_uge
-  global_store_dword_saddr %140, %157, %result_view_9
+  %131 = v_mov_b32_copy %selected_eq
+  %132 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_dword_saddr %132, %131, %result_view_0
+  %133 = v_mov_b32_copy %selected_ne
+  global_store_dword_saddr %132, %133, %result_view_0 {offset = 256}
+  %135 = v_mov_b32_copy %selected_slt
+  global_store_dword_saddr %132, %135, %result_view_0 {offset = 512}
+  %137 = v_mov_b32_copy %selected_sle
+  global_store_dword_saddr %132, %137, %result_view_0 {offset = 768}
+  %139 = v_mov_b32_copy %selected_sgt
+  global_store_dword_saddr %132, %139, %result_view_0 {offset = 1024}
+  %141 = v_mov_b32_copy %selected_sge
+  global_store_dword_saddr %132, %141, %result_view_0 {offset = 1280}
+  %143 = v_mov_b32_copy %selected_ult
+  global_store_dword_saddr %132, %143, %result_view_0 {offset = 1536}
+  %145 = v_mov_b32_copy %selected_ule
+  global_store_dword_saddr %132, %145, %result_view_0 {offset = 1792}
+  %147 = v_mov_b32_copy %selected_ugt
+  global_store_dword_saddr %132, %147, %result_view_0 {offset = 2048}
+  %149 = v_mov_b32_copy %selected_uge
+  global_store_dword_saddr %132, %149, %result_view_0 {offset = 2304}
   return
 }
 
@@ -425,19 +389,10 @@ kernel.def @uniform_predicates() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer, %result_buffer_6: buffer, %result_buffer_7: buffer, %result_buffer_8: buffer, %result_buffer_9: buffer) {
+} launch(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
-  %result_view_6 = buffer.view %result_buffer_6[%fixture_base] : buffer -> view<64xi32>
-  %result_view_7 = buffer.view %result_buffer_7[%fixture_base] : buffer -> view<64xi32>
-  %result_view_8 = buffer.view %result_buffer_8[%fixture_base] : buffer -> view<64xi32>
-  %result_view_9 = buffer.view %result_buffer_9[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<10x64xi32>
   %eq = scalar.cmpi eq, %lhs, %rhs : i64
   %ne = scalar.cmpi ne, %lhs, %rhs : i64
   %slt = scalar.cmpi slt, %lhs, %rhs : i64
@@ -460,139 +415,130 @@ kernel.def @uniform_predicates() {
   %ule_word = scalar.extui %ule : i1 to i32
   %ugt_word = scalar.extui %ugt : i1 to i32
   %uge_word = scalar.extui %uge : i1 to i32
-  view.store %eq_word, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %ne_word, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %slt_word, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %sle_word, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %sgt_word, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %sge_word, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %ult_word, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %ule_word, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %ugt_word, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %uge_word, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %eq_word, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ne_word, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %slt_word, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sle_word, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sgt_word, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sge_word, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ult_word, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ule_word, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ugt_word, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %uge_word, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 ^fallback:
-  view.store %fallback, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %fallback, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "take", arg3 = "fallback"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [8, 8, 1, 4], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 14, resource_count = 10, resource_offsets = [24, 32, 40, 48, 56, 64, 72, 80, 88, 96], resource_parameter_indices = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take$80: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "take", arg3 = "fallback"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [8, 8, 1, 4], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 5, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take$99: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_6 = resource<hal_binding> {extent = 256, index = 6, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_7 = resource<hal_binding> {extent = 256, index = 7, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_8 = resource<hal_binding> {extent = 256, index = 8, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_9 = resource<hal_binding> {extent = 256, index = 9, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %take$93 = s_bfe_u32_lit %take$80, 524288
-  %94 = s_cmp_eq_u64 %lhs, %rhs
-  %95 = s_mov_b32 0
-  %96 = s_mov_b32 1
-  %eq = s_cselect_b32 %96, %95, %94
-  %98 = s_cmp_lg_u64 %lhs, %rhs
-  %ne = s_cselect_b32 %96, %95, %98
-  %102 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %103 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %104 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %105 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %106 = s_xor_b32_lit %103, 2147483648
-  %107 = s_xor_b32_lit %105, 2147483648
-  %108 = s_cmp_lt_u32 %102, %104
-  %109, %110 = s_subb_u32 %106, %107, %108
-  %slt = s_cselect_b32 %96, %95, %110
-  %120 = s_cmp_le_u32 %102, %104
-  %121, %122 = s_subb_u32 %106, %107, %120
-  %sle = s_cselect_b32 %96, %95, %122
-  %132 = s_cmp_gt_u32 %102, %104
-  %133, %134 = s_subb_u32 %107, %106, %132
-  %sgt = s_cselect_b32 %96, %95, %134
-  %144 = s_cmp_ge_u32 %102, %104
-  %145, %146 = s_subb_u32 %107, %106, %144
-  %sge = s_cselect_b32 %96, %95, %146
-  %154 = s_cmp_lt_u32 %102, %104
-  %155, %156 = s_subb_u32 %103, %105, %154
-  %ult = s_cselect_b32 %96, %95, %156
-  %164 = s_cmp_le_u32 %102, %104
-  %165, %166 = s_subb_u32 %103, %105, %164
-  %ule = s_cselect_b32 %96, %95, %166
-  %174 = s_cmp_gt_u32 %102, %104
-  %175, %176 = s_subb_u32 %105, %103, %174
-  %ugt = s_cselect_b32 %96, %95, %176
-  %184 = s_cmp_ge_u32 %102, %104
-  %185, %186 = s_subb_u32 %105, %103, %184
-  %uge = s_cselect_b32 %96, %95, %186
-  %191 = s_cmp_lg_i32 %take$93, %95
-  low.cond_br %191, ^observed, ^fallback : reg<amdgpu.scc>
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %take$103 = s_bfe_u32_lit %take$99, 524288
+  %104 = s_cmp_eq_u64 %lhs, %rhs
+  %105 = s_mov_b32 0
+  %106 = s_mov_b32 1
+  %eq = s_cselect_b32 %106, %105, %104
+  %108 = s_cmp_lg_u64 %lhs, %rhs
+  %ne = s_cselect_b32 %106, %105, %108
+  %112 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %113 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %114 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %115 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %116 = s_xor_b32_lit %113, 2147483648
+  %117 = s_xor_b32_lit %115, 2147483648
+  %118 = s_cmp_lt_u32 %112, %114
+  %119, %120 = s_subb_u32 %116, %117, %118
+  %slt = s_cselect_b32 %106, %105, %120
+  %130 = s_cmp_le_u32 %112, %114
+  %131, %132 = s_subb_u32 %116, %117, %130
+  %sle = s_cselect_b32 %106, %105, %132
+  %142 = s_cmp_gt_u32 %112, %114
+  %143, %144 = s_subb_u32 %117, %116, %142
+  %sgt = s_cselect_b32 %106, %105, %144
+  %154 = s_cmp_ge_u32 %112, %114
+  %155, %156 = s_subb_u32 %117, %116, %154
+  %sge = s_cselect_b32 %106, %105, %156
+  %164 = s_cmp_lt_u32 %112, %114
+  %165, %166 = s_subb_u32 %113, %115, %164
+  %ult = s_cselect_b32 %106, %105, %166
+  %174 = s_cmp_le_u32 %112, %114
+  %175, %176 = s_subb_u32 %113, %115, %174
+  %ule = s_cselect_b32 %106, %105, %176
+  %184 = s_cmp_gt_u32 %112, %114
+  %185, %186 = s_subb_u32 %115, %113, %184
+  %ugt = s_cselect_b32 %106, %105, %186
+  %194 = s_cmp_ge_u32 %112, %114
+  %195, %196 = s_subb_u32 %115, %113, %194
+  %uge = s_cselect_b32 %106, %105, %196
+  %201 = s_cmp_lg_i32 %take$103, %105
+  low.cond_br %201, ^observed, ^fallback : reg<amdgpu.scc>
 ^observed:
-  %194 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
-  %eq_word = s_cselect_b32 %96, %95, %194
-  %196 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
-  %ne_word = s_cselect_b32 %96, %95, %196
-  %198 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
-  %slt_word = s_cselect_b32 %96, %95, %198
-  %200 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
-  %sle_word = s_cselect_b32 %96, %95, %200
-  %202 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
-  %sgt_word = s_cselect_b32 %96, %95, %202
-  %204 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
-  %sge_word = s_cselect_b32 %96, %95, %204
-  %206 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
-  %ult_word = s_cselect_b32 %96, %95, %206
-  %208 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
-  %ule_word = s_cselect_b32 %96, %95, %208
-  %210 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
-  %ugt_word = s_cselect_b32 %96, %95, %210
-  %212 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
-  %uge_word = s_cselect_b32 %96, %95, %212
-  %214 = v_mov_b32_copy %eq_word
-  %215 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %215, %214, %result_view_0
-  %216 = v_mov_b32_copy %ne_word
-  global_store_b32_saddr %215, %216, %result_view_1
-  %218 = v_mov_b32_copy %slt_word
-  global_store_b32_saddr %215, %218, %result_view_2
-  %220 = v_mov_b32_copy %sle_word
-  global_store_b32_saddr %215, %220, %result_view_3
-  %222 = v_mov_b32_copy %sgt_word
-  global_store_b32_saddr %215, %222, %result_view_4
-  %224 = v_mov_b32_copy %sge_word
-  global_store_b32_saddr %215, %224, %result_view_5
-  %226 = v_mov_b32_copy %ult_word
-  global_store_b32_saddr %215, %226, %result_view_6
-  %228 = v_mov_b32_copy %ule_word
-  global_store_b32_saddr %215, %228, %result_view_7
-  %230 = v_mov_b32_copy %ugt_word
-  global_store_b32_saddr %215, %230, %result_view_8
-  %232 = v_mov_b32_copy %uge_word
-  global_store_b32_saddr %215, %232, %result_view_9
+  %204 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
+  %eq_word = s_cselect_b32 %106, %105, %204
+  %206 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
+  %ne_word = s_cselect_b32 %106, %105, %206
+  %208 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
+  %slt_word = s_cselect_b32 %106, %105, %208
+  %210 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
+  %sle_word = s_cselect_b32 %106, %105, %210
+  %212 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
+  %sgt_word = s_cselect_b32 %106, %105, %212
+  %214 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
+  %sge_word = s_cselect_b32 %106, %105, %214
+  %216 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
+  %ult_word = s_cselect_b32 %106, %105, %216
+  %218 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
+  %ule_word = s_cselect_b32 %106, %105, %218
+  %220 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
+  %ugt_word = s_cselect_b32 %106, %105, %220
+  %222 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
+  %uge_word = s_cselect_b32 %106, %105, %222
+  %224 = v_mov_b32_copy %eq_word
+  %225 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %225, %224, %result_view_0
+  %226 = v_mov_b32_copy %ne_word
+  global_store_b32_saddr %225, %226, %result_view_0 {offset = 256}
+  %228 = v_mov_b32_copy %slt_word
+  global_store_b32_saddr %225, %228, %result_view_0 {offset = 512}
+  %230 = v_mov_b32_copy %sle_word
+  global_store_b32_saddr %225, %230, %result_view_0 {offset = 768}
+  %232 = v_mov_b32_copy %sgt_word
+  global_store_b32_saddr %225, %232, %result_view_0 {offset = 1024}
+  %234 = v_mov_b32_copy %sge_word
+  global_store_b32_saddr %225, %234, %result_view_0 {offset = 1280}
+  %236 = v_mov_b32_copy %ult_word
+  global_store_b32_saddr %225, %236, %result_view_0 {offset = 1536}
+  %238 = v_mov_b32_copy %ule_word
+  global_store_b32_saddr %225, %238, %result_view_0 {offset = 1792}
+  %240 = v_mov_b32_copy %ugt_word
+  global_store_b32_saddr %225, %240, %result_view_0 {offset = 2048}
+  %242 = v_mov_b32_copy %uge_word
+  global_store_b32_saddr %225, %242, %result_view_0 {offset = 2304}
   return
 ^fallback:
-  %234 = v_mov_b32_copy %fallback
-  %235 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %235, %234, %result_view_0
-  global_store_b32_saddr %235, %234, %result_view_1
-  global_store_b32_saddr %235, %234, %result_view_2
-  global_store_b32_saddr %235, %234, %result_view_3
-  global_store_b32_saddr %235, %234, %result_view_4
-  global_store_b32_saddr %235, %234, %result_view_5
-  global_store_b32_saddr %235, %234, %result_view_6
-  global_store_b32_saddr %235, %234, %result_view_7
-  global_store_b32_saddr %235, %234, %result_view_8
-  global_store_b32_saddr %235, %234, %result_view_9
+  %244 = v_mov_b32_copy %fallback
+  %245 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %245, %244, %result_view_0
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 256}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 512}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 768}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 1024}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 1280}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 1536}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 1792}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 2048}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 2304}
   return
 }
 
@@ -604,19 +550,10 @@ kernel.def @uniform_selections() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer, %result_buffer_6: buffer, %result_buffer_7: buffer, %result_buffer_8: buffer, %result_buffer_9: buffer) {
+} launch(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
-  %result_view_6 = buffer.view %result_buffer_6[%fixture_base] : buffer -> view<64xi32>
-  %result_view_7 = buffer.view %result_buffer_7[%fixture_base] : buffer -> view<64xi32>
-  %result_view_8 = buffer.view %result_buffer_8[%fixture_base] : buffer -> view<64xi32>
-  %result_view_9 = buffer.view %result_buffer_9[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<10x64xi32>
   %eq = scalar.cmpi eq, %lhs, %rhs : i64
   %selected_eq = scf.select %eq, %then_value, %else_value : i32
   %ne = scalar.cmpi ne, %lhs, %rhs : i64
@@ -637,87 +574,78 @@ kernel.def @uniform_selections() {
   %selected_ugt = scf.select %ugt, %then_value, %else_value : i32
   %uge = scalar.cmpi uge, %lhs, %rhs : i64
   %selected_uge = scf.select %uge, %then_value, %else_value : i32
-  view.store %selected_eq, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ne, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_slt, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sle, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sgt, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sge, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ult, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ule, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ugt, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_uge, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %selected_eq, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ne, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_slt, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sle, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sgt, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sge, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ult, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ule, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ugt, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_uge, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "then_value", arg3 = "else_value"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 14, resource_count = 10, resource_offsets = [24, 32, 40, 48, 56, 64, 72, 80, 88, 96], resource_parameter_indices = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "then_value", arg3 = "else_value"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 5, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_6 = resource<hal_binding> {extent = 256, index = 6, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_7 = resource<hal_binding> {extent = 256, index = 7, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_8 = resource<hal_binding> {extent = 256, index = 8, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_9 = resource<hal_binding> {extent = 256, index = 9, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %eq = s_cmp_eq_u64 %lhs, %rhs
   %selected_eq = s_cselect_b32 %then_value, %else_value, %eq
   %ne = s_cmp_lg_u64 %lhs, %rhs
   %selected_ne = s_cselect_b32 %then_value, %else_value, %ne
-  %67 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %68 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %69 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %70 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %71 = s_xor_b32_lit %68, 2147483648
-  %72 = s_xor_b32_lit %70, 2147483648
-  %73 = s_cmp_lt_u32 %67, %69
-  %74, %slt = s_subb_u32 %71, %72, %73
+  %59 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %60 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %61 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %62 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = s_xor_b32_lit %60, 2147483648
+  %64 = s_xor_b32_lit %62, 2147483648
+  %65 = s_cmp_lt_u32 %59, %61
+  %66, %slt = s_subb_u32 %63, %64, %65
   %selected_slt = s_cselect_b32 %then_value, %else_value, %slt
-  %83 = s_cmp_le_u32 %67, %69
-  %84, %sle = s_subb_u32 %71, %72, %83
+  %75 = s_cmp_le_u32 %59, %61
+  %76, %sle = s_subb_u32 %63, %64, %75
   %selected_sle = s_cselect_b32 %then_value, %else_value, %sle
-  %93 = s_cmp_gt_u32 %67, %69
-  %94, %sgt = s_subb_u32 %72, %71, %93
+  %85 = s_cmp_gt_u32 %59, %61
+  %86, %sgt = s_subb_u32 %64, %63, %85
   %selected_sgt = s_cselect_b32 %then_value, %else_value, %sgt
-  %103 = s_cmp_ge_u32 %67, %69
-  %104, %sge = s_subb_u32 %72, %71, %103
+  %95 = s_cmp_ge_u32 %59, %61
+  %96, %sge = s_subb_u32 %64, %63, %95
   %selected_sge = s_cselect_b32 %then_value, %else_value, %sge
-  %111 = s_cmp_lt_u32 %67, %69
-  %112, %ult = s_subb_u32 %68, %70, %111
+  %103 = s_cmp_lt_u32 %59, %61
+  %104, %ult = s_subb_u32 %60, %62, %103
   %selected_ult = s_cselect_b32 %then_value, %else_value, %ult
-  %119 = s_cmp_le_u32 %67, %69
-  %120, %ule = s_subb_u32 %68, %70, %119
+  %111 = s_cmp_le_u32 %59, %61
+  %112, %ule = s_subb_u32 %60, %62, %111
   %selected_ule = s_cselect_b32 %then_value, %else_value, %ule
-  %127 = s_cmp_gt_u32 %67, %69
-  %128, %ugt = s_subb_u32 %70, %68, %127
+  %119 = s_cmp_gt_u32 %59, %61
+  %120, %ugt = s_subb_u32 %62, %60, %119
   %selected_ugt = s_cselect_b32 %then_value, %else_value, %ugt
-  %135 = s_cmp_ge_u32 %67, %69
-  %136, %uge = s_subb_u32 %70, %68, %135
+  %127 = s_cmp_ge_u32 %59, %61
+  %128, %uge = s_subb_u32 %62, %60, %127
   %selected_uge = s_cselect_b32 %then_value, %else_value, %uge
-  %139 = v_mov_b32_copy %selected_eq
-  %140 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %140, %139, %result_view_0
-  %141 = v_mov_b32_copy %selected_ne
-  global_store_b32_saddr %140, %141, %result_view_1
-  %143 = v_mov_b32_copy %selected_slt
-  global_store_b32_saddr %140, %143, %result_view_2
-  %145 = v_mov_b32_copy %selected_sle
-  global_store_b32_saddr %140, %145, %result_view_3
-  %147 = v_mov_b32_copy %selected_sgt
-  global_store_b32_saddr %140, %147, %result_view_4
-  %149 = v_mov_b32_copy %selected_sge
-  global_store_b32_saddr %140, %149, %result_view_5
-  %151 = v_mov_b32_copy %selected_ult
-  global_store_b32_saddr %140, %151, %result_view_6
-  %153 = v_mov_b32_copy %selected_ule
-  global_store_b32_saddr %140, %153, %result_view_7
-  %155 = v_mov_b32_copy %selected_ugt
-  global_store_b32_saddr %140, %155, %result_view_8
-  %157 = v_mov_b32_copy %selected_uge
-  global_store_b32_saddr %140, %157, %result_view_9
+  %131 = v_mov_b32_copy %selected_eq
+  %132 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %132, %131, %result_view_0
+  %133 = v_mov_b32_copy %selected_ne
+  global_store_b32_saddr %132, %133, %result_view_0 {offset = 256}
+  %135 = v_mov_b32_copy %selected_slt
+  global_store_b32_saddr %132, %135, %result_view_0 {offset = 512}
+  %137 = v_mov_b32_copy %selected_sle
+  global_store_b32_saddr %132, %137, %result_view_0 {offset = 768}
+  %139 = v_mov_b32_copy %selected_sgt
+  global_store_b32_saddr %132, %139, %result_view_0 {offset = 1024}
+  %141 = v_mov_b32_copy %selected_sge
+  global_store_b32_saddr %132, %141, %result_view_0 {offset = 1280}
+  %143 = v_mov_b32_copy %selected_ult
+  global_store_b32_saddr %132, %143, %result_view_0 {offset = 1536}
+  %145 = v_mov_b32_copy %selected_ule
+  global_store_b32_saddr %132, %145, %result_view_0 {offset = 1792}
+  %147 = v_mov_b32_copy %selected_ugt
+  global_store_b32_saddr %132, %147, %result_view_0 {offset = 2048}
+  %149 = v_mov_b32_copy %selected_uge
+  global_store_b32_saddr %132, %149, %result_view_0 {offset = 2304}
   return
 }
 
@@ -729,19 +657,10 @@ kernel.def @uniform_predicates() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer, %result_buffer_6: buffer, %result_buffer_7: buffer, %result_buffer_8: buffer, %result_buffer_9: buffer) {
+} launch(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
-  %result_view_6 = buffer.view %result_buffer_6[%fixture_base] : buffer -> view<64xi32>
-  %result_view_7 = buffer.view %result_buffer_7[%fixture_base] : buffer -> view<64xi32>
-  %result_view_8 = buffer.view %result_buffer_8[%fixture_base] : buffer -> view<64xi32>
-  %result_view_9 = buffer.view %result_buffer_9[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<10x64xi32>
   %eq = scalar.cmpi eq, %lhs, %rhs : i64
   %ne = scalar.cmpi ne, %lhs, %rhs : i64
   %slt = scalar.cmpi slt, %lhs, %rhs : i64
@@ -764,139 +683,130 @@ kernel.def @uniform_predicates() {
   %ule_word = scalar.extui %ule : i1 to i32
   %ugt_word = scalar.extui %ugt : i1 to i32
   %uge_word = scalar.extui %uge : i1 to i32
-  view.store %eq_word, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %ne_word, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %slt_word, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %sle_word, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %sgt_word, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %sge_word, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %ult_word, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %ule_word, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %ugt_word, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %uge_word, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %eq_word, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ne_word, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %slt_word, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sle_word, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sgt_word, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %sge_word, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ult_word, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ule_word, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %ugt_word, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %uge_word, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 ^fallback:
-  view.store %fallback, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %fallback, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %fallback, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %fallback, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "take", arg3 = "fallback"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [8, 8, 1, 4], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 14, resource_count = 10, resource_offsets = [24, 32, 40, 48, 56, 64, 72, 80, 88, 96], resource_parameter_indices = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take$80: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "take", arg3 = "fallback"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [8, 8, 1, 4], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 5, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take$99: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_6 = resource<hal_binding> {extent = 256, index = 6, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_7 = resource<hal_binding> {extent = 256, index = 7, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_8 = resource<hal_binding> {extent = 256, index = 8, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_9 = resource<hal_binding> {extent = 256, index = 9, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %take$93 = s_bfe_u32_lit %take$80, 524288
-  %94 = s_cmp_eq_u64 %lhs, %rhs
-  %95 = s_mov_b32 0
-  %96 = s_mov_b32 1
-  %eq = s_cselect_b32 %96, %95, %94
-  %98 = s_cmp_lg_u64 %lhs, %rhs
-  %ne = s_cselect_b32 %96, %95, %98
-  %102 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %103 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %104 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %105 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %106 = s_xor_b32_lit %103, 2147483648
-  %107 = s_xor_b32_lit %105, 2147483648
-  %108 = s_cmp_lt_u32 %102, %104
-  %109, %110 = s_subb_u32 %106, %107, %108
-  %slt = s_cselect_b32 %96, %95, %110
-  %120 = s_cmp_le_u32 %102, %104
-  %121, %122 = s_subb_u32 %106, %107, %120
-  %sle = s_cselect_b32 %96, %95, %122
-  %132 = s_cmp_gt_u32 %102, %104
-  %133, %134 = s_subb_u32 %107, %106, %132
-  %sgt = s_cselect_b32 %96, %95, %134
-  %144 = s_cmp_ge_u32 %102, %104
-  %145, %146 = s_subb_u32 %107, %106, %144
-  %sge = s_cselect_b32 %96, %95, %146
-  %154 = s_cmp_lt_u32 %102, %104
-  %155, %156 = s_subb_u32 %103, %105, %154
-  %ult = s_cselect_b32 %96, %95, %156
-  %164 = s_cmp_le_u32 %102, %104
-  %165, %166 = s_subb_u32 %103, %105, %164
-  %ule = s_cselect_b32 %96, %95, %166
-  %174 = s_cmp_gt_u32 %102, %104
-  %175, %176 = s_subb_u32 %105, %103, %174
-  %ugt = s_cselect_b32 %96, %95, %176
-  %184 = s_cmp_ge_u32 %102, %104
-  %185, %186 = s_subb_u32 %105, %103, %184
-  %uge = s_cselect_b32 %96, %95, %186
-  %191 = s_cmp_lg_i32 %take$93, %95
-  low.cond_br %191, ^observed, ^fallback : reg<amdgpu.scc>
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %take$103 = s_bfe_u32_lit %take$99, 524288
+  %104 = s_cmp_eq_u64 %lhs, %rhs
+  %105 = s_mov_b32 0
+  %106 = s_mov_b32 1
+  %eq = s_cselect_b32 %106, %105, %104
+  %108 = s_cmp_lg_u64 %lhs, %rhs
+  %ne = s_cselect_b32 %106, %105, %108
+  %112 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %113 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %114 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %115 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %116 = s_xor_b32_lit %113, 2147483648
+  %117 = s_xor_b32_lit %115, 2147483648
+  %118 = s_cmp_lt_u32 %112, %114
+  %119, %120 = s_subb_u32 %116, %117, %118
+  %slt = s_cselect_b32 %106, %105, %120
+  %130 = s_cmp_le_u32 %112, %114
+  %131, %132 = s_subb_u32 %116, %117, %130
+  %sle = s_cselect_b32 %106, %105, %132
+  %142 = s_cmp_gt_u32 %112, %114
+  %143, %144 = s_subb_u32 %117, %116, %142
+  %sgt = s_cselect_b32 %106, %105, %144
+  %154 = s_cmp_ge_u32 %112, %114
+  %155, %156 = s_subb_u32 %117, %116, %154
+  %sge = s_cselect_b32 %106, %105, %156
+  %164 = s_cmp_lt_u32 %112, %114
+  %165, %166 = s_subb_u32 %113, %115, %164
+  %ult = s_cselect_b32 %106, %105, %166
+  %174 = s_cmp_le_u32 %112, %114
+  %175, %176 = s_subb_u32 %113, %115, %174
+  %ule = s_cselect_b32 %106, %105, %176
+  %184 = s_cmp_gt_u32 %112, %114
+  %185, %186 = s_subb_u32 %115, %113, %184
+  %ugt = s_cselect_b32 %106, %105, %186
+  %194 = s_cmp_ge_u32 %112, %114
+  %195, %196 = s_subb_u32 %115, %113, %194
+  %uge = s_cselect_b32 %106, %105, %196
+  %201 = s_cmp_lg_i32 %take$103, %105
+  low.cond_br %201, ^observed, ^fallback : reg<amdgpu.scc>
 ^observed:
-  %194 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
-  %eq_word = s_cselect_b32 %96, %95, %194
-  %196 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
-  %ne_word = s_cselect_b32 %96, %95, %196
-  %198 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
-  %slt_word = s_cselect_b32 %96, %95, %198
-  %200 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
-  %sle_word = s_cselect_b32 %96, %95, %200
-  %202 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
-  %sgt_word = s_cselect_b32 %96, %95, %202
-  %204 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
-  %sge_word = s_cselect_b32 %96, %95, %204
-  %206 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
-  %ult_word = s_cselect_b32 %96, %95, %206
-  %208 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
-  %ule_word = s_cselect_b32 %96, %95, %208
-  %210 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
-  %ugt_word = s_cselect_b32 %96, %95, %210
-  %212 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
-  %uge_word = s_cselect_b32 %96, %95, %212
-  %214 = v_mov_b32_copy %eq_word
-  %215 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %215, %214, %result_view_0
-  %216 = v_mov_b32_copy %ne_word
-  global_store_b32_saddr %215, %216, %result_view_1
-  %218 = v_mov_b32_copy %slt_word
-  global_store_b32_saddr %215, %218, %result_view_2
-  %220 = v_mov_b32_copy %sle_word
-  global_store_b32_saddr %215, %220, %result_view_3
-  %222 = v_mov_b32_copy %sgt_word
-  global_store_b32_saddr %215, %222, %result_view_4
-  %224 = v_mov_b32_copy %sge_word
-  global_store_b32_saddr %215, %224, %result_view_5
-  %226 = v_mov_b32_copy %ult_word
-  global_store_b32_saddr %215, %226, %result_view_6
-  %228 = v_mov_b32_copy %ule_word
-  global_store_b32_saddr %215, %228, %result_view_7
-  %230 = v_mov_b32_copy %ugt_word
-  global_store_b32_saddr %215, %230, %result_view_8
-  %232 = v_mov_b32_copy %uge_word
-  global_store_b32_saddr %215, %232, %result_view_9
+  %204 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
+  %eq_word = s_cselect_b32 %106, %105, %204
+  %206 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
+  %ne_word = s_cselect_b32 %106, %105, %206
+  %208 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
+  %slt_word = s_cselect_b32 %106, %105, %208
+  %210 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
+  %sle_word = s_cselect_b32 %106, %105, %210
+  %212 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
+  %sgt_word = s_cselect_b32 %106, %105, %212
+  %214 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
+  %sge_word = s_cselect_b32 %106, %105, %214
+  %216 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
+  %ult_word = s_cselect_b32 %106, %105, %216
+  %218 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
+  %ule_word = s_cselect_b32 %106, %105, %218
+  %220 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
+  %ugt_word = s_cselect_b32 %106, %105, %220
+  %222 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
+  %uge_word = s_cselect_b32 %106, %105, %222
+  %224 = v_mov_b32_copy %eq_word
+  %225 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %225, %224, %result_view_0
+  %226 = v_mov_b32_copy %ne_word
+  global_store_b32_saddr %225, %226, %result_view_0 {offset = 256}
+  %228 = v_mov_b32_copy %slt_word
+  global_store_b32_saddr %225, %228, %result_view_0 {offset = 512}
+  %230 = v_mov_b32_copy %sle_word
+  global_store_b32_saddr %225, %230, %result_view_0 {offset = 768}
+  %232 = v_mov_b32_copy %sgt_word
+  global_store_b32_saddr %225, %232, %result_view_0 {offset = 1024}
+  %234 = v_mov_b32_copy %sge_word
+  global_store_b32_saddr %225, %234, %result_view_0 {offset = 1280}
+  %236 = v_mov_b32_copy %ult_word
+  global_store_b32_saddr %225, %236, %result_view_0 {offset = 1536}
+  %238 = v_mov_b32_copy %ule_word
+  global_store_b32_saddr %225, %238, %result_view_0 {offset = 1792}
+  %240 = v_mov_b32_copy %ugt_word
+  global_store_b32_saddr %225, %240, %result_view_0 {offset = 2048}
+  %242 = v_mov_b32_copy %uge_word
+  global_store_b32_saddr %225, %242, %result_view_0 {offset = 2304}
   return
 ^fallback:
-  %234 = v_mov_b32_copy %fallback
-  %235 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %235, %234, %result_view_0
-  global_store_b32_saddr %235, %234, %result_view_1
-  global_store_b32_saddr %235, %234, %result_view_2
-  global_store_b32_saddr %235, %234, %result_view_3
-  global_store_b32_saddr %235, %234, %result_view_4
-  global_store_b32_saddr %235, %234, %result_view_5
-  global_store_b32_saddr %235, %234, %result_view_6
-  global_store_b32_saddr %235, %234, %result_view_7
-  global_store_b32_saddr %235, %234, %result_view_8
-  global_store_b32_saddr %235, %234, %result_view_9
+  %244 = v_mov_b32_copy %fallback
+  %245 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %245, %244, %result_view_0
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 256}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 512}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 768}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 1024}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 1280}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 1536}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 1792}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 2048}
+  global_store_b32_saddr %245, %244, %result_view_0 {offset = 2304}
   return
 }
 
@@ -908,19 +818,10 @@ kernel.def @uniform_selections() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer, %result_buffer_3: buffer, %result_buffer_4: buffer, %result_buffer_5: buffer, %result_buffer_6: buffer, %result_buffer_7: buffer, %result_buffer_8: buffer, %result_buffer_9: buffer) {
+} launch(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi32>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi32>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi32>
-  %result_view_3 = buffer.view %result_buffer_3[%fixture_base] : buffer -> view<64xi32>
-  %result_view_4 = buffer.view %result_buffer_4[%fixture_base] : buffer -> view<64xi32>
-  %result_view_5 = buffer.view %result_buffer_5[%fixture_base] : buffer -> view<64xi32>
-  %result_view_6 = buffer.view %result_buffer_6[%fixture_base] : buffer -> view<64xi32>
-  %result_view_7 = buffer.view %result_buffer_7[%fixture_base] : buffer -> view<64xi32>
-  %result_view_8 = buffer.view %result_buffer_8[%fixture_base] : buffer -> view<64xi32>
-  %result_view_9 = buffer.view %result_buffer_9[%fixture_base] : buffer -> view<64xi32>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<10x64xi32>
   %eq = scalar.cmpi eq, %lhs, %rhs : i64
   %selected_eq = scf.select %eq, %then_value, %else_value : i32
   %ne = scalar.cmpi ne, %lhs, %rhs : i64
@@ -941,86 +842,77 @@ kernel.def @uniform_selections() {
   %selected_ugt = scf.select %ugt, %then_value, %else_value : i32
   %uge = scalar.cmpi uge, %lhs, %rhs : i64
   %selected_uge = scf.select %uge, %then_value, %else_value : i32
-  view.store %selected_eq, %result_view_0[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ne, %result_view_1[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_slt, %result_view_2[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sle, %result_view_3[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sgt, %result_view_4[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_sge, %result_view_5[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ult, %result_view_6[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ule, %result_view_7[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_ugt, %result_view_8[%fixture_lane] : i32, view<64xi32>
-  view.store %selected_uge, %result_view_9[%fixture_lane] : i32, view<64xi32>
+  view.store %selected_eq, %result_view_0[0, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ne, %result_view_0[1, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_slt, %result_view_0[2, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sle, %result_view_0[3, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sgt, %result_view_0[4, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_sge, %result_view_0[5, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ult, %result_view_0[6, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ule, %result_view_0[7, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_ugt, %result_view_0[8, %fixture_lane] : i32, view<10x64xi32>
+  view.store %selected_uge, %result_view_0[9, %fixture_lane] : i32, view<10x64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "then_value", arg3 = "else_value"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 14, resource_count = 10, resource_offsets = [24, 32, 40, 48, 56, 64, 72, 80, 88, 96], resource_parameter_indices = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 6, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs", arg1 = "rhs", arg2 = "then_value", arg3 = "else_value"}, direct_arg_offsets = [0, 8, 16, 20], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [8, 8, 4, 4], parameter_count = 5, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_3 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_4 = resource<hal_binding> {extent = 256, index = 4, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_5 = resource<hal_binding> {extent = 256, index = 5, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_6 = resource<hal_binding> {extent = 256, index = 6, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_7 = resource<hal_binding> {extent = 256, index = 7, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_8 = resource<hal_binding> {extent = 256, index = 8, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_9 = resource<hal_binding> {extent = 256, index = 9, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 2560, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %eq = s_cmp_eq_u64 %lhs, %rhs
   %selected_eq = s_cselect_b32 %then_value, %else_value, %eq
   %ne = s_cmp_lg_u64 %lhs, %rhs
   %selected_ne = s_cselect_b32 %then_value, %else_value, %ne
-  %67 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %68 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %69 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %70 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %71 = s_xor_b32_lit %68, 2147483648
-  %72 = s_xor_b32_lit %70, 2147483648
-  %73 = s_cmp_lt_u32 %67, %69
-  %74, %slt = s_subb_u32 %71, %72, %73
+  %59 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %60 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %61 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %62 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = s_xor_b32_lit %60, 2147483648
+  %64 = s_xor_b32_lit %62, 2147483648
+  %65 = s_cmp_lt_u32 %59, %61
+  %66, %slt = s_subb_u32 %63, %64, %65
   %selected_slt = s_cselect_b32 %then_value, %else_value, %slt
-  %83 = s_cmp_le_u32 %67, %69
-  %84, %sle = s_subb_u32 %71, %72, %83
+  %75 = s_cmp_le_u32 %59, %61
+  %76, %sle = s_subb_u32 %63, %64, %75
   %selected_sle = s_cselect_b32 %then_value, %else_value, %sle
-  %93 = s_cmp_gt_u32 %67, %69
-  %94, %sgt = s_subb_u32 %72, %71, %93
+  %85 = s_cmp_gt_u32 %59, %61
+  %86, %sgt = s_subb_u32 %64, %63, %85
   %selected_sgt = s_cselect_b32 %then_value, %else_value, %sgt
-  %103 = s_cmp_ge_u32 %67, %69
-  %104, %sge = s_subb_u32 %72, %71, %103
+  %95 = s_cmp_ge_u32 %59, %61
+  %96, %sge = s_subb_u32 %64, %63, %95
   %selected_sge = s_cselect_b32 %then_value, %else_value, %sge
-  %111 = s_cmp_lt_u32 %67, %69
-  %112, %ult = s_subb_u32 %68, %70, %111
+  %103 = s_cmp_lt_u32 %59, %61
+  %104, %ult = s_subb_u32 %60, %62, %103
   %selected_ult = s_cselect_b32 %then_value, %else_value, %ult
-  %119 = s_cmp_le_u32 %67, %69
-  %120, %ule = s_subb_u32 %68, %70, %119
+  %111 = s_cmp_le_u32 %59, %61
+  %112, %ule = s_subb_u32 %60, %62, %111
   %selected_ule = s_cselect_b32 %then_value, %else_value, %ule
-  %127 = s_cmp_gt_u32 %67, %69
-  %128, %ugt = s_subb_u32 %70, %68, %127
+  %119 = s_cmp_gt_u32 %59, %61
+  %120, %ugt = s_subb_u32 %62, %60, %119
   %selected_ugt = s_cselect_b32 %then_value, %else_value, %ugt
-  %135 = s_cmp_ge_u32 %67, %69
-  %136, %uge = s_subb_u32 %70, %68, %135
+  %127 = s_cmp_ge_u32 %59, %61
+  %128, %uge = s_subb_u32 %62, %60, %127
   %selected_uge = s_cselect_b32 %then_value, %else_value, %uge
-  %139 = v_mov_b32_copy %selected_eq
-  %140 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %140, %139, %result_view_0
-  %141 = v_mov_b32_copy %selected_ne
-  global_store_b32_saddr %140, %141, %result_view_1
-  %143 = v_mov_b32_copy %selected_slt
-  global_store_b32_saddr %140, %143, %result_view_2
-  %145 = v_mov_b32_copy %selected_sle
-  global_store_b32_saddr %140, %145, %result_view_3
-  %147 = v_mov_b32_copy %selected_sgt
-  global_store_b32_saddr %140, %147, %result_view_4
-  %149 = v_mov_b32_copy %selected_sge
-  global_store_b32_saddr %140, %149, %result_view_5
-  %151 = v_mov_b32_copy %selected_ult
-  global_store_b32_saddr %140, %151, %result_view_6
-  %153 = v_mov_b32_copy %selected_ule
-  global_store_b32_saddr %140, %153, %result_view_7
-  %155 = v_mov_b32_copy %selected_ugt
-  global_store_b32_saddr %140, %155, %result_view_8
-  %157 = v_mov_b32_copy %selected_uge
-  global_store_b32_saddr %140, %157, %result_view_9
+  %131 = v_mov_b32_copy %selected_eq
+  %132 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %132, %131, %result_view_0
+  %133 = v_mov_b32_copy %selected_ne
+  global_store_b32_saddr %132, %133, %result_view_0 {offset = 256}
+  %135 = v_mov_b32_copy %selected_slt
+  global_store_b32_saddr %132, %135, %result_view_0 {offset = 512}
+  %137 = v_mov_b32_copy %selected_sle
+  global_store_b32_saddr %132, %137, %result_view_0 {offset = 768}
+  %139 = v_mov_b32_copy %selected_sgt
+  global_store_b32_saddr %132, %139, %result_view_0 {offset = 1024}
+  %141 = v_mov_b32_copy %selected_sge
+  global_store_b32_saddr %132, %141, %result_view_0 {offset = 1280}
+  %143 = v_mov_b32_copy %selected_ult
+  global_store_b32_saddr %132, %143, %result_view_0 {offset = 1536}
+  %145 = v_mov_b32_copy %selected_ule
+  global_store_b32_saddr %132, %145, %result_view_0 {offset = 1792}
+  %147 = v_mov_b32_copy %selected_ugt
+  global_store_b32_saddr %132, %147, %result_view_0 {offset = 2048}
+  %149 = v_mov_b32_copy %selected_uge
+  global_store_b32_saddr %132, %149, %result_view_0 {offset = 2304}
   return
 }

@@ -145,51 +145,47 @@ kernel.def target(@target) @index_uniform_signed_shifts() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%value0: index, %amount0: index, %result_buffer_0: buffer, %result_buffer_1: buffer, %result_buffer_2: buffer) {
+} launch(%value0: index, %amount0: index, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
-  %result_view_2 = buffer.view %result_buffer_2[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<3x64xi64>
   %value = index.assume %value0 [range(%value0, -1024, -1)] : index
   %amount = index.assume %amount0 [range(%amount0, 1, 4)] : index
   %left = index.shli %value, %amount : index
   %arithmetic_right = index.shrsi %value, %amount : index
   %logical_right = index.shrui %value, %amount : index
   %result_storage_0 = index.cast %left : index to i64
-  view.store %result_storage_0, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_0, %result_view_0[0, %fixture_lane] : i64, view<3x64xi64>
   %result_storage_1 = index.cast %arithmetic_right : index to i64
-  view.store %result_storage_1, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_1, %result_view_0[1, %fixture_lane] : i64, view<3x64xi64>
   %result_storage_2 = index.cast %logical_right : index to i64
-  view.store %result_storage_2, %result_view_2[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_2, %result_view_0[2, %fixture_lane] : i64, view<3x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "value0", arg1 = "amount0"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 5, resource_count = 3, resource_offsets = [8, 16, 24], resource_parameter_indices = [2, 3, 4], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_uniform_signed_shifts(%value: reg<amdgpu.sgpr>, %amount: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "value0", arg1 = "amount0"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_uniform_signed_shifts(%value: reg<amdgpu.sgpr>, %amount: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_2 = resource<hal_binding> {extent = 512, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1536, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %left = s_lshl_b32 %value, %amount
   %arithmetic_right = s_ashr_i32 %value, %amount
   %logical_right = s_lshr_b32 %value, %amount
-  %29 = s_ashr_i32_rhs_inline %left, 31
-  %32 = v_mov_b32_copy %left
-  %34 = v_mov_b32_copy %29
-  %35 = concat(%32, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %36 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  global_store_b64_saddr %36, %35, %result_view_0
-  %37 = s_ashr_i32_rhs_inline %arithmetic_right, 31
-  %40 = v_mov_b32_copy %arithmetic_right
-  %42 = v_mov_b32_copy %37
-  %43 = concat(%40, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %36, %43, %result_view_1
-  %45 = s_mov_b32 0
-  %48 = v_mov_b32_copy %logical_right
-  %50 = v_mov_b32_copy %45
-  %51 = concat(%48, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %36, %51, %result_view_2
+  %28 = s_ashr_i32_rhs_inline %left, 31
+  %31 = v_mov_b32_copy %left
+  %33 = v_mov_b32_copy %28
+  %34 = concat(%31, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %35 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  global_store_b64_saddr %35, %34, %result_view_0
+  %36 = s_ashr_i32_rhs_inline %arithmetic_right, 31
+  %39 = v_mov_b32_copy %arithmetic_right
+  %41 = v_mov_b32_copy %36
+  %42 = concat(%39, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %35, %42, %result_view_0 {offset = 512}
+  %44 = s_mov_b32 0
+  %47 = v_mov_b32_copy %logical_right
+  %49 = v_mov_b32_copy %44
+  %50 = concat(%47, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %35, %50, %result_view_0 {offset = 1024}
   return
 }
 
@@ -276,11 +272,10 @@ kernel.def target(@target) @index_uniform_shift_mask() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%value: i32, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+} launch(%value: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi64>
   %value_index = index.cast %value : i32 to index
   %bounded_value = index.assume %value_index [range(%value_index, 0, 1024)] : index
   %shift = index.constant 7 : index
@@ -288,17 +283,16 @@ kernel.def target(@target) @index_uniform_shift_mask() {
   %mask = index.constant 127 : index
   %remainder = index.andi %bounded_value, %mask : index
   %result_storage_0 = index.cast %quotient : index to i64
-  view.store %result_storage_0, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_0, %result_view_0[0, %fixture_lane] : i64, view<2x64xi64>
   %result_storage_1 = index.cast %remainder : index to i64
-  view.store %result_storage_1, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_1, %result_view_0[1, %fixture_lane] : i64, view<2x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_uniform_shift_mask(%bounded_value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_uniform_shift_mask(%bounded_value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %shift = s_mov_b32 7
   %quotient = s_lshr_b32 %bounded_value, %shift
   %mask = s_mov_b32 127
@@ -311,7 +305,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   global_store_b64_saddr %32, %31, %result_view_0
   %36 = v_mov_b32_copy %remainder
   %39 = concat(%36, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %32, %39, %result_view_1
+  global_store_b64_saddr %32, %39, %result_view_0 {offset = 512}
   return
 }
 
@@ -323,28 +317,26 @@ kernel.def target(@target) @index_uniform_div_rem_power_of_two() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%value: i32, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+} launch(%value: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi64>
   %value_index = index.cast %value : i32 to index
   %bounded_value = index.assume %value_index [range(%value_index, 0, 31)] : index
   %divisor = index.constant 8 : index
   %quotient = index.div %bounded_value, %divisor : index
   %remainder = index.rem %bounded_value, %divisor : index
   %result_storage_0 = index.cast %quotient : index to i64
-  view.store %result_storage_0, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_0, %result_view_0[0, %fixture_lane] : i64, view<2x64xi64>
   %result_storage_1 = index.cast %remainder : index to i64
-  view.store %result_storage_1, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_1, %result_view_0[1, %fixture_lane] : i64, view<2x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_uniform_div_rem_power_of_two(%bounded_value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_uniform_div_rem_power_of_two(%bounded_value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %24 = s_mov_b32 3
   %quotient = s_lshr_b32 %bounded_value, %24
   %26 = s_mov_b32 7
@@ -357,7 +349,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   global_store_b64_saddr %35, %34, %result_view_0
   %39 = v_mov_b32_copy %remainder
   %42 = concat(%39, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %35, %42, %result_view_1
+  global_store_b64_saddr %35, %42, %result_view_0 {offset = 512}
   return
 }
 
@@ -369,28 +361,26 @@ kernel.def target(@target) @index_uniform_div_rem_magic_mul() {
   %launch_unit = index.constant 1 : index
   %launch_width = index.constant 64 : index
   kernel.launch.config workgroups(%launch_unit, %launch_unit, %launch_unit) workgroup_size(%launch_width, %launch_unit, %launch_unit) : index
-} launch(%value: i32, %result_buffer_0: buffer, %result_buffer_1: buffer) {
+} launch(%value: i32, %result_buffer_0: buffer) {
   %fixture_base = index.constant 0 : offset
   %fixture_lane = kernel.workitem.id<x> : index
-  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<64xi64>
-  %result_view_1 = buffer.view %result_buffer_1[%fixture_base] : buffer -> view<64xi64>
+  %result_view_0 = buffer.view %result_buffer_0[%fixture_base] : buffer -> view<2x64xi64>
   %value_index = index.cast %value : i32 to index
   %bounded_value = index.assume %value_index [range(%value_index, 0, 24)] : index
   %divisor = index.constant 5 : index
   %quotient = index.div %bounded_value, %divisor : index
   %remainder = index.rem %bounded_value, %divisor : index
   %result_storage_0 = index.cast %quotient : index to i64
-  view.store %result_storage_0, %result_view_0[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_0, %result_view_0[0, %fixture_lane] : i64, view<2x64xi64>
   %result_storage_1 = index.cast %remainder : index to i64
-  view.store %result_storage_1, %result_view_1[%fixture_lane] : i64, view<64xi64>
+  view.store %result_storage_1, %result_view_0[1, %fixture_lane] : i64, view<2x64xi64>
   kernel.return
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_uniform_div_rem_magic_mul(%bounded_value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_uniform_div_rem_magic_mul(%bounded_value: reg<amdgpu.sgpr>) asm {
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %result_view_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %result_view_1 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result_view_0 = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %divisor = s_mov_b32 5
   %21 = s_mov_b32 858993460
   %quotient = s_mul_hi_u32 %bounded_value, %21
@@ -404,7 +394,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   global_store_b64_saddr %34, %33, %result_view_0
   %38 = v_mov_b32_copy %remainder
   %41 = concat(%38, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %34, %41, %result_view_1
+  global_store_b64_saddr %34, %41, %result_view_0 {offset = 512}
   return
 }
 
