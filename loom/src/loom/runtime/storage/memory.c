@@ -6,6 +6,8 @@
 
 #include "loom/runtime/storage/memory.h"
 
+#include <stdlib.h>
+
 #include "iree/async/semaphore.h"
 #include "iree/base/internal/atomic_slist.h"
 #include "iree/base/threading/mutex.h"
@@ -173,7 +175,7 @@ struct loom_runtime_memory_operation_t {
   loom_runtime_backing_growth_t growth;
   // Unique pending-parent readiness, captured in trailing storage.
   iree_hal_semaphore_list_t allocation_waits;
-  // Captured virtual mapping updates in trailing storage.
+  // Mapping runs in trailing storage, independent of logical edit ownership.
   iree_hal_memory_mapping_t* mappings;
   // Owned predecessor mapping references, at most one per edited reservation.
   iree_hal_semaphore_list_t mapping_waits;
@@ -1270,6 +1272,61 @@ static void loom_runtime_memory_operation_complete(
   iree_slim_mutex_unlock(&operation->mutex);
 }
 
+static int loom_runtime_memory_edit_compare(const void* lhs, const void* rhs) {
+  const loom_runtime_memory_edit_t* a = lhs;
+  const loom_runtime_memory_edit_t* b = rhs;
+  if (a->buffer != b->buffer) {
+    return (uintptr_t)a->buffer < (uintptr_t)b->buffer ? -1 : 1;
+  }
+  return (a->index > b->index) - (a->index < b->index);
+}
+
+// Native readiness establishes each parent's source view. Consecutive logical
+// slots sharing contiguous physical storage become one mapping, while edits
+// retain their independent publication, return, and failure ownership.
+static iree_host_size_t loom_runtime_memory_operation_build_mappings(
+    loom_runtime_memory_operation_t* operation) {
+  iree_host_size_t count = 0;
+  for (iree_host_size_t i = 0; i < operation->count; ++i) {
+    const loom_runtime_memory_edit_t* edit = &operation->edits[i];
+    const loom_runtime_backing_entry_t* result = &edit->result;
+    const iree_device_size_t length =
+        loom_runtime_memory_slab_length(edit->buffer, edit->index);
+    const loom_runtime_memory_edit_t* previous =
+        i ? &operation->edits[i - 1] : NULL;
+    if (previous && previous->buffer == edit->buffer &&
+        previous->index + 1 == edit->index &&
+        previous->result.physical == result->physical &&
+        previous->result.physical_offset +
+                loom_runtime_memory_slab_length(previous->buffer,
+                                                previous->index) ==
+            result->physical_offset) {
+      operation->mappings[count - 1].target_range.byte_length += length;
+      continue;
+    }
+    iree_hal_buffer_t* source =
+        loom_runtime_backing_pages_buffer((loom_runtime_backing_slot_t){
+            result->physical, result->physical_offset});
+    operation->mappings[count++] = (iree_hal_memory_mapping_t){
+        .target = edit->buffer->handle,
+        .scope = operation->pool->mapping_scope,
+        .target_range = {edit->index * edit->buffer->geometry.mapping_size,
+                         length},
+        .source = operation->releasing ? NULL : source,
+        .source_offset = operation->releasing ? 0 : result->physical_offset,
+        .access = operation->releasing ? IREE_HAL_MEMORY_ACCESS_NONE
+                                       : IREE_HAL_MEMORY_ACCESS_ALL,
+        .operation = operation->releasing
+                         ? IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND
+                         : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+        .previous_source = operation->releasing ? source : NULL,
+        .previous_source_offset =
+            operation->releasing ? result->physical_offset : 0,
+    };
+  }
+  return count;
+}
+
 // Sources are resolved only after their private native acquisition completed.
 // Warm claims skip the allocation queue entirely; pending claims wait once per
 // parent and continue directly into mapping without creating per-page views.
@@ -1286,20 +1343,14 @@ static void loom_runtime_memory_stage_completed(
         next_status =
             iree_hal_semaphore_signal(operation->stages[1].semaphore, 1, NULL);
       } else {
-        for (iree_host_size_t i = 0; i < operation->count; ++i) {
-          const loom_runtime_backing_entry_t* result =
-              &operation->edits[i].result;
-          operation->mappings[i].source =
-              loom_runtime_backing_pages_buffer((loom_runtime_backing_slot_t){
-                  result->physical, result->physical_offset});
-          operation->mappings[i].source_offset = result->physical_offset;
-        }
+        const iree_host_size_t mapping_count =
+            loom_runtime_memory_operation_build_mappings(operation);
         uint64_t value = 1;
         const iree_hal_semaphore_list_t signal = {
             1, &operation->stages[1].semaphore, &value};
-        next_status = iree_hal_queue_map(
-            operation->pool->queue, operation->mapping_waits, signal,
-            operation->count, operation->mappings, 0);
+        next_status =
+            iree_hal_queue_map(operation->pool->queue, operation->mapping_waits,
+                               signal, mapping_count, operation->mappings, 0);
       }
     }
     for (iree_host_size_t i = 0; i < operation->mapping_waits.count; ++i) {
@@ -1415,6 +1466,12 @@ static void loom_runtime_memory_operation_enqueue(
     loom_runtime_memory_pool_t* pool,
     loom_runtime_memory_operation_t* operation,
     iree_status_t preparation_status) {
+  // Growth and trim capture sparse-directory order and have no indexed backing
+  // consumer. Commitments preserve caller order for streamed source I/O.
+  if ((operation->growing || operation->releasing) && operation->count > 1) {
+    qsort(operation->edits, operation->count, sizeof(operation->edits[0]),
+          loom_runtime_memory_edit_compare);
+  }
   operation->observer.wake = pool->observer.wake;
   operation->observer.user_data = pool->observer.user_data;
   operation->pending_next = pool->pending_operations;
@@ -1450,32 +1507,7 @@ static void loom_runtime_memory_operation_enqueue(
       edit->buffer->target->mapping_completion = mapping_completion;
       iree_hal_semaphore_retain(mapping_completion);
     }
-    operation->mappings[i] = (iree_hal_memory_mapping_t){
-        .target = edit->buffer->handle,
-        .scope = pool->mapping_scope,
-        .target_range = {edit->index * edit->buffer->geometry.mapping_size,
-                         loom_runtime_memory_slab_length(edit->buffer,
-                                                         edit->index)},
-        .access = operation->releasing ? IREE_HAL_MEMORY_ACCESS_NONE
-                                       : IREE_HAL_MEMORY_ACCESS_ALL,
-        .operation = operation->releasing
-                         ? IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND
-                         : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
-        .previous_source =
-            operation->releasing
-                ? loom_runtime_backing_pages_buffer(
-                      (loom_runtime_backing_slot_t){
-                          edit->result.physical, edit->result.physical_offset})
-                : NULL,
-        .previous_source_offset =
-            operation->releasing ? edit->result.physical_offset : 0,
-    };
-    if (operation->growing) {
-      operation->mappings[i].source =
-          loom_runtime_backing_pages_buffer((loom_runtime_backing_slot_t){
-              edit->result.physical, edit->result.physical_offset});
-      operation->mappings[i].source_offset = edit->result.physical_offset;
-    } else if (!operation->releasing && edit->result.physical) {
+    if (!operation->growing && !operation->releasing && edit->result.physical) {
       iree_hal_semaphore_t* ready = loom_runtime_backing_pages_observe(
           (loom_runtime_backing_slot_t){edit->result.physical,
                                         edit->result.physical_offset},
@@ -1498,10 +1530,12 @@ static void loom_runtime_memory_operation_enqueue(
     }
   }
   loom_runtime_backing_pages_submit(&operation->growth);
+  iree_host_size_t mapping_count = 0;
   if (iree_status_is_ok(status)) {
     if (operation->releasing || operation->growing) {
+      mapping_count = loom_runtime_memory_operation_build_mappings(operation);
       status = iree_hal_queue_map(pool->queue, operation->mapping_waits, first,
-                                  operation->count, operation->mappings, 0);
+                                  mapping_count, operation->mappings, 0);
     } else if (operation->allocation_waits.count) {
       status = iree_hal_queue_barrier(pool->queue, operation->allocation_waits,
                                       first, NULL, 0);
@@ -1515,7 +1549,7 @@ static void loom_runtime_memory_operation_enqueue(
                             iree_status_clone(status));
     iree_hal_semaphore_fail(operation->stages[1].semaphore, status);
   } else if (operation->growing) {
-    for (iree_host_size_t i = 0; i < operation->count; ++i) {
+    for (iree_host_size_t i = 0; i < mapping_count; ++i) {
       operation->mappings[i].target = operation->growing->previous_handle;
       operation->mappings[i].previous_source = operation->mappings[i].source;
       operation->mappings[i].previous_source_offset =
@@ -1526,7 +1560,7 @@ static void loom_runtime_memory_operation_enqueue(
       operation->mappings[i].operation =
           IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
     }
-    status = iree_hal_queue_map(pool->queue, first, second, operation->count,
+    status = iree_hal_queue_map(pool->queue, first, second, mapping_count,
                                 operation->mappings, 0);
     if (!iree_status_is_ok(status)) {
       iree_hal_semaphore_fail(operation->stages[1].semaphore, status);
