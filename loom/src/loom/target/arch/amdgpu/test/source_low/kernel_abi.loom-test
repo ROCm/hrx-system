@@ -199,7 +199,7 @@ kernel.def target(@target) export("projected_vector_argument_payloads") @project
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 42, direct_arg_count = 4, direct_arg_names = {arg0 = "", arg1 = "", arg2 = "", arg3 = ""}, direct_arg_offsets = [0, 128, 132, 164], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [128, 4, 32, 1], direct_arg_sizes = [128, 4, 32, 4], parameter_count = 5, resource_count = 1, resource_offsets = [168], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) export("projected_vector_argument_payloads") workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @projected_vector_argument_payloads(%8: reg<amdgpu.sgpr x32>, %9: reg<amdgpu.sgpr>, %10: reg<amdgpu.sgpr x8>, %11: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 42, direct_arg_count = 4, direct_arg_names = {arg0 = "", arg1 = "", arg2 = "", arg3 = ""}, direct_arg_offsets = [0, 128, 132, 164], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_payload_sizes = [128, 4, 32, 1], direct_arg_sizes = [128, 4, 32, 4], parameter_count = 5, resource_count = 1, resource_offsets = [168], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) export("projected_vector_argument_payloads") workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @projected_vector_argument_payloads(%10: reg<amdgpu.sgpr x32>, %11: reg<amdgpu.sgpr>, %12: reg<amdgpu.sgpr x8>, %13: reg<amdgpu.sgpr>) asm {
   return
 }
 

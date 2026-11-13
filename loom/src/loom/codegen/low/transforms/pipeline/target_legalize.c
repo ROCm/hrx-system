@@ -1752,6 +1752,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
       .vector_packet_policy = selection->policy->vector_packet_policy,
       .bitstream_policy = selection->policy->bitstream_policy,
       .bulk_memory_policy = selection->policy->bulk_memory_policy,
+      .predicate_storage_type = selection->policy->predicate_storage_type,
       .source_vector_carrier_supported =
           selection->policy->source_vector_carrier_supported,
       .source_function_has_unsupported_vector_carrier =

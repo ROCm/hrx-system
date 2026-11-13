@@ -163,8 +163,8 @@ static bool loom_kernel_workgroup_collective_math_is_supported(
 }
 
 static bool loom_kernel_workgroup_payload_initialize(
-    loom_type_t logical_type, uint32_t scratch_slot_count,
-    loom_kernel_workgroup_payload_t* out_payload) {
+    const loom_target_legalization_context_t* context, loom_type_t logical_type,
+    uint32_t scratch_slot_count, loom_kernel_workgroup_payload_t* out_payload) {
   *out_payload = (loom_kernel_workgroup_payload_t){0};
   int64_t lane_count = 1;
   if (loom_type_is_vector(logical_type)) {
@@ -187,8 +187,11 @@ static bool loom_kernel_workgroup_payload_initialize(
   loom_scalar_type_t storage_element_type = logical_element_type;
   int64_t element_byte_count = 0;
   if (logical_element_type == LOOM_SCALAR_TYPE_I1) {
-    storage_element_type = LOOM_SCALAR_TYPE_I8;
-    element_byte_count = 1;
+    storage_element_type =
+        context->predicate_storage_type
+            ? context->predicate_storage_type(context->target_facts)
+            : LOOM_SCALAR_TYPE_I8;
+    element_byte_count = loom_scalar_type_bitwidth(storage_element_type) / 8;
   } else if (logical_element_bit_count > 0 &&
              (logical_element_bit_count % 8) == 0) {
     element_byte_count = logical_element_bit_count / 8;
@@ -1315,7 +1318,8 @@ static iree_status_t loom_kernel_workgroup_replace_logical_collective(
   for (iree_host_size_t i = 0; i < sources.count; ++i) {
     loom_type_t type =
         loom_module_value_type(context->module, sources.values[i]);
-    if (!loom_kernel_workgroup_payload_initialize(type, 1, &payloads[i])) {
+    if (!loom_kernel_workgroup_payload_initialize(context, type, 1,
+                                                  &payloads[i])) {
       return iree_ok_status();
     }
     if (loom_type_is_vector(type)) {
@@ -1329,7 +1333,7 @@ static iree_status_t loom_kernel_workgroup_replace_logical_collective(
                                        loom_type_element_type(type),
                                        loom_dim_pack_static(lane_count), 0);
     }
-    if (!loom_kernel_workgroup_payload_initialize(type, group_count,
+    if (!loom_kernel_workgroup_payload_initialize(context, type, group_count,
                                                   &payloads[i])) {
       return iree_ok_status();
     }
@@ -1457,7 +1461,7 @@ iree_status_t loom_kernel_target_legalize_workgroup_reduce(
                                                  (void**)&replacements));
   for (iree_host_size_t i = 0; i < values.count; ++i) {
     if (!loom_kernel_workgroup_payload_initialize(
-            loom_module_value_type(context->module, values.values[i]),
+            context, loom_module_value_type(context->module, values.values[i]),
             scratch_slot_count, &payloads[i])) {
       return iree_ok_status();
     }
@@ -1531,8 +1535,8 @@ iree_status_t loom_kernel_target_legalize_workgroup_scan(
       topology.subgroup_count *
       (topology.subgroup_count <= topology.subgroup_size ? 2u : 1u);
   if (!loom_kernel_workgroup_payload_initialize(
-          loom_module_value_type(context->module, source), scratch_slot_count,
-          &payload)) {
+          context, loom_module_value_type(context->module, source),
+          scratch_slot_count, &payload)) {
     return iree_ok_status();
   }
 

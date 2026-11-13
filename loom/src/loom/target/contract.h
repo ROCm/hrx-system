@@ -69,6 +69,13 @@ typedef struct loom_target_bitstream_policy_t {
   loom_target_vector_carrier_supported_callback_t packet_carrier_supported;
 } loom_target_bitstream_policy_t;
 
+// Selects a byte-addressable integer carrier for compiler-created predicate
+// scratch. Stores zero-extend i1 and loads truncate back to i1; logical
+// arithmetic and its identities stay in i1. The selected target must support
+// these conversions and ordinary loads/stores of the returned scalar type.
+typedef loom_scalar_type_t (*loom_target_predicate_storage_type_fn_t)(
+    const loom_target_facts_t* target_facts);
+
 // Preferred exact transfers for shared bulk-buffer decomposition. Each bit
 // names its power-of-two byte width (1 | 2 | 4 | 8, for example). Scalar
 // transfers use integers; vector transfers use contiguous i32 lanes. Targets

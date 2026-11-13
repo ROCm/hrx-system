@@ -293,6 +293,7 @@ loom_corpus_build(
     xfails = {
         "//loom/target/wasm:simd128": {
             "control/branch/structured.loom:@structured_branch_observations": "TARGET/001",
+            "control/loop/vector_recurrence.loom:@dynamic_row_bank": "WASM/001",
             "control/loop/vector_recurrence.loom:@packed_history": "TARGET/001,TARGET/032",
             "control/loop/vector_recurrence.loom:@wide_conditional_accumulation": "WASM/001",
             "function/buffer/arguments.loom:@buffer_argument_observations": "TARGET/001",
@@ -408,6 +409,7 @@ loom_scenario_test(
     xfails = {
         WASM_HOSTED_PROFILE.name: {
             "control/branch/structured.loom:@structured_branch_values": "TARGET/001",
+            "control/loop/vector_recurrence.loom:@dynamic_row_bank_values": "WASM/001",
             "control/loop/vector_recurrence.loom:@packed_history_values": "TARGET/001,TARGET/032",
             "control/loop/vector_recurrence.loom:@wide_conditional_accumulation_values": "WASM/001",
             "function/buffer/arguments.loom:@buffer_argument_values": "TARGET/001",

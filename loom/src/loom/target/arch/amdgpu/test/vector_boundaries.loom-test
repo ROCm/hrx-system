@@ -11,19 +11,19 @@ func.def public target(@target) @wide_callable_family(%i1_value: vector<33xi1>, 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-func.def public target(@target) @wide_callable_family(%48: vector<32xi1>, %49: vector<1xi1>, %50: vector<64xi8>, %51: vector<64xi8>, %52: vector<1xi8>, %53: vector<32xi16>, %54: vector<32xi16>, %55: vector<1xi16>, %56: vector<32xi32>, %57: vector<1xi32>, %58: vector<16xi64>, %59: vector<1xi64>, %60: vector<64xf8E4M3>, %61: vector<64xf8E4M3>, %62: vector<1xf8E4M3>, %63: vector<64xf8E5M2>, %64: vector<64xf8E5M2>, %65: vector<1xf8E5M2>, %66: vector<64xf16>, %67: vector<1xf16>, %68: vector<64xbf16>, %69: vector<1xbf16>, %70: vector<32xf32>, %71: vector<1xf32>, %72: vector<16xf64>, %73: vector<1xf64>) -> (vector<32xi1>, vector<1xi1>, vector<64xi8>, vector<64xi8>, vector<1xi8>, vector<32xi16>, vector<32xi16>, vector<1xi16>, vector<32xi32>, vector<1xi32>, vector<16xi64>, vector<1xi64>, vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3>, vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2>, vector<64xf16>, vector<1xf16>, vector<64xbf16>, vector<1xbf16>, vector<32xf32>, vector<1xf32>, vector<16xf64>, vector<1xf64>) {
-  %i1_value = vector.concat<0> %48, %49 : vector<32xi1>, vector<1xi1> -> vector<33xi1>
-  %i8_value = vector.concat<0> %50, %51, %52 : vector<64xi8>, vector<64xi8>, vector<1xi8> -> vector<129xi8>
-  %i16_value = vector.concat<0> %53, %54, %55 : vector<32xi16>, vector<32xi16>, vector<1xi16> -> vector<65xi16>
-  %i32_value = vector.concat<0> %56, %57 : vector<32xi32>, vector<1xi32> -> vector<33xi32>
-  %i64_value = vector.concat<0> %58, %59 : vector<16xi64>, vector<1xi64> -> vector<17xi64>
-  %f8e4m3_value = vector.concat<0> %60, %61, %62 : vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3> -> vector<129xf8E4M3>
-  %f8e5m2_value = vector.concat<0> %63, %64, %65 : vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2> -> vector<129xf8E5M2>
-  %f16_value = vector.concat<0> %66, %67 : vector<64xf16>, vector<1xf16> -> vector<65xf16>
-  %bf16_value = vector.concat<0> %68, %69 : vector<64xbf16>, vector<1xbf16> -> vector<65xbf16>
-  %f32_value = vector.concat<0> %70, %71 : vector<32xf32>, vector<1xf32> -> vector<33xf32>
-  %f64_value = vector.concat<0> %72, %73 : vector<16xf64>, vector<1xf64> -> vector<17xf64>
-  func.return %48, %49, %50, %51, %52, %53, %54, %55, %56, %57, %58, %59, %60, %61, %62, %63, %64, %65, %66, %67, %68, %69, %70, %71, %72, %73 : vector<32xi1>, vector<1xi1>, vector<64xi8>, vector<64xi8>, vector<1xi8>, vector<32xi16>, vector<32xi16>, vector<1xi16>, vector<32xi32>, vector<1xi32>, vector<16xi64>, vector<1xi64>, vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3>, vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2>, vector<64xf16>, vector<1xf16>, vector<64xbf16>, vector<1xbf16>, vector<32xf32>, vector<1xf32>, vector<16xf64>, vector<1xf64>
+func.def public target(@target) @wide_callable_family(%59: vector<32xi1>, %60: vector<1xi1>, %61: vector<64xi8>, %62: vector<64xi8>, %63: vector<1xi8>, %64: vector<32xi16>, %65: vector<32xi16>, %66: vector<1xi16>, %67: vector<32xi32>, %68: vector<1xi32>, %69: vector<16xi64>, %70: vector<1xi64>, %71: vector<64xf8E4M3>, %72: vector<64xf8E4M3>, %73: vector<1xf8E4M3>, %74: vector<64xf8E5M2>, %75: vector<64xf8E5M2>, %76: vector<1xf8E5M2>, %77: vector<64xf16>, %78: vector<1xf16>, %79: vector<64xbf16>, %80: vector<1xbf16>, %81: vector<32xf32>, %82: vector<1xf32>, %83: vector<16xf64>, %84: vector<1xf64>) -> (vector<32xi1>, vector<1xi1>, vector<64xi8>, vector<64xi8>, vector<1xi8>, vector<32xi16>, vector<32xi16>, vector<1xi16>, vector<32xi32>, vector<1xi32>, vector<16xi64>, vector<1xi64>, vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3>, vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2>, vector<64xf16>, vector<1xf16>, vector<64xbf16>, vector<1xbf16>, vector<32xf32>, vector<1xf32>, vector<16xf64>, vector<1xf64>) {
+  %i1_value = vector.concat<0> %59, %60 : vector<32xi1>, vector<1xi1> -> vector<33xi1>
+  %i8_value = vector.concat<0> %61, %62, %63 : vector<64xi8>, vector<64xi8>, vector<1xi8> -> vector<129xi8>
+  %i16_value = vector.concat<0> %64, %65, %66 : vector<32xi16>, vector<32xi16>, vector<1xi16> -> vector<65xi16>
+  %i32_value = vector.concat<0> %67, %68 : vector<32xi32>, vector<1xi32> -> vector<33xi32>
+  %i64_value = vector.concat<0> %69, %70 : vector<16xi64>, vector<1xi64> -> vector<17xi64>
+  %f8e4m3_value = vector.concat<0> %71, %72, %73 : vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3> -> vector<129xf8E4M3>
+  %f8e5m2_value = vector.concat<0> %74, %75, %76 : vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2> -> vector<129xf8E5M2>
+  %f16_value = vector.concat<0> %77, %78 : vector<64xf16>, vector<1xf16> -> vector<65xf16>
+  %bf16_value = vector.concat<0> %79, %80 : vector<64xbf16>, vector<1xbf16> -> vector<65xbf16>
+  %f32_value = vector.concat<0> %81, %82 : vector<32xf32>, vector<1xf32> -> vector<33xf32>
+  %f64_value = vector.concat<0> %83, %84 : vector<16xf64>, vector<1xf64> -> vector<17xf64>
+  func.return %59, %60, %61, %62, %63, %64, %65, %66, %67, %68, %69, %70, %71, %72, %73, %74, %75, %76, %77, %78, %79, %80, %81, %82, %83, %84 : vector<32xi1>, vector<1xi1>, vector<64xi8>, vector<64xi8>, vector<1xi8>, vector<32xi16>, vector<32xi16>, vector<1xi16>, vector<32xi32>, vector<1xi32>, vector<16xi64>, vector<1xi64>, vector<64xf8E4M3>, vector<64xf8E4M3>, vector<1xf8E4M3>, vector<64xf8E5M2>, vector<64xf8E5M2>, vector<1xf8E5M2>, vector<64xf16>, vector<1xf16>, vector<64xbf16>, vector<1xbf16>, vector<32xf32>, vector<1xf32>, vector<16xf64>, vector<1xf64>
 }
 
 // ====
@@ -46,12 +46,12 @@ func.def public target(@target) @wide_call(%value: vector<36xf32>) -> (vector<36
 // ----
 amdgpu.target<gfx11-generic> @target
 
-func.def noinline target(@target) @wide_identity(%12: vector<32xf32>, %13: vector<4xf32>) -> (vector<32xf32>, vector<4xf32>) {
-  func.return %12, %13 : vector<32xf32>, vector<4xf32>
+func.def noinline target(@target) @wide_identity(%14: vector<32xf32>, %15: vector<4xf32>) -> (vector<32xf32>, vector<4xf32>) {
+  func.return %14, %15 : vector<32xf32>, vector<4xf32>
 }
 
-func.def public target(@target) @wide_call(%16: vector<32xf32>, %17: vector<4xf32>) -> (vector<32xf32>, vector<4xf32>) {
-  %5, %6 = func.call pure noinline @wide_identity(%16, %17) : (vector<32xf32>, vector<4xf32>) -> (vector<32xf32>, vector<4xf32>)
+func.def public target(@target) @wide_call(%18: vector<32xf32>, %19: vector<4xf32>) -> (vector<32xf32>, vector<4xf32>) {
+  %5, %6 = func.call pure noinline @wide_identity(%18, %19) : (vector<32xf32>, vector<4xf32>) -> (vector<32xf32>, vector<4xf32>)
   func.return %5, %6 : vector<32xf32>, vector<4xf32>
 }
 
@@ -79,20 +79,20 @@ func.def public target(@target) @wide_cfg_arithmetic(%lhs: vector<36xf32>, %rhs:
 // ----
 amdgpu.target<gfx11-generic> @target
 
-func.def public target(@target) @wide_cfg_arithmetic(%17: vector<32xf32>, %18: vector<4xf32>, %19: vector<32xf32>, %20: vector<4xf32>, %condition: i1) -> (vector<32xf32>, vector<4xf32>) {
-  cfg.br ^_bb1(%17: vector<32xf32>, %18: vector<4xf32>, %19: vector<32xf32>, %20: vector<4xf32>, %condition: i1)
-^_bb1(%7: vector<32xf32>, %0: vector<4xf32>, %9: vector<32xf32>, %1: vector<4xf32>, %2: i1):
+func.def public target(@target) @wide_cfg_arithmetic(%20: vector<32xf32>, %21: vector<4xf32>, %22: vector<32xf32>, %23: vector<4xf32>, %condition: i1) -> (vector<32xf32>, vector<4xf32>) {
+  cfg.br ^_bb1(%20: vector<32xf32>, %21: vector<4xf32>, %22: vector<32xf32>, %23: vector<4xf32>, %condition: i1)
+^_bb1(%7: vector<32xf32>, %0: vector<4xf32>, %10: vector<32xf32>, %1: vector<4xf32>, %2: i1):
   cfg.cond_br %2, ^_bb2, ^_bb3
 ^_bb2:
-  %24 = vector.addf %7, %9 : vector<32xf32>
-  %25 = vector.addf %0, %1 : vector<4xf32>
-  cfg.br ^_bb4(%24: vector<32xf32>, %25: vector<4xf32>)
-^_bb3:
-  %27 = vector.subf %7, %9 : vector<32xf32>
-  %28 = vector.subf %0, %1 : vector<4xf32>
+  %27 = vector.addf %7, %10 : vector<32xf32>
+  %28 = vector.addf %0, %1 : vector<4xf32>
   cfg.br ^_bb4(%27: vector<32xf32>, %28: vector<4xf32>)
-^_bb4(%11: vector<32xf32>, %6: vector<4xf32>):
-  func.return %11, %6 : vector<32xf32>, vector<4xf32>
+^_bb3:
+  %30 = vector.subf %7, %10 : vector<32xf32>
+  %31 = vector.subf %0, %1 : vector<4xf32>
+  cfg.br ^_bb4(%30: vector<32xf32>, %31: vector<4xf32>)
+^_bb4(%13: vector<32xf32>, %6: vector<4xf32>):
+  func.return %13, %6 : vector<32xf32>, vector<4xf32>
 }
 
 // ====
@@ -112,12 +112,12 @@ func.def public target(@target) @wide_bitcast(%input: vector<64xf32>) -> (vector
 // ----
 amdgpu.target<gfx11-generic> @target
 
-func.def public target(@target) @wide_bitcast(%7: vector<32xf32>, %8: vector<32xf32>) -> (vector<32xi32>, vector<32xi32>) {
-  %input = vector.concat<0> %7, %8 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
+func.def public target(@target) @wide_bitcast(%8: vector<32xf32>, %9: vector<32xf32>) -> (vector<32xi32>, vector<32xi32>) {
+  %input = vector.concat<0> %8, %9 : vector<32xf32>, vector<32xf32> -> vector<64xf32>
   %bits = vector.bitcast %input : vector<64xf32> to vector<64xi32>
-  %5 = vector.slice %bits[0] : vector<64xi32> -> vector<32xi32>
-  %6 = vector.slice %bits[32] : vector<64xi32> -> vector<32xi32>
-  func.return %5, %6 : vector<32xi32>, vector<32xi32>
+  %6 = vector.slice %bits[0] : vector<64xi32> -> vector<32xi32>
+  %7 = vector.slice %bits[32] : vector<64xi32> -> vector<32xi32>
+  func.return %6, %7 : vector<32xi32>, vector<32xi32>
 }
 
 // ====
@@ -137,13 +137,13 @@ func.def public target(@target) @wide_bitunpacku(%packed: vector<65xi8>) -> (vec
 // ----
 amdgpu.target<gfx11-generic> @target
 
-func.def public target(@target) @wide_bitunpacku(%8: vector<64xi8>, %9: vector<1xi8>) -> (vector<32xi32>, vector<32xi32>, vector<1xi32>) {
-  %21 = vector.slice %8[0] : vector<64xi8> -> vector<32xi8>
-  %14 = vector.bitunpacku<8> %21 : vector<32xi8> -> vector<32xi32>
-  %20 = vector.slice %8[32] : vector<64xi8> -> vector<32xi8>
-  %16 = vector.bitunpacku<8> %20 : vector<32xi8> -> vector<32xi32>
-  %18 = vector.bitunpacku<8> %9 : vector<1xi8> -> vector<1xi32>
-  func.return %14, %16, %18 : vector<32xi32>, vector<32xi32>, vector<1xi32>
+func.def public target(@target) @wide_bitunpacku(%9: vector<64xi8>, %10: vector<1xi8>) -> (vector<32xi32>, vector<32xi32>, vector<1xi32>) {
+  %22 = vector.slice %9[0] : vector<64xi8> -> vector<32xi8>
+  %15 = vector.bitunpacku<8> %22 : vector<32xi8> -> vector<32xi32>
+  %21 = vector.slice %9[32] : vector<64xi8> -> vector<32xi8>
+  %17 = vector.bitunpacku<8> %21 : vector<32xi8> -> vector<32xi32>
+  %19 = vector.bitunpacku<8> %10 : vector<1xi8> -> vector<1xi32>
+  func.return %15, %17, %19 : vector<32xi32>, vector<32xi32>, vector<1xi32>
 }
 
 // ====
@@ -182,10 +182,10 @@ func.def public target(@target) @wide_bitpack(%values: vector<64xi32>) -> (vecto
 // ----
 amdgpu.target<gfx11-generic> @target
 
-func.def public target(@target) @wide_bitpack(%5: vector<32xi32>, %6: vector<32xi32>) -> (vector<32xi8>) {
-  %9 = vector.bitpack<4> %5 : vector<32xi32> -> vector<16xi8>
-  %11 = vector.bitpack<4> %6 : vector<32xi32> -> vector<16xi8>
-  %packed = vector.concat<0> %9, %11 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+func.def public target(@target) @wide_bitpack(%6: vector<32xi32>, %7: vector<32xi32>) -> (vector<32xi8>) {
+  %10 = vector.bitpack<4> %6 : vector<32xi32> -> vector<16xi8>
+  %12 = vector.bitpack<4> %7 : vector<32xi32> -> vector<16xi8>
+  %packed = vector.concat<0> %10, %12 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
   func.return %packed : vector<32xi8>
 }
 
@@ -247,9 +247,9 @@ func.def public target(@target) @wide_predicate_bitpack(%predicates: vector<40xi
 // ----
 amdgpu.target<gfx11-generic> @target
 
-func.def public target(@target) @wide_predicate_bitpack(%5: vector<32xi1>, %6: vector<8xi1>) -> (vector<5xi8>) {
-  %9 = vector.bitpack<1> %5 : vector<32xi1> -> vector<4xi8>
-  %11 = vector.bitpack<1> %6 : vector<8xi1> -> vector<1xi8>
-  %packed = vector.concat<0> %9, %11 : vector<4xi8>, vector<1xi8> -> vector<5xi8>
+func.def public target(@target) @wide_predicate_bitpack(%6: vector<32xi1>, %7: vector<8xi1>) -> (vector<5xi8>) {
+  %10 = vector.bitpack<1> %6 : vector<32xi1> -> vector<4xi8>
+  %12 = vector.bitpack<1> %7 : vector<8xi1> -> vector<1xi8>
+  %packed = vector.concat<0> %10, %12 : vector<4xi8>, vector<1xi8> -> vector<5xi8>
   func.return %packed : vector<5xi8>
 }

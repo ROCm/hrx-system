@@ -752,3 +752,57 @@ check.scenario @workgroup_tree_extrema_type_values {
   }
   check.return
 }
+
+// Mixed predicate/word reductions retain independent arithmetic widths.
+// Neither input requires optional narrow types.
+kernel.def @workgroup_tree_predicate_word() {
+  %unit = index.constant 1 : index
+  %items = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<67xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<67x2xi32>
+  %word = view.load %source[%item] : view<67xi32> -> i32
+  %predicate = scalar.trunci %word : i32 to i1
+  %parity, %sum = kernel.workgroup.reduce<addi> %predicate, %word : i1, i32
+  %parity_word = scalar.extui %parity : i1 to i32
+  view.store %parity_word, %destination[%item, 0] : i32, view<67x2xi32>
+  view.store %sum, %destination[%item, 1] : i32, view<67x2xi32>
+  kernel.return
+}
+
+func.def @workgroup_tree_predicate_word_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %items = index.constant 67 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %source = buffer.view %input[%base] : buffer -> view<67xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<67x2xi32>
+  %total = scf.for %item = [%begin to %items step %step](%sum = %c0 : i32) -> (i32) {
+    %word = view.load %source[%item] : view<67xi32> -> i32
+    %next = scalar.addi %sum, %word : i32
+    scf.yield %next : i32
+  }
+  %parity = scalar.andi %total, %c1 : i32
+  scf.for %item = [%begin to %items step %step] {
+    view.store %parity, %destination[%item, 0] : i32, view<67x2xi32>
+    view.store %total, %destination[%item, 1] : i32, view<67x2xi32>
+  }
+  func.return
+}
+
+check.scenario @workgroup_tree_predicate_word_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<67xi32>
+    %output = check.generate.fill value(-1) : tensor<67x2xi32>
+    check.compare<@workgroup_tree_predicate_word, @workgroup_tree_predicate_word_oracle>(%input, %output) : (tensor<67xi32>, tensor<67x2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<67x2xi32>
+    }
+  }
+  check.return
+}

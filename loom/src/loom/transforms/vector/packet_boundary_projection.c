@@ -145,7 +145,8 @@ static bool loom_vector_packet_boundary_select_schema(
       loom_vector_packet_boundary_scalar_components_enabled(policy);
   if (loom_vector_packet_boundary_is_object_signature_role(function, role) ||
       !loom_type_is_vector(logical_type) || loom_type_rank(logical_type) == 0 ||
-      (!scalar_components_enabled && loom_type_rank(logical_type) != 1) ||
+      (!scalar_components_enabled && loom_type_rank(logical_type) != 1 &&
+       logical_type.encoding_id != 0) ||
       !loom_type_is_all_static(logical_type) ||
       loom_vector_packet_boundary_carrier_supported(plan, function, role,
                                                     logical_type, value_id)) {
@@ -155,7 +156,8 @@ static bool loom_vector_packet_boundary_select_schema(
   uint64_t logical_lane_count = 0;
   if (!loom_type_static_element_count(logical_type, &logical_lane_count) ||
       logical_lane_count == 0 || logical_lane_count > UINT32_MAX ||
-      (!scalar_components_enabled && logical_lane_count < 2)) {
+      (!scalar_components_enabled && loom_type_rank(logical_type) == 1 &&
+       logical_lane_count < 2)) {
     return false;
   }
   if (policy == NULL) {
@@ -163,11 +165,13 @@ static bool loom_vector_packet_boundary_select_schema(
   }
 
   uint32_t component_lane_count = 0;
-  if (loom_type_rank(logical_type) == 1) {
+  if (loom_type_rank(logical_type) == 1 || logical_type.encoding_id == 0) {
     for (uint8_t i = 0; i < policy->native_lane_count_count; ++i) {
       const uint32_t candidate_lane_count = policy->native_lane_counts[i];
       if (candidate_lane_count == 0 ||
-          candidate_lane_count >= logical_lane_count ||
+          candidate_lane_count > logical_lane_count ||
+          (candidate_lane_count == logical_lane_count &&
+           loom_type_rank(logical_type) == 1) ||
           candidate_lane_count <= component_lane_count) {
         continue;
       }
@@ -376,6 +380,21 @@ static iree_status_t loom_vector_packet_boundary_plan_source(
   return iree_ok_status();
 }
 
+// Ordinary static shapes flatten in row-major lane order. The schema selector
+// leaves opaque carriers and encoded multi-rank values with their owning
+// target.
+static loom_type_t loom_vector_packet_boundary_flat_type(loom_type_t type) {
+  if (loom_type_rank(type) == 1) {
+    return type;
+  }
+  uint64_t lane_count = 0;
+  const bool is_static = loom_type_static_element_count(type, &lane_count);
+  IREE_ASSERT(is_static);
+  (void)is_static;
+  return loom_vector_packet_boundary_type(type, (uint32_t)lane_count,
+                                          /*scalar_components=*/false);
+}
+
 static iree_status_t loom_vector_packet_boundary_materialize_source(
     const loom_boundary_projection_rule_t* rule,
     loom_boundary_projection_plan_t* plan,
@@ -422,12 +441,24 @@ static iree_status_t loom_vector_packet_boundary_materialize_source(
     }
     return iree_ok_status();
   }
+  loom_value_id_t flat_value = logical_value;
+  const loom_type_t logical_type =
+      loom_module_value_type(plan->module, logical_value);
+  const loom_type_t flat_type =
+      loom_vector_packet_boundary_flat_type(logical_type);
+  if (!loom_type_equal(logical_type, flat_type)) {
+    loom_op_t* bitcast_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+        &plan->rewriter.builder, logical_value, logical_type, flat_type,
+        source->boundary_op->location, &bitcast_op));
+    flat_value = loom_vector_bitcast_result(bitcast_op);
+  }
   uint32_t lane_offset = 0;
   for (uint16_t i = 0; i < source_plan->slot_plan->component_count; ++i) {
     const int64_t static_offset = lane_offset;
     loom_op_t* slice_op = NULL;
     IREE_RETURN_IF_ERROR(loom_vector_slice_build(
-        &plan->rewriter.builder, logical_value,
+        &plan->rewriter.builder, flat_value,
         /*offsets=*/NULL, /*offsets_count=*/0, &static_offset,
         /*static_offsets_count=*/1, source_plan->slot_plan->component_types[i],
         source->boundary_op->location, &slice_op));
@@ -464,11 +495,24 @@ static iree_status_t loom_vector_packet_boundary_reconstruct(
                                     slot->schema.component_count);
     return iree_ok_status();
   }
-  loom_op_t* concat_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_concat_build(
-      &plan->rewriter.builder, /*axis=*/0, slot->component_value_ids,
-      slot->schema.component_count, logical_type, location, &concat_op));
-  *out_logical_value = loom_vector_concat_result(concat_op);
+  const loom_type_t flat_type =
+      loom_vector_packet_boundary_flat_type(logical_type);
+  loom_value_id_t flat_value = slot->component_value_ids[0];
+  if (slot->schema.component_count > 1) {
+    loom_op_t* concat_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_concat_build(
+        &plan->rewriter.builder, /*axis=*/0, slot->component_value_ids,
+        slot->schema.component_count, flat_type, location, &concat_op));
+    flat_value = loom_vector_concat_result(concat_op);
+  }
+  *out_logical_value = flat_value;
+  if (!loom_type_equal(logical_type, flat_type)) {
+    loom_op_t* bitcast_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+        &plan->rewriter.builder, flat_value, flat_type, logical_type, location,
+        &bitcast_op));
+    *out_logical_value = loom_vector_bitcast_result(bitcast_op);
+  }
   loom_boundary_projection_record(plan, rule, 1, slot->schema.component_count);
   return iree_ok_status();
 }

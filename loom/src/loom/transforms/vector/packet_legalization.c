@@ -882,6 +882,10 @@ iree_status_t loom_vector_packet_legalize_dynamic_slice(
   };
   loom_vector_packetization_t packetization = {0};
   loom_vector_packetization_initialize(context, policy, &packetization);
+  packetization.selection_flags =
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_EXTERNAL |
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_NON_DECOMPOSABLE;
+  packetization.captured_value_location = op->location;
   bool producer_selected = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
       &packetization, source, &source_shape, &producer_selected));
@@ -925,8 +929,15 @@ iree_status_t loom_vector_packet_legalize_dynamic_slice(
     *out_rewritten = true;
     return iree_ok_status();
   }
-  if (loom_vector_packet_has_snapshots(&packetization)) {
-    if (iree_any_bit_set(
+  const bool has_snapshots = loom_vector_packet_has_snapshots(&packetization);
+  const bool has_captured_values =
+      loom_vector_packet_has_captured_values(&packetization);
+  if (has_snapshots || has_captured_values) {
+    // Captured native values cannot replay a dynamic slice: selection must use
+    // static slices of the retained SSA value. Snapshot-only graphs keep the
+    // target's existing choice between selection and private staging.
+    if (has_captured_values ||
+        iree_any_bit_set(
             policy->flags,
             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_SNAPSHOT_SELECTION)) {
       return loom_vector_packet_legalize_dynamic_snapshot_selection(

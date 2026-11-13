@@ -114,10 +114,13 @@ static iree_status_t loom_boundary_projection_reconstruct_block_candidate(
   loom_builder_t* builder = &plan->rewriter.builder;
   IREE_ASSERT(candidate->realization_anchor != NULL);
   loom_builder_set_before(builder, candidate->realization_anchor);
-  IREE_RETURN_IF_ERROR(loom_builder_reserve_values(
-      builder, 1, &candidate->replacement_value_id));
-  IREE_RETURN_IF_ERROR(loom_module_set_value_type(
-      plan->module, candidate->replacement_value_id, logical_type));
+  // Preserve logical uses while recycling the original argument as a physical
+  // component. Reconstruction can emit several operations; its first result
+  // need not be the reconstructed value.
+  loom_value_id_t logical_placeholder = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_define_value(plan->module, logical_type,
+                                                &logical_placeholder));
+  candidate->replacement_value_id = logical_placeholder;
   IREE_RETURN_IF_ERROR(loom_boundary_projection_replace_definition(
       plan, function, candidate->value_id, candidate->replacement_value_id));
   for (uint16_t component = 0; component < schema->component_count;
@@ -144,7 +147,12 @@ static iree_status_t loom_boundary_projection_reconstruct_block_candidate(
       schema->rule, plan, function, candidate, logical_type,
       candidate->realization_anchor->location,
       &candidate->replacement_value_id));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_boundary_projection_record_value_replacement(
+      function, candidate->value_id, candidate->replacement_value_id));
+  IREE_RETURN_IF_ERROR(loom_rewriter_move_value_name(
+      &plan->rewriter, logical_placeholder, candidate->replacement_value_id));
+  return loom_rewriter_replace_all_uses_with(
+      &plan->rewriter, logical_placeholder, candidate->replacement_value_id);
 }
 
 static iree_status_t loom_boundary_projection_eliminate_block_candidate(

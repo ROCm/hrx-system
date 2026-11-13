@@ -121,6 +121,19 @@ static const loom_target_bitstream_policy_t kSpirvBitstreamPolicy = {
         },
 };
 
+static loom_scalar_type_t loom_spirv_predicate_storage_type(
+    const loom_target_facts_t* target_facts) {
+  const uint64_t features =
+      loom_target_facts_bundle(target_facts)->config->contract_feature_bits;
+  if (features & LOOM_SPIRV_FEATURE_INT8) {
+    return LOOM_SCALAR_TYPE_I8;
+  }
+  if (features & LOOM_SPIRV_FEATURE_INT16) {
+    return LOOM_SCALAR_TYPE_I16;
+  }
+  return LOOM_SCALAR_TYPE_I32;
+}
+
 static const uint16_t kSpirvVectorPacketBitCounts[] = {
     256u, 128u, 64u, 32u, 16u, 8u,
 };
@@ -559,6 +572,7 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .error_catalog = &loom_spirv_error_catalog,
     .vector_packet_policy = &kSpirvVectorPacketPolicy,
     .bitstream_policy = &kSpirvBitstreamPolicy,
+    .predicate_storage_type = loom_spirv_predicate_storage_type,
     .source_vector_carrier_supported =
         {.fn = loom_spirv_source_vector_carrier_supported, .user_data = NULL},
     .source_function_vector_carrier_supported =
