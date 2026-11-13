@@ -89,6 +89,8 @@ typedef struct loom_call_collector_t {
   uint64_t* callee_membership;
   // Function currently supplying call edges.
   loom_symbol_id_t caller;
+  // Tracked call kinds observed across all function walks.
+  uint8_t call_kinds;
   // Optional owner retaining the discovered callsites.
   loom_call_graph_call_visitor_t visitor;
 } loom_call_collector_t;
@@ -109,9 +111,11 @@ static iree_status_t loom_call_collector_visit(
   if (!loom_call_like_isa(call)) {
     return iree_ok_status();
   }
-  if (!loom_call_graph_tracks_call_kind(loom_call_like_kind(call))) {
+  const loom_call_like_kind_t kind = loom_call_like_kind(call);
+  if (!loom_call_graph_tracks_call_kind(kind)) {
     return iree_ok_status();
   }
+  collector->call_kinds |= (uint8_t)(1u << kind);
   loom_symbol_ref_t callee_ref = loom_call_like_callee(call);
   if (!loom_symbol_ref_is_valid(callee_ref) || callee_ref.module_id != 0 ||
       callee_ref.symbol_id >= collector->module->symbols.count) {
@@ -393,6 +397,8 @@ iree_status_t loom_call_graph_build_with_calls(
     }
     ++node_index;
   }
+
+  out_graph->call_kinds = collector.call_kinds;
 
   // Compute SCCs.
   return loom_call_graph_compute_sccs(out_graph, arena);

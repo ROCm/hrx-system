@@ -56,9 +56,14 @@ typedef struct loom_call_graph_node_t {
 
 // Call graph for all functions in a module.
 typedef struct loom_call_graph_t {
+  // Immutable source module supplying symbol identities.
   const loom_module_t* module;
-  // One node per function-like symbol with a body.
+  // Number of function-like symbols with bodies.
   uint16_t node_count;
+  // Bit (1 << loom_call_like_kind_t) for each observed tracked call kind,
+  // including calls to declarations and duplicate edges of different kinds.
+  uint8_t call_kinds;
+  // One node per definition, in module symbol order.
   loom_call_graph_node_t* nodes;
   // SCC count after analysis. SCCs are numbered 0..scc_count-1.
   uint16_t scc_count;
@@ -67,6 +72,7 @@ typedef struct loom_call_graph_t {
   // Maps symbol_id → node index (UINT16_MAX if not in the graph).
   // Enables O(1) lookup from symbol ID.
   uint16_t* symbol_to_node;
+  // Symbol domain covered by symbol_to_node.
   uint16_t symbol_to_node_count;
 } loom_call_graph_t;
 
@@ -103,6 +109,13 @@ iree_status_t loom_call_graph_build_with_calls(
 //===----------------------------------------------------------------------===//
 // Queries
 //===----------------------------------------------------------------------===//
+
+// Returns whether construction observed a tracked call of |kind|. This summary
+// includes declaration targets, which have no graph node or caller count.
+static inline bool loom_call_graph_has_call_kind(const loom_call_graph_t* graph,
+                                                 loom_call_like_kind_t kind) {
+  return (graph->call_kinds & (1u << kind)) != 0;
+}
 
 // Returns true if the function at |symbol_id| is (mutually) recursive.
 // A function is recursive if its SCC has more than one member or if

@@ -208,7 +208,6 @@ static iree_status_t loom_low_source_invocation_collect_call(
                        LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE)) {
     return iree_ok_status();
   }
-  ((uint8_t*)work->facts->direct_call_targets)[callee_symbol.symbol_id] = 1;
   loom_low_source_invocation_call_t* edge = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(work->arena, sizeof(*edge), (void**)&edge));
@@ -445,6 +444,9 @@ static iree_status_t loom_low_source_invocation_initialize_function(
       &work->functions[node->symbol_id];
   const loom_module_t* module = work->module;
   loom_value_fact_table_t* facts = &work->facts->boundaries;
+  if (function->incoming) {
+    ((uint8_t*)work->facts->direct_call_targets)[node->symbol_id] = 1;
+  }
   if ((!function->selection ||
        function->selection->kind != LOOM_LOW_SOURCE_SELECTION_FUNCTION) &&
       !function->incoming && !function->outgoing) {
@@ -654,14 +656,6 @@ iree_status_t loom_low_source_invocation_facts_compute(
       (void**)&out_facts->functions));
   memset(out_facts->functions, 0,
          module->symbols.count * sizeof(*out_facts->functions));
-  uint8_t* direct_call_targets = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, module->symbols.count,
-                                                 sizeof(*direct_call_targets),
-                                                 (void**)&direct_call_targets));
-  memset(direct_call_targets, 0,
-         module->symbols.count * sizeof(*direct_call_targets));
-  out_facts->direct_call_targets = direct_call_targets;
-  out_facts->direct_call_target_count = module->symbols.count;
 
   iree_arena_allocator_t analysis_arena;
   iree_arena_initialize(module->arena.block_pool, &analysis_arena);
@@ -698,19 +692,31 @@ iree_status_t loom_low_source_invocation_facts_compute(
             .user_data = &work, .fn = loom_low_source_invocation_collect_call},
         &out_facts->call_graph);
   }
-  if (iree_status_is_ok(status)) {
-    work.call_bucket_count = iree_math_round_up_to_pow2_u64(
-        iree_max((iree_host_size_t)1, work.call_count));
-    status = iree_arena_allocate_array(&analysis_arena, work.call_bucket_count,
-                                       sizeof(*work.call_buckets),
-                                       (void**)&work.call_buckets);
+  if (iree_status_is_ok(status) && work.call_count != 0) {
+    uint8_t* direct_call_targets = NULL;
+    status = iree_arena_allocate_array(arena, module->symbols.count,
+                                       sizeof(*direct_call_targets),
+                                       (void**)&direct_call_targets);
+    if (iree_status_is_ok(status)) {
+      memset(direct_call_targets, 0,
+             module->symbols.count * sizeof(*direct_call_targets));
+      out_facts->direct_call_targets = direct_call_targets;
+      out_facts->direct_call_target_count = module->symbols.count;
+      work.call_bucket_count = iree_math_round_up_to_pow2_u64(work.call_count);
+      status = iree_arena_allocate_array(
+          &analysis_arena, work.call_bucket_count, sizeof(*work.call_buckets),
+          (void**)&work.call_buckets);
+    }
     if (iree_status_is_ok(status)) {
       memset(work.call_buckets, 0,
              work.call_bucket_count * sizeof(*work.call_buckets));
     }
   }
-  for (uint16_t i = 0;
-       i < out_facts->call_graph.node_count && iree_status_is_ok(status); ++i) {
+  // Local analyses can only be owned after graph construction succeeds. A
+  // failed construction may leave nodes incomplete and needs no local cleanup.
+  const uint16_t function_count =
+      iree_status_is_ok(status) ? out_facts->call_graph.node_count : 0;
+  for (uint16_t i = 0; i < function_count && iree_status_is_ok(status); ++i) {
     status = loom_low_source_invocation_initialize_function(
         &work, &out_facts->call_graph.nodes[i], arena);
   }
@@ -744,7 +750,7 @@ iree_status_t loom_low_source_invocation_facts_compute(
   pass->value_facts->table.context.resolve_call_results =
       previous_context.resolve_call_results;
   loom_pass_value_fact_owner_invalidate(pass->value_facts);
-  for (uint16_t i = 0; i < out_facts->call_graph.node_count; ++i) {
+  for (uint16_t i = 0; i < function_count; ++i) {
     loom_low_source_invocation_local_t* local =
         work.functions[out_facts->call_graph.nodes[i].symbol_id].local;
     if (local) {
