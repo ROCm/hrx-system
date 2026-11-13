@@ -15,9 +15,16 @@
 extern "C" {
 #endif
 
-// Retains branch/call/return literal, extension, or active-mask choices and
-// establishes the uniformity proof for selecting one lane from a
-// vector-register producer.
+// Admits lossless native argument conversions from retained distribution and
+// range facts. This does not choose or change either endpoint's carrier.
+bool loom_amdgpu_control_operand_accepts(loom_type_t source_type,
+                                         loom_value_facts_t source_facts,
+                                         loom_type_t actual_type,
+                                         loom_type_t required_type);
+
+// Retains branch/call/return literal, extension, or active-mask choices using
+// the receiving contract's established proof. Selecting one lane from a
+// vector-register producer requires subgroup uniformity.
 iree_status_t loom_amdgpu_prepare_control_operand(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, loom_value_id_t source_value,

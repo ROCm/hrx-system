@@ -919,9 +919,10 @@ TEST_P(LowLowerControlOperandTest,
       },
       &receiving_argument};
   policy_.control_operand = {
-      [](void* user_data, loom_low_lower_context_t* context,
-         const loom_op_t* terminator, loom_value_id_t source_value,
-         loom_type_t required_type, const void** out_plan) -> iree_status_t {
+      .prepare = [](void* user_data, loom_low_lower_context_t* context,
+                    const loom_op_t* terminator, loom_value_id_t source_value,
+                    loom_type_t required_type,
+                    const void** out_plan) -> iree_status_t {
         *out_plan = nullptr;
         EXPECT_EQ(loom_low_lower_context_low_function(context), nullptr);
         EXPECT_EQ(loom_low_register_type_unit_count(
@@ -931,15 +932,17 @@ TEST_P(LowLowerControlOperandTest,
         return loom_low_lower_emit_branch_constraint(
             context, terminator, IREE_SV("test_control_operand_constraint"));
       },
-      [](void* user_data, loom_low_lower_context_t* context,
-         const loom_op_t* terminator, loom_value_id_t source_value,
-         loom_value_id_t low_value, loom_type_t required_type, const void* plan,
-         loom_value_id_t* out_value) -> iree_status_t {
+      .emit = [](void* user_data, loom_low_lower_context_t* context,
+                 const loom_op_t* terminator, loom_value_id_t source_value,
+                 loom_value_id_t low_value, loom_type_t required_type,
+                 const void* plan,
+                 loom_value_id_t* out_value) -> iree_status_t {
         ADD_FAILURE() << "Rejected control operand reached emission";
         *out_value = low_value;
         return iree_ok_status();
       },
-      nullptr};
+      .user_data = nullptr,
+  };
   options_.max_errors = 1;
   const iree_host_size_t value_count = module_->values.count;
   const loom_region_t* body = loom_func_like_body(function_);

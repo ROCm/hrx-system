@@ -303,3 +303,14 @@ loom_type_t loom_spirv_join_index_type(loom_type_t source_type, loom_type_t lhs,
   }
   return right_width > left_width ? rhs : lhs;
 }
+
+bool loom_spirv_index_control_operand_accepts(loom_type_t source_type,
+                                              loom_value_facts_t source_facts,
+                                              loom_type_t actual_type,
+                                              loom_type_t required_type) {
+  const loom_type_t common_type =
+      loom_spirv_join_index_type(source_type, actual_type, required_type);
+  return loom_type_kind(common_type) != LOOM_TYPE_NONE &&
+         (loom_type_equal(common_type, required_type) ||
+          loom_value_facts_fit_signed_bit_count(source_facts, 32));
+}

@@ -10,10 +10,54 @@
 #include "loom/target/arch/amdgpu/lower/buffer.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/materializers.h"
-#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+
+bool loom_amdgpu_control_operand_accepts(loom_type_t source_type,
+                                         loom_value_facts_t source_facts,
+                                         loom_type_t actual_type,
+                                         loom_type_t required_type) {
+  const loom_type_t common_type =
+      loom_amdgpu_join_result_type(source_type, actual_type, required_type);
+  if (loom_type_kind(common_type) == LOOM_TYPE_NONE) {
+    return false;
+  }
+  if (loom_type_equal(common_type, required_type)) {
+    return true;
+  }
+  const uint16_t actual_class = loom_low_register_type_class_id(actual_type);
+  const uint16_t required_class =
+      loom_low_register_type_class_id(required_type);
+  const uint32_t actual_count = loom_low_register_type_unit_count(actual_type);
+  const uint32_t required_count =
+      loom_low_register_type_unit_count(required_type);
+  if (loom_amdgpu_type_is_i1(source_type)) {
+    // A lane mask is not a widened truth value. Collapsing it is lossless only
+    // when all participating lanes agree. Scalar truth can also feed SCC.
+    return actual_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+           (required_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+            required_class == LOOM_AMDGPU_REG_CLASS_ID_SCC) &&
+           required_count == 1 &&
+           (actual_count == 1 ||
+            loom_value_facts_is_subgroup_uniform(source_facts));
+  }
+  if (!(loom_type_is_scalar(source_type) || loom_type_is_vector(source_type))) {
+    return false;
+  }
+  if (actual_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR &&
+      required_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+      !loom_value_facts_is_subgroup_uniform(source_facts)) {
+    return false;
+  }
+  // Numeric payload widths are fixed; only index/offset transport can narrow.
+  // Index also admits signed logical coordinates in its native word.
+  return actual_count <= required_count ||
+         (loom_amdgpu_type_is_address_scalar(source_type) &&
+          (loom_value_facts_fit_unsigned_bit_count(source_facts, 32) ||
+           (loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_INDEX &&
+            loom_value_facts_fit_signed_bit_count(source_facts, 32))));
+}
 
 iree_status_t loom_amdgpu_prepare_control_operand(
     void* user_data, loom_low_lower_context_t* context,
@@ -78,6 +122,11 @@ iree_status_t loom_amdgpu_emit_control_operand(
     return loom_amdgpu_emit_buffer_null(context, source_terminator,
                                         required_low_type, out_low_value_id);
   }
+  if (loom_amdgpu_low_type_is_register_class(context, required_low_type,
+                                             LOOM_AMDGPU_REG_CLASS_ID_SCC)) {
+    return loom_amdgpu_materialize_uniform_i1_condition(
+        context, source_terminator, low_value_id, out_low_value_id);
+  }
   const bool requires_vgpr = loom_amdgpu_low_type_is_register_class(
       context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   const bool requires_sgpr = loom_amdgpu_low_type_is_register_class(
@@ -115,16 +164,9 @@ iree_status_t loom_amdgpu_emit_control_operand(
     // A scalar destination has a uniformity proof. Its source can still use a
     // native mask (for example, a Boolean select), or transient SCC state.
     // Capture the truth value without changing the source's canonical mapping.
-    loom_value_id_t low_condition = low_value_id;
-    const loom_type_t actual_type = loom_module_value_type(
-        loom_low_lower_context_module(context), low_value_id);
-    if (loom_low_register_type_unit_count(actual_type) == 2) {
-      const uint32_t wavefront_size = loom_amdgpu_target_wavefront_size(
-          loom_low_lower_context_bundle(context));
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_lane_mask_nonzero_scc(
-          context, source_terminator, low_value_id, wavefront_size,
-          &low_condition));
-    }
+    loom_value_id_t low_condition = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_i1_condition(
+        context, source_terminator, low_value_id, &low_condition));
     loom_value_id_t low_false = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
         context, source_terminator, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32, 0,

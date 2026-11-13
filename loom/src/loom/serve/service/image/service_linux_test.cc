@@ -312,8 +312,7 @@ class ImageServiceFixture : public ::testing::Test {
     return http_.Read(client.release(), false, out_response);
   }
 
-  iree_status_t WaitEvent(int client, const char* event, const char* field,
-                          std::string* out_record) {
+  iree_status_t WaitGeneratingHeartbeat(int client, std::string* out_record) {
     for (;;) {
       loom_runtime_telemetry_record_t value;
       if (loom_runtime_telemetry_stream_read(services_[0].telemetry.stream,
@@ -327,16 +326,17 @@ class ImageServiceFixture : public ::testing::Test {
         const std::string record(view.data, view.size);
         iree_string_builder_deinitialize(&output);
         IREE_RETURN_IF_ERROR(status);
-        if (record.find(event) != std::string::npos &&
-            record.find(field) != std::string::npos) {
+        if (record.find("\"event\":\"snapshot\"") != std::string::npos &&
+            record.find("\"phase\":\"generating\"") != std::string::npos) {
           *out_record = record;
           return iree_ok_status();
         }
       }
       IREE_RETURN_IF_ERROR(http_.CheckPending(client));
-      // Telemetry readers have independent cursors, not producer wake
-      // callbacks. A missing record never prevents observing socket or owner
-      // failure.
+      // Heartbeats recur while the device dependency is held, so a ring gap
+      // cannot lose the only notification. One-time events cannot serve as
+      // readiness gates on this overwriting stream. Observe socket and owner
+      // failure on every poll.
       std::this_thread::yield();
     }
   }
@@ -444,7 +444,7 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
   using ImageServiceFixture::SendImage;
   using ImageServiceFixture::server_;
   using ImageServiceFixture::services_;
-  using ImageServiceFixture::WaitEvent;
+  using ImageServiceFixture::WaitGeneratingHeartbeat;
 
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(this->InitializeSharedGroup());
@@ -456,7 +456,6 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
 
   void ExerciseCompletion(CompletionMode mode) {
     std::string response;
-    IREE_ASSERT_OK(WaitEvent(-1, "\"event\":\"stream_begin\"", "", &response));
     // Denial follows preparation but precedes the held device frontier.
     HttpClient denied;
     IREE_ASSERT_OK(SendImage("image-witness", 1, &denied));
@@ -465,8 +464,7 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
 
     HttpClient client;
     IREE_ASSERT_OK(SendImage("image-witness", 0, &client));
-    IREE_ASSERT_OK(WaitEvent(client.get(), "\"event\":\"snapshot\"",
-                             "\"phase\":\"generating\"", &response));
+    IREE_ASSERT_OK(WaitGeneratingHeartbeat(client.get(), &response));
     EXPECT_NE(response.find("\"request\":2"), std::string::npos);
     EXPECT_NE(response.find("\"completed\":0"), std::string::npos);
 
@@ -518,8 +516,10 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
 
     if (mode == CompletionMode::kShutdown) {
       loom_serve_http_server_request_stop(server_);
-      IREE_ASSERT_OK(WaitEvent(-1, "\"event\":\"image_shutdown\"",
-                               "\"request\":2", &response));
+      // Shutdown detaches the HTTP owner before draining device borrowers.
+      // Socket closure remains observable even if telemetry records wrap.
+      IREE_ASSERT_OK(http_.Read(client.release(), true, &response));
+      EXPECT_TRUE(response.empty());
     }
     ReleaseDependency(mode == CompletionMode::kDeviceFailure);
     if (mode == CompletionMode::kResponse) {
@@ -598,8 +598,7 @@ TEST_F(ImageServiceTest, TransportFailureTerminatesHeartbeatWait) {
       HttpClient client;
       IREE_ASSERT_OK(SendImage("image-witness", 0, &client));
       std::string record;
-      IREE_ASSERT_OK(WaitEvent(client.get(), "\"event\":\"snapshot\"",
-                               "\"phase\":\"generating\"", &record));
+      IREE_ASSERT_OK(WaitGeneratingHeartbeat(client.get(), &record));
     }();
   }
   ASSERT_EQ(failures.size(), 1);

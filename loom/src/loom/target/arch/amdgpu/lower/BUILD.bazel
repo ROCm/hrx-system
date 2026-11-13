@@ -525,6 +525,17 @@ loom_check_test(
     src = "control_operands_test.loom-test",
 )
 
+loom_cc_test(
+    name = "control_operands_api_test",
+    srcs = ["control_operands_test.cc"],
+    deps = [
+        ":component_api",
+        ":lower",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_check_test(
     name = "uniform_predicate_select_test",
     src = "uniform_predicate_select.loom-test",

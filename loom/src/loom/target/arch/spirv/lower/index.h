@@ -31,6 +31,13 @@ iree_status_t loom_spirv_map_index_value(loom_low_lower_context_t* context,
 loom_type_t loom_spirv_join_index_type(loom_type_t source_type, loom_type_t lhs,
                                        loom_type_t rhs);
 
+// Admits native index arguments without discarding values outside the receiving
+// carrier's range. Other semantic types require identical native carriers.
+bool loom_spirv_index_control_operand_accepts(loom_type_t source_type,
+                                              loom_value_facts_t source_facts,
+                                              loom_type_t actual_type,
+                                              loom_type_t required_type);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

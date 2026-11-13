@@ -2037,7 +2037,8 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
                     .emit = loom_amdgpu_emit_entry_setup,
                     .user_data = NULL},
     .prepare_branch = {.fn = loom_amdgpu_prepare_branch, .user_data = NULL},
-    .control_operand = {.prepare = loom_amdgpu_prepare_control_operand,
+    .control_operand = {.accepts = loom_amdgpu_control_operand_accepts,
+                        .prepare = loom_amdgpu_prepare_control_operand,
                         .emit = loom_amdgpu_emit_control_operand,
                         .user_data = NULL},
     .materialize_structural_operand =

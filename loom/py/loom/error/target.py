@@ -1356,8 +1356,8 @@ ERR_TARGET_074 = ErrorDef(
         ErrorParam("expected_type", ParamKind.TYPE),
     ),
     fix_hint=(
-        "Use source values whose target-low mapping exactly matches the low "
-        "helper register signature"
+        "Match the helper register signature; argument carrier conversions "
+        "require source facts proving a supported lossless conversion"
     ),
 )
 

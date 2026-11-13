@@ -320,6 +320,12 @@ typedef iree_status_t (*loom_low_lower_emit_control_operand_fn_t)(
     const void* plan, loom_value_id_t* out_low_value_id);
 
 typedef struct loom_low_lower_control_operand_t {
+  // Admits an authored native receiver whose carrier differs from its source.
+  // Consumes retained facts without inspecting IR; missing requires equality.
+  // Compiler-selected branch, call, and return receivers already own this
+  // proof and go directly to preparation instead of repeating admission.
+  bool (*accepts)(loom_type_t source_type, loom_value_facts_t source_facts,
+                  loom_type_t actual_type, loom_type_t required_type);
   // Prepares a branch, call, or callable-exit operand whose producer carrier
   // differs from its receiving signature. Source facts are available here;
   // rejection emits diagnostics before any Low construction. Retained data
@@ -328,7 +334,8 @@ typedef struct loom_low_lower_control_operand_t {
   loom_low_lower_prepare_control_operand_fn_t prepare;
   // Emits the prepared conversion without consulting source analysis or
   // changing the source value's canonical mapping. Only infrastructure
-  // failures remain possible. Both callbacks are present or both are absent.
+  // failures remain possible. Preparation and emission are paired; admission
+  // requires both and is optional for targets without authored conversions.
   loom_low_lower_emit_control_operand_fn_t emit;
   // Caller-owned payload passed to both callbacks.
   void* user_data;
