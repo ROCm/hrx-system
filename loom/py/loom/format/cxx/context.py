@@ -488,6 +488,7 @@ class CxxRenderContext:
                 if any(operand in signed for operand in operation.operands):
                     signed.update(operation.results)
             elif operation.name in {
+                "scalar.absi",
                 "scalar.sitofp",
                 "scalar.extsi",
                 "scalar.divsi",
@@ -495,6 +496,7 @@ class CxxRenderContext:
                 "scalar.minsi",
                 "scalar.maxsi",
                 "scalar.ashri",
+                "vector.absi",
                 "vector.sitofp",
                 "vector.extsi",
                 "vector.divsi",
@@ -506,7 +508,7 @@ class CxxRenderContext:
                 if operation.operands:
                     signed.add(operation.operands[0])
                 if operation.name.endswith(
-                    ("extsi", "divsi", "remsi", "minsi", "maxsi", "ashri")
+                    ("absi", "extsi", "divsi", "remsi", "minsi", "maxsi", "ashri")
                 ):
                     signed.update(operation.results)
             elif operation.name in {"scalar.cmpi", "vector.cmpi"}:
@@ -1278,10 +1280,17 @@ class CxxRenderContext:
         )
 
     def numeric_argument(self, value_id: int, expected_type: str) -> str:
-        """Adapts C++ vector signedness without changing the signless IR value."""
+        """Adapts source signedness without changing the signless IR value."""
 
         expression = self.expression(value_id)
         value_type = self.module.values[value_id].type
+        if (
+            isinstance(value_type, ScalarType)
+            and self.expression_type(value_id) != expected_type
+        ):
+            # Implicit signedness changes are narrowing in list initialization,
+            # including aggregate returns used for multiple function results.
+            return f"static_cast<{expected_type}>({expression})"
         if (
             isinstance(value_type, ShapedType)
             and value_type.type_kind == TypeKind.VECTOR

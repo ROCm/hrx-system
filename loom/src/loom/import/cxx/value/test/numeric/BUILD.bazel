@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -38,6 +38,8 @@ loom_check_test_suite(
         "integer_operations.cxx-test",
         "integer_widening.cxx-test",
         "logarithms.cxx-test",
+        "math_builtins.cxx-test",
+        "math_builtins_invalid.cxx-test",
         "multiprecision_arithmetic.cxx-test",
         "narrow_float_subtraction.cxx-test",
         "numeric_conversion.cxx-test",
@@ -49,5 +51,16 @@ loom_check_test_suite(
         "scalar_templates.cxx-test",
         "scalar_templates_invalid.cxx-test",
     ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "math_export",
+    src = "math_export.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

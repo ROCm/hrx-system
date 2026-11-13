@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "loom/import/cxx/binding/math.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/locations.h"
@@ -475,6 +476,12 @@ Intrinsics::Binding* Intrinsics::concrete_binding(cxx::FunctionSymbol* function,
   auto entry = bindings_.find(function->canonical());
   if (entry != bindings_.end()) {
     return &entry->second;
+  }
+  if (auto* scalar =
+          builtin_math_binding(unit_, diagnostics_, function, owner)) {
+    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+    auto binding = resolve_scalar({scalar}, signature, owner);
+    return &bindings_.try_emplace(function->canonical(), binding).first->second;
   }
   if (!function->isSpecialization()) {
     return nullptr;

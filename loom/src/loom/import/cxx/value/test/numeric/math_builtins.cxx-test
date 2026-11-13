@@ -1,0 +1,277 @@
+// RUN: roundtrip
+// Standard-library wrappers select the builtin's own type. Every mapped
+// operation is returned independently so no arithmetic masks a wrong binding.
+template <class Float> struct MathResults {
+  // Independent results in the order of the source operations below.
+  Float values[37];
+};
+
+MathResults<float> single(float value, float other, float addend, int exponent) {
+  return {{
+      __builtin_acosf(value),
+      __builtin_acoshf(value),
+      __builtin_asinf(value),
+      __builtin_asinhf(value),
+      __builtin_atanf(value),
+      __builtin_atanhf(value),
+      __builtin_cbrtf(value),
+      __builtin_ceilf(value),
+      __builtin_cosf(value),
+      __builtin_coshf(value),
+      __builtin_erff(value),
+      __builtin_erfcf(value),
+      __builtin_expf(value),
+      __builtin_exp2f(value),
+      __builtin_expm1f(value),
+      __builtin_fabsf(value),
+      __builtin_floorf(value),
+      __builtin_logf(value),
+      __builtin_log10f(value),
+      __builtin_log1pf(value),
+      __builtin_log2f(value),
+      __builtin_roundf(value),
+      __builtin_roundevenf(value),
+      __builtin_sinf(value),
+      __builtin_sinhf(value),
+      __builtin_sqrtf(value),
+      __builtin_tanf(value),
+      __builtin_tanhf(value),
+      __builtin_truncf(value),
+      __builtin_atan2f(value, other),
+      __builtin_copysignf(value, other),
+      __builtin_fmaxf(value, other),
+      __builtin_fminf(value, other),
+      __builtin_fmodf(value, other),
+      __builtin_powf(value, other),
+      __builtin_fmaf(value, other, addend),
+      __builtin_scalbnf(value, exponent),
+  }};
+}
+
+MathResults<double> wide(double value, double other, double addend, int exponent) {
+  return {{
+      __builtin_acos(value),
+      __builtin_acosh(value),
+      __builtin_asin(value),
+      __builtin_asinh(value),
+      __builtin_atan(value),
+      __builtin_atanh(value),
+      __builtin_cbrt(value),
+      __builtin_ceil(value),
+      __builtin_cos(value),
+      __builtin_cosh(value),
+      __builtin_erf(value),
+      __builtin_erfc(value),
+      __builtin_exp(value),
+      __builtin_exp2(value),
+      __builtin_expm1(value),
+      __builtin_fabs(value),
+      __builtin_floor(value),
+      __builtin_log(value),
+      __builtin_log10(value),
+      __builtin_log1p(value),
+      __builtin_log2(value),
+      __builtin_round(value),
+      __builtin_roundeven(value),
+      __builtin_sin(value),
+      __builtin_sinh(value),
+      __builtin_sqrt(value),
+      __builtin_tan(value),
+      __builtin_tanh(value),
+      __builtin_trunc(value),
+      __builtin_atan2(value, other),
+      __builtin_copysign(value, other),
+      __builtin_fmax(value, other),
+      __builtin_fmin(value, other),
+      __builtin_fmod(value, other),
+      __builtin_pow(value, other),
+      __builtin_fma(value, other, addend),
+      __builtin_scalbn(value, exponent),
+  }};
+}
+// ----
+func.def public @single(%value: f32, %other: f32, %addend: f32, %exponent: i32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+  %41 = scalar.acosf %value : f32
+  %42 = scalar.acoshf %value : f32
+  %43 = scalar.asinf %value : f32
+  %44 = scalar.asinhf %value : f32
+  %45 = scalar.atanf %value : f32
+  %46 = scalar.atanhf %value : f32
+  %47 = scalar.cbrtf %value : f32
+  %48 = scalar.ceilf %value : f32
+  %49 = scalar.cosf %value : f32
+  %50 = scalar.coshf %value : f32
+  %51 = scalar.erff %value : f32
+  %52 = scalar.erfcf %value : f32
+  %53 = scalar.expf %value : f32
+  %54 = scalar.exp2f %value : f32
+  %55 = scalar.expm1f %value : f32
+  %56 = scalar.absf %value : f32
+  %57 = scalar.floorf %value : f32
+  %58 = scalar.logf %value : f32
+  %59 = scalar.log10f %value : f32
+  %60 = scalar.log1pf %value : f32
+  %61 = scalar.log2f %value : f32
+  %62 = scalar.roundf %value : f32
+  %63 = scalar.roundevenf %value : f32
+  %64 = scalar.sinf %value : f32
+  %65 = scalar.sinhf %value : f32
+  %66 = scalar.sqrtf %value : f32
+  %67 = scalar.tanf %value : f32
+  %68 = scalar.tanhf %value : f32
+  %69 = scalar.truncf %value : f32
+  %70 = scalar.atan2f %value, %other : f32
+  %71 = scalar.copysignf %value, %other : f32
+  %72 = scalar.maxnumf %value, %other : f32
+  %73 = scalar.minnumf %value, %other : f32
+  %74 = scalar.remf %value, %other : f32
+  %75 = scalar.powf %value, %other : f32
+  %76 = scalar.fmaf %value, %other, %addend : f32
+  %77 = scalar.ldexpf %value, %exponent : f32, i32
+  func.return %41, %42, %43, %44, %45, %46, %47, %48, %49, %50, %51, %52, %53, %54, %55, %56, %57, %58, %59, %60, %61, %62, %63, %64, %65, %66, %67, %68, %69, %70, %71, %72, %73, %74, %75, %76, %77 : f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32
+}
+
+func.def public @wide(%value: f64, %other: f64, %addend: f64, %exponent: i32) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
+  %119 = scalar.acosf %value : f64
+  %120 = scalar.acoshf %value : f64
+  %121 = scalar.asinf %value : f64
+  %122 = scalar.asinhf %value : f64
+  %123 = scalar.atanf %value : f64
+  %124 = scalar.atanhf %value : f64
+  %125 = scalar.cbrtf %value : f64
+  %126 = scalar.ceilf %value : f64
+  %127 = scalar.cosf %value : f64
+  %128 = scalar.coshf %value : f64
+  %129 = scalar.erff %value : f64
+  %130 = scalar.erfcf %value : f64
+  %131 = scalar.expf %value : f64
+  %132 = scalar.exp2f %value : f64
+  %133 = scalar.expm1f %value : f64
+  %134 = scalar.absf %value : f64
+  %135 = scalar.floorf %value : f64
+  %136 = scalar.logf %value : f64
+  %137 = scalar.log10f %value : f64
+  %138 = scalar.log1pf %value : f64
+  %139 = scalar.log2f %value : f64
+  %140 = scalar.roundf %value : f64
+  %141 = scalar.roundevenf %value : f64
+  %142 = scalar.sinf %value : f64
+  %143 = scalar.sinhf %value : f64
+  %144 = scalar.sqrtf %value : f64
+  %145 = scalar.tanf %value : f64
+  %146 = scalar.tanhf %value : f64
+  %147 = scalar.truncf %value : f64
+  %148 = scalar.atan2f %value, %other : f64
+  %149 = scalar.copysignf %value, %other : f64
+  %150 = scalar.maxnumf %value, %other : f64
+  %151 = scalar.minnumf %value, %other : f64
+  %152 = scalar.remf %value, %other : f64
+  %153 = scalar.powf %value, %other : f64
+  %154 = scalar.fmaf %value, %other, %addend : f64
+  %155 = scalar.ldexpf %value, %exponent : f64, i32
+  func.return %119, %120, %121, %122, %123, %124, %125, %126, %127, %128, %129, %130, %131, %132, %133, %134, %135, %136, %137, %138, %139, %140, %141, %142, %143, %144, %145, %146, %147, %148, %149, %150, %151, %152, %153, %154, %155 : f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64
+}
+
+// ====
+// INPUT: cxx data-model=lp64
+struct IntegerResults {
+  // The three C standard integer absolute-value signatures.
+  int narrow;
+  // Source-model long width.
+  long natural;
+  // Source-model long long width.
+  long long wide;
+};
+IntegerResults magnitudes(int narrow, long natural, long long wide) {
+  return {__builtin_abs(narrow), __builtin_labs(natural), __builtin_llabs(wide)};
+}
+// ----
+func.def public @magnitudes(%narrow: i32, %natural: i64, %wide: i64) -> (i32, i64, i64) {
+  %6 = scalar.absi %narrow : i32
+  %7 = scalar.absi %natural : i64
+  %8 = scalar.absi %wide : i64
+  func.return %6, %7, %8 : i32, i64, i64
+}
+
+// ====
+// INPUT: cxx data-model=llp64
+struct IntegerResults {
+  // The three C standard integer absolute-value signatures.
+  int narrow;
+  // Source-model long width.
+  long natural;
+  // Source-model long long width.
+  long long wide;
+};
+IntegerResults magnitudes(int narrow, long natural, long long wide) {
+  return {__builtin_abs(narrow), __builtin_labs(natural), __builtin_llabs(wide)};
+}
+// ----
+func.def public @magnitudes(%narrow: i32, %natural: i32, %wide: i64) -> (i32, i32, i64) {
+  %6 = scalar.absi %narrow : i32
+  %7 = scalar.absi %natural : i32
+  %8 = scalar.absi %wide : i64
+  func.return %6, %7, %8 : i32, i32, i64
+}
+
+// ====
+// INPUT: cxx data-model=ilp32
+struct IntegerResults {
+  // The three C standard integer absolute-value signatures.
+  int narrow;
+  // Source-model long width.
+  long natural;
+  // Source-model long long width.
+  long long wide;
+};
+IntegerResults magnitudes(int narrow, long natural, long long wide) {
+  return {__builtin_abs(narrow), __builtin_labs(natural), __builtin_llabs(wide)};
+}
+// ----
+func.def public @magnitudes(%narrow: i32, %natural: i32, %wide: i64) -> (i32, i32, i64) {
+  %6 = scalar.absi %narrow : i32
+  %7 = scalar.absi %natural : i32
+  %8 = scalar.absi %wide : i64
+  func.return %6, %7, %8 : i32, i32, i64
+}
+
+// ====
+// The existing operation bindings own lexical floating-point permissions.
+[[loom::fastmath]] double relaxed(double value, double other, double addend) {
+  return __builtin_fma(__builtin_sqrt(value), __builtin_pow(value, other), addend);
+}
+[[loom::fastmath(false)]] double strict(double value) { return __builtin_sqrt(value); }
+// ----
+func.def public @relaxed(%value: f64, %other: f64, %addend: f64) -> (f64) {
+  %4 = scalar.sqrtf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f64
+  %5 = scalar.powf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value, %other : f64
+  %6 = scalar.fmaf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %4, %5, %addend : f64
+  func.return %6 : f64
+}
+
+func.def public @strict(%value: f64) -> (f64) {
+  %9 = scalar.sqrtf %value : f64
+  func.return %9 : f64
+}
+
+// ====
+// A discarded result still evaluates the source operands exactly once.
+float discarded(float value) {
+  __builtin_fmaf(value++, value++, value++);
+  return value;
+}
+// ----
+func.def public @discarded(%value$0: f32) -> (f32) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.sitofp %2 : i32 to f32
+  %value$4 = scalar.addf %value$0, %3 : f32
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.sitofp %5 : i32 to f32
+  %value$7 = scalar.addf %value$4, %6 : f32
+  %8 = scalar.constant 1 : i32
+  %9 = scalar.sitofp %8 : i32 to f32
+  %value$10 = scalar.addf %value$7, %9 : f32
+  %11 = scalar.fmaf %value$0, %value$4, %value$7 : f32
+  func.return %value$10 : f32
+}
+

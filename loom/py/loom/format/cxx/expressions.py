@@ -90,6 +90,7 @@ _SCALAR_TRIGONOMETRY_OPERATIONS = frozenset(
 )
 _SCALAR_NAMED_FUNCTION_OPERATIONS = frozenset(
     {
+        "scalar.absi",
         "scalar.absf",
         "scalar.acosf",
         "scalar.acoshf",

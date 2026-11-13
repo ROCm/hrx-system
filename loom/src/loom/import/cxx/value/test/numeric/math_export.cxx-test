@@ -1,0 +1,33 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+// Export uses the public scalar operations, preserving floating precision,
+// source permissions, and signed integer absolute value on reimport.
+struct Results {
+  // Float result.
+  float single;
+  // Double result.
+  double wide;
+  // Integer magnitude.
+  int magnitude;
+};
+[[loom::fastmath("contract")]] Results evaluate(float single, double wide, int integer) {
+  return {__builtin_sqrtf(single), __builtin_fma(wide, wide, wide), __builtin_abs(integer)};
+}
+// ----
+#include <loomcxx/scalar.h>
+
+struct evaluate_result {
+  float value0;
+  double value1;
+  unsigned value2;
+};
+
+[[loom::symbol("evaluate")]]
+evaluate_result evaluate(float single, double wide, int integer);
+
+[[loom::symbol("evaluate")]]
+evaluate_result evaluate(float single, double wide, int integer) {
+  [[loom::fastmath("contract")]] float v6 = loom::scalar::sqrtf(single);
+  [[loom::fastmath("contract")]] double v7 = loom::scalar::fmaf(wide, wide, wide);
+  return {v6, v7, static_cast<unsigned>(loom::scalar::absi(integer))};
+}

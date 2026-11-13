@@ -21,6 +21,10 @@ namespace loom::scalar {
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.absf")]] Float absf(Float input);
 
+// Integer absolute value.
+template <class Integer> requires (__is_integral(Integer) && !__is_same(Integer, bool))
+[[loom::op("scalar.absi")]] Integer absi(Integer input);
+
 // Arccosine.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.acosf")]] Float acosf(Float input);

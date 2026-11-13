@@ -1,0 +1,61 @@
+// RUN: verify
+// Diagnostics identify the source builtin rather than producing an unresolved
+// external symbol or silently narrowing a long-double operation.
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "unsupported math builtin '__builtin_hypot'"
+  return __builtin_hypot(value, value);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "unsupported math builtin '__builtin_rint'"
+  return __builtin_rint(value);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "unsupported math builtin '__builtin_nearbyint'"
+  return __builtin_nearbyint(value);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "unsupported math builtin '__builtin_lround'"
+  return __builtin_lround(value);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "unsupported math builtin '__builtin_scalbln'"
+  return __builtin_scalbln(value, 3L);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "unsupported math builtin '__builtin_nextafter'"
+  return __builtin_nextafter(value, value);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "unsupported math builtin '__builtin_isfinite'"
+  return __builtin_isfinite(value);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "math builtin '__builtin_sqrtl' requires long-double lowering; implicit narrowing is not permitted"
+  return __builtin_sqrtl(value);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "math builtin '__builtin_powl' requires long-double lowering; implicit narrowing is not permitted"
+  return __builtin_powl(value, value);
+}
+
+// ====
+double unsupported(double value) {
+  // ERROR@+1: LOWERING/059 "math builtin '__builtin_scalbnl' requires long-double lowering; implicit narrowing is not permitted"
+  return __builtin_scalbnl(value, 3);
+}
