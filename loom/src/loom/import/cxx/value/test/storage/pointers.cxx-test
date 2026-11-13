@@ -182,12 +182,6 @@ func.def public @identity(%p: buffer, %p_byte_offset: offset) -> (buffer, offset
 }
 
 // ====
-// RUN: verify
-// Unsupported pointer operations produce source diagnostics.
-// ERROR@+1: LOWERING/059 "pointer ordering and subtraction are not supported"
-long diff(int* a, int* b) { return a - b; }
-
-// ====
 // RUN: roundtrip
 // Taking the address of a pointer value needs no stored object representation
 // when the indirect pointer is used only to read the original value.

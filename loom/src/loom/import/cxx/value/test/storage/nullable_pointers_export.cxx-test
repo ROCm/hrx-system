@@ -13,6 +13,10 @@ bool different(Buffer first, loom::type::offset first_offset, Buffer second, loo
   return loom::buffer::compare::address<loom::buffer::compare::predicate::ne>(first, first_offset, second, second_offset);
 }
 int guarded(const int* input) { return input ? input[0] : 7; }
+auto distance(const int* first, const int* last) { return last - first; }
+short byte_distance(Buffer source, loom::type::offset left, loom::type::offset right) {
+  return loom::buffer::distance<short>(source, left, source, right);
+}
 // ----
 #include <loomcxx/numeric.h>
 #include <loomcxx/predicate.h>
@@ -32,6 +36,12 @@ bool different(loom::type::buffer<unsigned char> first, loom::type::offset first
 
 [[loom::symbol("guarded")]]
 unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_byte_offset);
+
+[[loom::symbol("distance")]]
+unsigned long long distance(loom::type::buffer<unsigned char> first, loom::type::offset first_byte_offset, loom::type::buffer<unsigned char> last, loom::type::offset last_byte_offset);
+
+[[loom::symbol("byte_distance")]]
+unsigned short byte_distance(loom::type::buffer<unsigned char> source, loom::type::offset left, loom::type::offset right);
 
 [[loom::symbol("optional")]]
 loom::type::buffer<unsigned char> optional(loom::type::buffer<unsigned char> input, bool use) {
@@ -76,4 +86,16 @@ unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_by
     v26 = 7u;
   }
   return v26;
+}
+
+[[loom::symbol("distance")]]
+unsigned long long distance(loom::type::buffer<unsigned char> first, loom::type::offset first_byte_offset, loom::type::buffer<unsigned char> last, loom::type::offset last_byte_offset) {
+  long long v43 = loom::buffer::distance<long long>(last, last_byte_offset, first, first_byte_offset);
+  return static_cast<unsigned long long>((v43 / 4ll));
+}
+
+[[loom::symbol("byte_distance")]]
+unsigned short byte_distance(loom::type::buffer<unsigned char> source, loom::type::offset left, loom::type::offset right) {
+  short v50 = loom::buffer::distance<short>(source, left, source, right);
+  return static_cast<unsigned short>(v50);
 }

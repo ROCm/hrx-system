@@ -828,8 +828,16 @@ class CxxExpressionRenderer(CxxRenderContext):
             self.value_origins[result] = self.value_origins[source]
 
     def _binary_expression(self, operation: Operation, token: str) -> str:
-        lhs = self.expression(operation.operands[0])
-        rhs = self.expression(operation.operands[1])
+        member = operation.name.split(".")[-1]
+        if member in {"divsi", "divui", "remsi", "remui"}:
+            signed = member.endswith("si")
+            lhs, rhs = (
+                self.numeric_argument(value, self.cpp_type(value, signed=signed))
+                for value in operation.operands
+            )
+        else:
+            lhs = self.expression(operation.operands[0])
+            rhs = self.expression(operation.operands[1])
         return f"({lhs} {token} {rhs})"
 
     def _mixed_indices(

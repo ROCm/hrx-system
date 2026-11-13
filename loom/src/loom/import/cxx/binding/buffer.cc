@@ -76,7 +76,8 @@ bool BufferIntrinsic::supports(std::string_view name) {
          name == "buffer.assume.noalias" ||
          name == "buffer.assume.memory_space" || name == "buffer.cast" ||
          name == "buffer.root" || name == "buffer.null" ||
-         name == "buffer.compare.null" || name == "buffer.compare.address";
+         name == "buffer.compare.null" || name == "buffer.compare.address" ||
+         name == "buffer.distance";
 }
 
 std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
@@ -116,18 +117,26 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
         construct ? Operation::Null : Operation::CompareNull,
         construct ? &static_cast<const BufferPartition&>(partition) : nullptr);
   }
-  if (name == "buffer.compare.address") {
+  if (name == "buffer.compare.address" || name == "buffer.distance") {
+    const bool distance = name == "buffer.distance";
+    const bool valid_result =
+        distance ? unit.typeTraits().is_integral(signature->returnType())
+                 : types.unqualified(signature->returnType())->kind() ==
+                       cxx::TypeKind::kBool;
     if (attribute.arguments.size() != 1 || signature->isVariadic() ||
         parameters.size() != 4 ||
         types.partition(parameters[0], owner).kind != ValueKind::Buffer ||
         !types.is_offset(parameters[1], owner) ||
         types.partition(parameters[2], owner).kind != ValueKind::Buffer ||
-        !types.is_offset(parameters[3], owner) ||
-        types.unqualified(signature->returnType())->kind() !=
-            cxx::TypeKind::kBool) {
-      diagnostics.reject(unit, owner,
-                         "buffer.compare.address requires two typed buffer "
-                         "and offset pairs and a bool result");
+        !types.is_offset(parameters[3], owner) || !valid_result) {
+      diagnostics.reject(
+          unit, owner,
+          std::string(name) + " requires two typed buffer and offset pairs " +
+              (distance ? "and an integer result" : "and a bool result"));
+    }
+    if (distance) {
+      return BufferIntrinsic(
+          loom_type_element_type(types.get(signature->returnType(), owner)));
     }
     auto arguments = function->templateArguments();
     auto value = arguments.empty() ? std::nullopt
@@ -437,6 +446,11 @@ Value BufferIntrinsic::call(std::span<const Value> arguments, ValueArena& arena,
   if (operation_ == Operation::CompareNull) {
     return storage.compare_null(arguments[0].ssa(), true, owner);
   }
+  if (operation_ == Operation::Distance) {
+    return storage.byte_distance({arguments[0].ssa(), arguments[1].ssa()},
+                                 {arguments[2].ssa(), arguments[3].ssa()},
+                                 result_scalar_, owner);
+  }
   if (operation_ == Operation::CompareAddressEqual ||
       operation_ == Operation::CompareAddressUnequal) {
     return storage.compare_address({arguments[0].ssa(), arguments[1].ssa()},
@@ -512,6 +526,7 @@ Value BufferIntrinsic::call_literal(cxx::TranslationUnit& unit,
 
 bool BufferIntrinsic::equivalent(const BufferIntrinsic& other) const {
   return operation_ == other.operation_ && is_utf8_ == other.is_utf8_ &&
+         result_scalar_ == other.result_scalar_ &&
          element_type_ == other.element_type_ &&
          element_count_type_ == other.element_count_type_ &&
          result_buffer_ == other.result_buffer_ &&

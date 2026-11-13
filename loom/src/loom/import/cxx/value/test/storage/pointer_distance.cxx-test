@@ -1,0 +1,213 @@
+// RUN: pass inline-callables,canonicalize,cse,dce
+
+// The source object footprint selects element units; sign survives scaling.
+// Independent incoming roots retain their proof obligation in High IR.
+using Float3 = float __attribute__((ext_vector_type(3)));
+struct Triple { int x, y, z; };
+using Row = short[3];
+auto bytes(const char* first, const char* last) { return last - first; }
+auto words(const int* first, const int* last) { return first - last; }
+auto records(const Triple* first, const Triple* last) { return last - first; }
+auto vectors(const Float3* first, const Float3* last) { return last - first; }
+auto rows(const Row* first, const Row* last) { return last - first; }
+
+// ----
+func.def public @bytes(%first: buffer, %first_byte_offset: offset, %last: buffer, %last_byte_offset: offset) -> (i64) {
+  %5 = buffer.distance %last[%last_byte_offset], %first[%first_byte_offset] : i64
+  func.return %5 : i64
+}
+
+func.def public @words(%first: buffer, %first_byte_offset: offset, %last: buffer, %last_byte_offset: offset) -> (i64) {
+  %11 = buffer.distance %first[%first_byte_offset], %last[%last_byte_offset] : i64
+  %12 = scalar.constant 4 : i64
+  %13 = scalar.divsi %11, %12 : i64
+  func.return %13 : i64
+}
+
+func.def public @records(%first: buffer, %first_byte_offset: offset, %last: buffer, %last_byte_offset: offset) -> (i64) {
+  %19 = buffer.distance %last[%last_byte_offset], %first[%first_byte_offset] : i64
+  %20 = scalar.constant 12 : i64
+  %21 = scalar.divsi %19, %20 : i64
+  func.return %21 : i64
+}
+
+func.def public @vectors(%first: buffer, %first_byte_offset: offset, %last: buffer, %last_byte_offset: offset) -> (i64) {
+  %27 = buffer.distance %last[%last_byte_offset], %first[%first_byte_offset] : i64
+  %28 = scalar.constant 16 : i64
+  %29 = scalar.divsi %27, %28 : i64
+  func.return %29 : i64
+}
+
+func.def public @rows(%first: buffer, %first_byte_offset: offset, %last: buffer, %last_byte_offset: offset) -> (i64) {
+  %35 = buffer.distance %last[%last_byte_offset], %first[%first_byte_offset] : i64
+  %36 = scalar.constant 6 : i64
+  %37 = scalar.divsi %35, %36 : i64
+  func.return %37 : i64
+}
+
+// ====
+
+#include <initializer_list>
+static auto distance(const int* first, const int* last) { return last - first; }
+long forward(int value) {
+  std::initializer_list<int> values{value, value + 1, value + 2};
+  return distance(values.begin(), values.end());
+}
+long reverse(int value) {
+  std::initializer_list<int> values{value, value + 1, value + 2};
+  return distance(values.end(), values.begin());
+}
+long empty() {
+  const int* first = nullptr;
+  const int* last = nullptr;
+  return last - first;
+}
+
+// ----
+func.def public @forward(%value: i32) -> (i64) {
+  %2 = index.constant 12 : offset
+  %values_begin_ = buffer.alloca<private> align(4) %2 : buffer
+  %98 = index.constant 0 : offset
+  %7 = buffer.view %values_begin_[%98] : buffer -> view<1xi32>
+  view.store %value, %7[0] : i32, view<1xi32>
+  %10 = scalar.constant 1 : i32
+  %11 = scalar.addi %value, %10 : i32
+  %97 = index.constant 4 : offset
+  %13 = buffer.view %values_begin_[%97] : buffer -> view<1xi32>
+  view.store %11, %13[0] : i32, view<1xi32>
+  %16 = scalar.constant 2 : i32
+  %17 = scalar.addi %value, %16 : i32
+  %96 = index.constant 8 : offset
+  %19 = buffer.view %values_begin_[%96] : buffer -> view<1xi32>
+  view.store %17, %19[0] : i32, view<1xi32>
+  %95 = scalar.constant 3 : i64
+  func.return %95 : i64
+}
+
+func.def public @reverse(%value: i32) -> (i64) {
+  %28 = index.constant 12 : offset
+  %values_begin_ = buffer.alloca<private> align(4) %28 : buffer
+  %105 = index.constant 0 : offset
+  %33 = buffer.view %values_begin_[%105] : buffer -> view<1xi32>
+  view.store %value, %33[0] : i32, view<1xi32>
+  %36 = scalar.constant 1 : i32
+  %37 = scalar.addi %value, %36 : i32
+  %104 = index.constant 4 : offset
+  %39 = buffer.view %values_begin_[%104] : buffer -> view<1xi32>
+  view.store %37, %39[0] : i32, view<1xi32>
+  %42 = scalar.constant 2 : i32
+  %43 = scalar.addi %value, %42 : i32
+  %103 = index.constant 8 : offset
+  %45 = buffer.view %values_begin_[%103] : buffer -> view<1xi32>
+  view.store %43, %45[0] : i32, view<1xi32>
+  %102 = scalar.constant -12 : i64
+  %66 = scalar.constant 4 : i64
+  %67 = scalar.divsi %102, %66 : i64
+  func.return %67 : i64
+}
+
+func.def public @empty() -> (i64) {
+  %109 = scalar.constant 0 : i64
+  func.return %109 : i64
+}
+
+// ====
+
+// Member arrays, nested helpers, and branch-selected positions keep one root.
+struct Block { long tag; int values[8]; };
+static const int* advance(const int* pointer, int count) { return pointer + count; }
+auto selected(const Block* block, int start, int count, bool reverse) {
+  const int* begin = advance(block->values, start);
+  const int* end = advance(begin, count);
+  const int* selected = reverse ? begin : end;
+  return selected - begin;
+}
+auto walked(const int* begin, unsigned count) {
+  const int* cursor = begin;
+  for (unsigned i = 0; i < count; ++i) ++cursor;
+  return cursor - begin;
+}
+
+// ----
+func.def public @selected(%block: buffer, %block_byte_offset: offset, %start: i32, %count: i32, %reverse: i1) -> (i64) {
+  %6 = index.constant 8 : offset
+  %values_byte_offset = index.add %block_byte_offset, %6 : offset
+  %54 = scalar.extsi %start : i32 to i64
+  %68 = scalar.constant 2 : i64
+  %69 = scalar.shli %54, %68 : i64
+  %57 = index.cast %values_byte_offset : offset to i64
+  %58 = scalar.addi %57, %69 : i64
+  %59 = scalar.assume %58 [range(%58, 0, 9223372036854775807)] : i64
+  %begin_byte_offset = index.cast %59 : i64 to offset
+  %47 = scalar.extsi %count : i32 to i64
+  %67 = scalar.shli %47, %68 : i64
+  %50 = index.cast %begin_byte_offset : offset to i64
+  %51 = scalar.addi %50, %67 : i64
+  %52 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
+  %end_byte_offset = index.cast %52 : i64 to offset
+  %selected_byte_offset = scf.select %reverse, %begin_byte_offset, %end_byte_offset : offset
+  %61 = index.cast %selected_byte_offset : offset to i64
+  %63 = scalar.subi %61, %50 : i64
+  %15 = scalar.constant 4 : i64
+  %16 = scalar.divsi %63, %15 : i64
+  func.return %16 : i64
+}
+
+func.def public @walked(%begin: buffer, %begin_byte_offset: offset, %count: i32) -> (i64) {
+  %71 = index.constant 0 : offset
+  %23 = index.cast %count : i32 to offset
+  %24 = index.constant 1 : offset
+  %cursor_byte_offset = scf.for %i = [%71 to %23 step %24](%cursor_byte_offset$76 = %begin_byte_offset : offset) -> (offset) {
+    %70 = scalar.constant 4 : i64
+    %35 = index.cast %cursor_byte_offset$76 : offset to i64
+    %36 = scalar.addi %35, %70 : i64
+    %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
+    %cursor_byte_offset$38 = index.cast %37 : i64 to offset
+    scf.yield %cursor_byte_offset$38 : offset
+  }
+  %72 = index.cast %cursor_byte_offset : offset to i64
+  %73 = index.cast %begin_byte_offset : offset to i64
+  %74 = scalar.subi %72, %73 : i64
+  %40 = scalar.constant 4 : i64
+  %41 = scalar.divsi %74, %40 : i64
+  func.return %41 : i64
+}
+
+// ====
+// INPUT: cxx data-model=lp64
+auto source_layout(const long* first, const long* last) { return last - first; }
+
+// ----
+func.def public @source_layout(%first: buffer, %first_byte_offset: offset, %last: buffer, %last_byte_offset: offset) -> (i64) {
+  %5 = buffer.distance %last[%last_byte_offset], %first[%first_byte_offset] : i64
+  %6 = scalar.constant 8 : i64
+  %7 = scalar.divsi %5, %6 : i64
+  func.return %7 : i64
+}
+
+// ====
+// INPUT: cxx data-model=llp64
+auto source_layout(const long* first, const long* last) { return last - first; }
+
+// ----
+func.def public @source_layout(%first: buffer, %first_byte_offset: offset, %last: buffer, %last_byte_offset: offset) -> (i64) {
+  %5 = buffer.distance %last[%last_byte_offset], %first[%first_byte_offset] : i64
+  %6 = scalar.constant 4 : i64
+  %7 = scalar.divsi %5, %6 : i64
+  func.return %7 : i64
+}
+
+// ====
+// INPUT: cxx data-model=ilp32
+// Byte subtraction stays wide until after element division, even though the
+// source pointer and ptrdiff_t are 32 bits.
+auto source_layout(const long* first, const long* last) { return last - first; }
+
+// ----
+func.def public @source_layout(%first: buffer, %first_byte_offset: offset, %last: buffer, %last_byte_offset: offset) -> (i32) {
+  %5 = buffer.distance %last[%last_byte_offset], %first[%first_byte_offset] : i64
+  %6 = scalar.constant 4 : i64
+  %7 = scalar.divsi %5, %6 : i64
+  %8 = scalar.trunci %7 : i64 to i32
+  func.return %8 : i32
+}

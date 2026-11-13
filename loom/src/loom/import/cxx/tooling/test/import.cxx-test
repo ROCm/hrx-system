@@ -30,9 +30,9 @@ func.def @header_twice(%value: i32) -> (i32) {
 // ====
 // RUN: verify
 // INPUT: cxx
-long distance(int* left, int* right) {
-  // ERROR@+1: LOWERING/059 "pointer ordering and subtraction are not supported"
-  return left - right;
+bool before(int* left, int* right) {
+  // ERROR@+1: LOWERING/059 "ordered pointer comparisons are not supported"
+  return left < right;
 }
 
 // ====

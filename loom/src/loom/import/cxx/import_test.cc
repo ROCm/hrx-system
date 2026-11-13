@@ -452,7 +452,7 @@ TEST_F(ImportTest, PreambleNewDirectiveUsesColdParsing) {
 
 TEST_F(ImportTest, RestoredHeaderDiagnosticRetainsExactSource) {
   const std::string header =
-      "long distance(int* lhs, int* rhs) { return lhs - rhs; }\n";
+      "bool before(int* lhs, int* rhs) { return lhs < rhs; }\n";
   const auto source =
       IREE_SV("#include \"invalid.h\"\nvoid consumer_marker();\n");
   headers_["/app/invalid.h"] = header;

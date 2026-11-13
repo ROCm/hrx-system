@@ -505,7 +505,9 @@ class CxxRenderContext:
                 "vector.maxsi",
                 "vector.ashri",
             }:
-                if operation.operands:
+                if operation.name.endswith(("divsi", "remsi", "minsi", "maxsi")):
+                    signed.update(operation.operands)
+                elif operation.operands:
                     signed.add(operation.operands[0])
                 if operation.name.endswith(
                     ("absi", "extsi", "divsi", "remsi", "minsi", "maxsi", "ashri")
@@ -519,7 +521,11 @@ class CxxRenderContext:
                     "sge",
                 }:
                     signed.update(operation.operands)
-            elif operation.name in {"scalar.fptosi", "vector.fptosi"}:
+            elif operation.name in {
+                "scalar.fptosi",
+                "vector.fptosi",
+                "buffer.distance",
+            }:
                 signed.update(operation.results)
             elif operation.name == "scalar.frexpf":
                 signed.add(operation.results[1])
@@ -1054,8 +1060,14 @@ class CxxRenderContext:
                         literal_type, result_id in self.signed_values
                     )
                     return f"static_cast<{element}>({value})"
-                if name == "i64" and value >= 0:
-                    return f"{value}ull"
+                if name == "i64":
+                    bits = value & ((1 << 64) - 1)
+                    if result_id not in self.signed_values:
+                        return f"{bits}ull"
+                    signed = bits if bits < (1 << 63) else bits - (1 << 64)
+                    if signed == -(1 << 63):
+                        return "(-9223372036854775807ll - 1ll)"
+                    return f"{signed}ll"
                 if (
                     name in {"i8", "i16", "i32"}
                     and value >= 0

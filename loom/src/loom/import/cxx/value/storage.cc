@@ -84,6 +84,35 @@ loom_value_id_t Storage::compare_address(Pointer left, Pointer right,
   return loom_buffer_compare_address_result(op);
 }
 
+loom_value_id_t Storage::byte_distance(Pointer left, Pointer right,
+                                       loom_scalar_type_t result_type,
+                                       cxx::AST* owner) {
+  loom_op_t* op;
+  check(loom_buffer_distance_build(
+      &builder_, left.root, left.byte_offset, right.root, right.byte_offset,
+      loom_type_scalar(result_type), locations_.get(owner), &op));
+  return loom_buffer_distance_result(op);
+}
+
+loom_value_id_t Storage::distance(Pointer left, Pointer right,
+                                  const cxx::Type* element_type,
+                                  const cxx::Type* result_type,
+                                  cxx::AST* owner) {
+  const auto bytes = types_.storage_size(element_type, owner);
+  auto difference = byte_distance(left, right, LOOM_SCALAR_TYPE_I64, owner);
+  if (bytes != 1) {
+    auto source = locations_.get(owner);
+    auto stride = scalars_.integer(bytes, LOOM_SCALAR_TYPE_I64, source);
+    loom_op_t* op;
+    check(loom_scalar_divsi_build(&builder_, difference, stride,
+                                  loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+                                  source, &op));
+    difference = loom_scalar_divsi_result(op);
+  }
+  return scalars_.convert(difference, unit_.control()->getLongLongIntType(),
+                          result_type, owner);
+}
+
 Pointer Storage::constrain_origin(Pointer pointer, cxx::AST* owner) {
   if (unit_.control()->memoryLayout()->sizeOfPointer() != 4) {
     return pointer;

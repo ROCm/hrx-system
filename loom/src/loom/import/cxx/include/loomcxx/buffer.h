@@ -108,6 +108,13 @@ template <predicate Predicate, class Left, class Right>
 
 }  // namespace compare
 
+// Returns left_offset - right_offset in bytes. Compilation must prove both
+// positions share a byte origin; the signed distance must fit Result.
+template <class Result = long long, class Left, class Right>
+[[loom::op("buffer.distance")]] Result distance(
+    loom::type::buffer<Left> left, loom::type::offset left_offset,
+    loom::type::buffer<Right> right, loom::type::offset right_offset);
+
 // Recovers the zero-origin Loom buffer root carried by a source pointer. The
 // pointer expression is evaluated normally; its interior byte origin is not
 // part of the returned root value.

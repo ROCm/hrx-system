@@ -85,6 +85,17 @@ class Storage {
   // established after inlining; independent roots retain address equality.
   loom_value_id_t compare_address(Pointer left, Pointer right, bool equal,
                                   cxx::AST* owner);
+  // Emits signed byte distance with a compiler-proven common-origin contract.
+  // Shared cleanup establishes the proof after ordinary inlining and rejects
+  // unresolved roots before target lowering; no native address is exposed.
+  loom_value_id_t byte_distance(Pointer left, Pointer right,
+                                loom_scalar_type_t result_type,
+                                cxx::AST* owner);
+  // Computes source element distance using the admitted pointee footprint,
+  // then converts the signed result to the source ptrdiff_t representation.
+  loom_value_id_t distance(Pointer left, Pointer right,
+                           const cxx::Type* element_type,
+                           const cxx::Type* result_type, cxx::AST* owner);
   // Refines an opaque pointer origin to the configured source pointer width.
   // The allocation root remains independent; this only publishes the range
   // every valid source pointer representation already satisfies.

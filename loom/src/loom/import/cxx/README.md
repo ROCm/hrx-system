@@ -3489,8 +3489,40 @@ inlining a helper whose `first` and `last` arguments came from one array.
 Exported C++ preserves unresolved comparisons through
 `loom::buffer::compare::address<loom::buffer::compare::predicate::eq>` or `ne`.
 The explicit facade takes two typed buffers and two `loom::type::offset` values.
-Dereferencing null remains invalid. Ordered pointer comparisons and pointer
-subtraction have separate semantics and remain diagnosed.
+Dereferencing null remains invalid. Ordered pointer comparisons are diagnosed.
+
+Pointer subtraction returns a signed element count when the compiler can prove
+that both positions derive from the same buffer root:
+
+```cpp
+static auto distance(const int* first, const int* last) {
+  return last - first;
+}
+
+auto remaining(const int* data, int position, int count) {
+  return distance(data + position, data + count);
+}
+```
+
+Inlining establishes the shared root here. Member arrays, nested projections,
+pointer copies, and control flow can preserve that proof. The importer retains
+both buffer/offset pairs in `buffer.distance`, divides the signed byte distance
+by the source element size, and converts to the source `ptrdiff_t` width. Once
+the roots are proven equal, shared cleanup replaces `buffer.distance` with
+signed integer arithmetic. Reverse distances are negative, one-past endpoints
+are accepted, and subtracting two null pointers yields zero.
+
+An unresolved pair of roots fails final lowering at the C++ subtraction with
+"pointer subtraction requires both positions to derive from the same buffer
+root". Supplying overlapping buffers independently does not establish that
+proof. A retained helper with independent pointer parameters must likewise have
+a provable common origin; ordinary inlining can expose the caller's relationship.
+No native address is exposed and no runtime alias check is introduced.
+
+Exported C++ preserves the proof obligation with
+`loom::buffer::distance<Result>(left, left_offset, right, right_offset)`.
+This explicit buffer operation returns bytes; ordinary `last - first` uses
+source element units.
 
 `void*`, qualified void pointers, and pointers to forward-declared objects use
 the same representation. Copies, casts, helpers, branches, loops, and SSA record
