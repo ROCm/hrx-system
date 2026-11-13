@@ -114,6 +114,24 @@ static iree_status_t loom_check_test_pipeline_input_captures(
   return iree_ok_status();
 }
 
+static iree_status_t loom_check_test_pipeline_transport_copy_order(
+    const loom_module_t* module, loom_pipeline_transport_copy_cursor_t* cursor,
+    iree_string_builder_t* output) {
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, "    copy_order:"));
+  const loom_pipeline_transport_copy_t* copy = NULL;
+  while ((copy = loom_pipeline_transport_copy_cursor_next(cursor))) {
+    const iree_string_view_t source = loom_module_value_name(
+        module, loom_op_const_results(copy->source->admission->op)[0]);
+    const iree_string_view_t destination =
+        loom_module_value_name(module, copy->destination->channel->value_id);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output, " %%%.*s->%%%.*s", (int)source.size, source.data,
+        (int)destination.size, destination.data));
+  }
+  return iree_string_builder_append_cstring(output, "\n");
+}
+
 static iree_status_t loom_check_test_pipeline_transport_print(
     const loom_module_t* module, const loom_pipeline_worker_t* worker,
     iree_host_size_t worker_index, bool input_addresses, bool phase_details,
@@ -150,6 +168,22 @@ static iree_status_t loom_check_test_pipeline_transport_print(
   if (transport->batch_count > 1) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output, "  prefix_cycles=%" PRIu64 "\n", transport->prefix_cycles));
+  }
+  if (transport->copy_stream) {
+    const loom_pipeline_transport_copy_stream_t* stream =
+        transport->copy_stream;
+    const iree_string_view_t source =
+        loom_module_value_name(module, stream->source->value_id);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output,
+        "  copy_stream: source=%%%.*s records=%" PRIu64 " repetitions=%" PRIu64
+        "\n",
+        (int)source.size, source.data, stream->records, stream->repetitions));
+    loom_pipeline_transport_copy_cursor_t cursor;
+    IREE_RETURN_IF_ERROR(loom_pipeline_transport_stream_cursor_initialize(
+        transport, arena, &cursor));
+    IREE_RETURN_IF_ERROR(
+        loom_check_test_pipeline_transport_copy_order(module, &cursor, output));
   }
   if (transport->induction ||
       (phase_details && transport->stream_count && worker->graph->has_cycles)) {
@@ -252,23 +286,12 @@ static iree_status_t loom_check_test_pipeline_transport_print(
       }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "\n"));
     }
-    if (!batch->replays) {
+    if (!batch->replays && !transport->copy_stream) {
       loom_pipeline_transport_copy_cursor_t cursor;
       IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_cursor_initialize(
           transport, batch, arena, &cursor));
-      IREE_RETURN_IF_ERROR(
-          iree_string_builder_append_cstring(output, "    copy_order:"));
-      const loom_pipeline_transport_copy_t* copy = NULL;
-      while ((copy = loom_pipeline_transport_copy_cursor_next(&cursor))) {
-        const iree_string_view_t source = loom_module_value_name(
-            module, loom_op_const_results(copy->source->admission->op)[0]);
-        const iree_string_view_t destination = loom_module_value_name(
-            module, copy->destination->channel->value_id);
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-            output, " %%%.*s->%%%.*s", (int)source.size, source.data,
-            (int)destination.size, destination.data));
-      }
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "\n"));
+      IREE_RETURN_IF_ERROR(loom_check_test_pipeline_transport_copy_order(
+          module, &cursor, output));
     }
   }
   return iree_ok_status();

@@ -1,0 +1,392 @@
+// Independently reclaimed records change packet destinations within a cycle.
+// The middle record fans out to left, right, and left again; its source slot
+// cannot be reclaimed until both physical packets have consumed it.
+aie2p.target<array> @device
+
+func.def inline @fifo(%memory: pool, %capacity: index) -> (channel<tile<16xi32>>) {
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %bytes = index.scale %capacity, %record_bytes : index, offset -> offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<[%capacity]x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<[%capacity]x16xi32>, index -> channel<tile<16xi32>>
+  func.return %channel : channel<tile<16xi32>>
+}
+
+func.def inline @send(%read: read<tile<16xi32>>, %destination: channel<tile<16xi32>>) {
+  %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+  func.return
+}
+
+func.def inline @ingress(%input: buffer, %destination: channel<tile<16xi32>>, %count: index, %epoch: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : offset
+  scf.for %record = [%begin to %count step %step] {
+    %global_record = index.madd %epoch, %count, %record : index
+    %offset = index.scale %global_record, %record_bytes : index, offset -> offset
+    %external = buffer.view %input[%offset] : buffer -> view<16xi32>
+    %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %copy = kernel.async.copy %external to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<16xi32>>
+  }
+  func.return
+}
+
+func.def inline @drain(%source: channel<tile<16xi32>>, %output: buffer, %count: index, %epoch: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 64 : offset
+  scf.for %record = [%begin to %count step %step] {
+    %global_record = index.madd %epoch, %count, %record : index
+    %offset = index.scale %global_record, %record_bytes : index, offset -> offset
+    %external = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>>
+  }
+  func.return
+}
+
+pipeline.def @stream(%source_capacity: index, %source_row: index, %cycles: index) run(%input_arg: buffer, %left_arg: buffer, %right_arg: buffer, %epoch: index) {
+  %input_unique, %left_unique, %right_unique = buffer.assume.noalias %input_arg, %left_arg, %right_arg : buffer, buffer, buffer
+  %input, %left_output, %right_output = buffer.assume.alignment %input_unique, %left_unique, %right_unique {minimum_alignment = 64} : buffer, buffer, buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %left_capacity = index.constant 3 : index
+  %right_capacity = index.constant 2 : index
+  %source_memory = pipeline.memory<workgroup>[0, %source_row] : pool
+  %left_memory = pipeline.memory<workgroup>[1, 2] : pool
+  %right_memory = pipeline.memory<workgroup>[1, 3] : pool
+  %source = func.call @fifo(%source_memory, %source_capacity) : (pool, index) -> (channel<tile<16xi32>>)
+  %left = func.call @fifo(%left_memory, %left_capacity) : (pool, index) -> (channel<tile<16xi32>>)
+  %right = func.call @fifo(%right_memory, %right_capacity) : (pool, index) -> (channel<tile<16xi32>>)
+  %input_records = index.mul %cycles, %left_capacity : index
+  %right_records = index.mul %cycles, %right_capacity : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @ingress(%input, %source, %input_records, %epoch) : (buffer, channel<tile<16xi32>>, index, index)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %cycle = [%begin to %cycles step %step] {
+      %first, %first_payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      func.call @send(%first, %left) : (read<tile<16xi32>>, channel<tile<16xi32>>)
+      %middle, %middle_payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %middle_left, %middle_right, %middle_repeat = channel.fanout %middle : read<tile<16xi32>> -> (read<tile<16xi32>>, read<tile<16xi32>>, read<tile<16xi32>>)
+      func.call @send(%middle_left, %left) : (read<tile<16xi32>>, channel<tile<16xi32>>)
+      func.call @send(%middle_right, %right) : (read<tile<16xi32>>, channel<tile<16xi32>>)
+      func.call @send(%middle_repeat, %left) : (read<tile<16xi32>>, channel<tile<16xi32>>)
+      %last, %last_payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      func.call @send(%last, %right) : (read<tile<16xi32>>, channel<tile<16xi32>>)
+    }
+  }
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+    func.call @drain(%left, %left_output, %input_records, %epoch) : (channel<tile<16xi32>>, buffer, index, index)
+  }
+  pipeline.strand workers([1, 3], [1, 1], [1, 1]) {
+    func.call @drain(%right, %right_output, %right_records, %epoch) : (channel<tile<16xi32>>, buffer, index, index)
+  }
+}
+
+// Direct record selection is independent of packets, ring slots, and DMA.
+func.def @reference_cycles(%input: buffer, %left: buffer, %right: buffer, %cycles: index) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %input_stride = index.constant 3 : index
+  %right_stride = index.constant 2 : index
+  %words = index.constant 16 : index
+  %input_records = index.mul %cycles, %input_stride : index
+  %right_records = index.mul %cycles, %right_stride : index
+  %source = buffer.view %input[%origin] : buffer -> view<[%input_records]x16xi32>
+  %left_target = buffer.view %left[%origin] : buffer -> view<[%input_records]x16xi32>
+  %right_target = buffer.view %right[%origin] : buffer -> view<[%right_records]x16xi32>
+  scf.for %cycle = [%begin to %cycles step %step] {
+    %first = index.mul %cycle, %input_stride : index
+    %middle = index.add %first, %step : index
+    %last = index.add %middle, %step : index
+    %right_first = index.mul %cycle, %right_stride : index
+    %right_last = index.add %right_first, %step : index
+    scf.for %word = [%begin to %words step %step] {
+      %first_value = view.load %source[%first, %word] : view<[%input_records]x16xi32> -> i32
+      %middle_value = view.load %source[%middle, %word] : view<[%input_records]x16xi32> -> i32
+      %last_value = view.load %source[%last, %word] : view<[%input_records]x16xi32> -> i32
+      view.store %first_value, %left_target[%first, %word] : i32, view<[%input_records]x16xi32>
+      view.store %middle_value, %left_target[%middle, %word] : i32, view<[%input_records]x16xi32>
+      view.store %middle_value, %left_target[%last, %word] : i32, view<[%input_records]x16xi32>
+      view.store %middle_value, %right_target[%right_first, %word] : i32, view<[%right_records]x16xi32>
+      view.store %last_value, %right_target[%right_last, %word] : i32, view<[%right_records]x16xi32>
+    }
+  }
+  func.return
+}
+
+func.def @reference(%input: buffer, %left: buffer, %right: buffer) {
+  %cycles = index.constant 3 : index
+  func.call @reference_cycles(%input, %left, %right, %cycles) : (buffer, buffer, buffer, index)
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @sram_single_slot() run(%input: buffer, %left: buffer, %right: buffer) {
+  %capacity = index.constant 1 : index
+  %source_row = index.constant 1 : index
+  %cycles = index.constant 3 : index
+  %epoch = index.constant 0 : index
+  pipeline.compose @stream[%capacity, %source_row, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+}
+
+check.scenario public @sram_single_slot_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<176xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<176xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@sram_single_slot, @reference>(%input, %left, %right) : (tensor<144xi32>, tensor<144xi32>, tensor<96xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<176xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<176xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+// Three records per cycle rotate two slots. Three cycles end with
+// a partial period, so the final task must continue at the current slot.
+pipeline.def<kernel> public retain target(@device) @sram_partial_period() run(%input: buffer, %left: buffer, %right: buffer) {
+  %capacity = index.constant 2 : index
+  %source_row = index.constant 1 : index
+  %cycles = index.constant 3 : index
+  %epoch = index.constant 0 : index
+  pipeline.compose @stream[%capacity, %source_row, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+}
+
+check.scenario public @sram_partial_period_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<176xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<176xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@sram_partial_period, @reference>(%input, %left, %right) : (tensor<144xi32>, tensor<144xi32>, tensor<96xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<176xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<176xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+pipeline.def<kernel> public retain target(@device) @sram_whole_period() run(%input: buffer, %left: buffer, %right: buffer) {
+  %capacity = index.constant 3 : index
+  %source_row = index.constant 1 : index
+  %cycles = index.constant 3 : index
+  %epoch = index.constant 0 : index
+  pipeline.compose @stream[%capacity, %source_row, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+}
+
+check.scenario public @sram_whole_period_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<176xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<176xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@sram_whole_period, @reference>(%input, %left, %right) : (tensor<144xi32>, tensor<144xi32>, tensor<96xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<176xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<176xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+pipeline.def<kernel> public retain target(@device) @compute_single_slot() run(%input: buffer, %left: buffer, %right: buffer) {
+  %capacity = index.constant 1 : index
+  %source_row = index.constant 2 : index
+  %cycles = index.constant 3 : index
+  %epoch = index.constant 0 : index
+  pipeline.compose @stream[%capacity, %source_row, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+}
+
+check.scenario public @compute_single_slot_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<176xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<176xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@compute_single_slot, @reference>(%input, %left, %right) : (tensor<144xi32>, tensor<144xi32>, tensor<96xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<176xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<176xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+// Three records per cycle rotate two slots. Three cycles end with
+// a partial period, so the final task must continue at the current slot.
+pipeline.def<kernel> public retain target(@device) @compute_partial_period() run(%input: buffer, %left: buffer, %right: buffer) {
+  %capacity = index.constant 2 : index
+  %source_row = index.constant 2 : index
+  %cycles = index.constant 3 : index
+  %epoch = index.constant 0 : index
+  pipeline.compose @stream[%capacity, %source_row, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+}
+
+check.scenario public @compute_partial_period_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<176xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<176xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@compute_partial_period, @reference>(%input, %left, %right) : (tensor<144xi32>, tensor<144xi32>, tensor<96xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<176xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<176xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+pipeline.def<kernel> public retain target(@device) @compute_whole_period() run(%input: buffer, %left: buffer, %right: buffer) {
+  %capacity = index.constant 3 : index
+  %source_row = index.constant 2 : index
+  %cycles = index.constant 3 : index
+  %epoch = index.constant 0 : index
+  pipeline.compose @stream[%capacity, %source_row, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+}
+
+check.scenario public @compute_whole_period_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<176xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<176xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@compute_whole_period, @reference>(%input, %left, %right) : (tensor<144xi32>, tensor<144xi32>, tensor<96xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<176xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<176xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+// Each child consumes whole source and destination rings, physically retires,
+// and then reuses the same DMA engines for a different input epoch.
+pipeline.def<kernel> public retain target(@device) @children() run(%input: buffer, %left: buffer, %right: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 3 : index
+  %capacity = index.constant 2 : index
+  %sram = index.constant 1 : index
+  %cycles = index.constant 6 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @stream[%capacity, %sram, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+    }
+  }
+}
+
+func.def @children_reference(%input: buffer, %left: buffer, %right: buffer) {
+  %cycles = index.constant 18 : index
+  func.call @reference_cycles(%input, %left, %right, %cycles) : (buffer, buffer, buffer, index)
+  func.return
+}
+
+check.scenario public @independent_child_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<896xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<896xi32> -> tensor<864xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<896xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<896xi32> -> tensor<864xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<608xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<608xi32> -> tensor<576xi32>
+    check.compare<@children, @children_reference>(%input, %left, %right) : (tensor<864xi32>, tensor<864xi32>, tensor<576xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<896xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<896xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<608xi32>
+    }
+  }
+  check.return
+}
+
+// Three cycles do not complete the four-cycle source-address period.
+pipeline.def<kernel> public retain target(@device) @sram_partial_only() run(%input: buffer, %left: buffer, %right: buffer) {
+  %capacity = index.constant 4 : index
+  %source_row = index.constant 1 : index
+  %cycles = index.constant 3 : index
+  %epoch = index.constant 0 : index
+  pipeline.compose @stream[%capacity, %source_row, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+}
+
+check.scenario public @sram_partial_only_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<176xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<176xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<128xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@sram_partial_only, @reference>(%input, %left, %right) : (tensor<144xi32>, tensor<144xi32>, tensor<96xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<176xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<176xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+// Cross the 256-repeat task boundary without splitting source ownership.
+func.def @queued_reference(%input: buffer, %left: buffer, %right: buffer) {
+  %cycles = index.constant 257 : index
+  func.call @reference_cycles(%input, %left, %right, %cycles) : (buffer, buffer, buffer, index)
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @sram_queued_period() run(%input: buffer, %left: buffer, %right: buffer) {
+  %capacity = index.constant 1 : index
+  %source_row = index.constant 1 : index
+  %cycles = index.constant 257 : index
+  %epoch = index.constant 0 : index
+  pipeline.compose @stream[%capacity, %source_row, %cycles](%input, %left, %right, %epoch) : [index, index, index](buffer, buffer, buffer, index)
+}
+
+check.scenario public @sram_queued_period_records {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<12368xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<12368xi32> -> tensor<12336xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<12368xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<12368xi32> -> tensor<12336xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<8256xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<8256xi32> -> tensor<8224xi32>
+    check.compare<@sram_queued_period, @queued_reference>(%input, %left, %right) : (tensor<12336xi32>, tensor<12336xi32>, tensor<8224xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<12368xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<12368xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<8256xi32>
+    }
+  }
+  check.return
+}

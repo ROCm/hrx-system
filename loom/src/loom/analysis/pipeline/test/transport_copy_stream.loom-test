@@ -1,0 +1,203 @@
+// RUN: emit pipeline-transport @stream
+
+// Per-destination totals are not execution order: every cycle sends two
+// records left, then two right. The enclosing cycle stays outside the cursor.
+func.def @distribute(%source: channel<tile<1xi32>>, %left: channel<tile<1xi32>>, %right: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %cycles = index.constant 3 : index
+  %pair = index.constant 2 : index
+  cfg.br ^cycle_header(%begin: index)
+^cycle_header(%cycle: index):
+  %more_cycles = index.cmp ult, %cycle, %cycles : index
+  cfg.cond_br %more_cycles, ^left_entry, ^done
+^left_entry:
+  cfg.br ^left_header(%begin: index)
+^left_header(%left_record: index):
+  %more_left = index.cmp ult, %left_record, %pair : index
+  cfg.cond_br %more_left, ^left_copy, ^right_entry
+^left_copy:
+  %left_read, %left_payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %left_write, %left_target = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %left_read -> %left_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %next_left = index.add %left_record, %step : index
+  cfg.br ^left_header(%next_left: index)
+^right_entry:
+  cfg.br ^right_header(%begin: index)
+^right_header(%right_record: index):
+  %more_right = index.cmp ult, %right_record, %pair : index
+  cfg.cond_br %more_right, ^right_copy, ^next_cycle
+^right_copy:
+  %right_read, %right_payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %right_write, %right_target = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %right_read -> %right_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %next_right = index.add %right_record, %step : index
+  cfg.br ^right_header(%next_right: index)
+^next_cycle:
+  %next = index.add %cycle, %step : index
+  cfg.br ^cycle_header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%input: buffer, %left_output: buffer, %right_output: buffer) {
+  %origin = index.constant 0 : offset
+  %one_slot = index.constant 1 : index
+  %source_slots = buffer.view %input[%origin] : buffer -> view<1x1xi32>
+  %left_slots = buffer.view %left_output[%origin] : buffer -> view<1x1xi32>
+  %right_slots = buffer.view %right_output[%origin] : buffer -> view<1x1xi32>
+  %source = channel.bind<fifo> %source_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %left = channel.bind<fifo> %left_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %right = channel.bind<fifo> %right_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @distribute(%source, %left, %right) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=0
+  copy_stream: source=%source records=4 repetitions=3
+    copy_order: %left_read->%left %left_read->%left %right_read->%right %right_read->%right
+  batch 0: records=1 replays=1
+    record 0: admission=%left_read source=%source admissions=6 transfers=6 final_release=no destinations=%left
+  batch 1: records=1 replays=1
+    record 0: admission=%right_read source=%source admissions=6 transfers=6 final_release=no destinations=%right
+
+// ====
+// RUN: emit pipeline-transport @stream
+
+// Prefix and suffix copies belong to the complete stream, outside its inner
+// loop. A fanout consumes one source record despite its two destinations.
+func.def @distribute(%source: channel<tile<1xi32>>, %left: channel<tile<1xi32>>, %right: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %pairs = index.constant 2 : index
+  %prefix, %prefix_payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %prefix_write, %prefix_target = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %prefix -> %prefix_write : read<tile<1xi32>>, write<tile<1xi32>>
+  cfg.br ^pair_header(%begin: index)
+^pair_header(%pair: index):
+  %more_pairs = index.cmp ult, %pair, %pairs : index
+  cfg.cond_br %more_pairs, ^pair_body, ^suffix
+^pair_body:
+  %read, %payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %left_read, %right_read = channel.fanout %read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>)
+  %left_write, %left_target = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %left_read -> %left_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %right_write, %right_target = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %right_read -> %right_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %next_pair = index.add %pair, %step : index
+  cfg.br ^pair_header(%next_pair: index)
+^suffix:
+  %last, %last_payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %last_write, %last_target = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %last -> %last_write : read<tile<1xi32>>, write<tile<1xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%input: buffer, %left_output: buffer, %right_output: buffer) {
+  %origin = index.constant 0 : offset
+  %one_slot = index.constant 1 : index
+  %source_slots = buffer.view %input[%origin] : buffer -> view<1x1xi32>
+  %left_slots = buffer.view %left_output[%origin] : buffer -> view<1x1xi32>
+  %right_slots = buffer.view %right_output[%origin] : buffer -> view<1x1xi32>
+  %source = channel.bind<fifo> %source_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %left = channel.bind<fifo> %left_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %right = channel.bind<fifo> %right_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @distribute(%source, %left, %right) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=channel-copy execution_counts=exact batches=3 streams=0
+  prefix_cycles=0
+  copy_stream: source=%source records=4 repetitions=1
+    copy_order: %prefix->%right %read->%left %read->%right %read->%left %read->%right %last->%left
+  batch 0: records=1 replays=1
+    record 0: admission=%prefix source=%source admissions=1 transfers=1 final_release=no destinations=%right
+  batch 1: records=1 replays=1
+    record 0: admission=%read source=%source admissions=2 transfers=2 final_release=no destinations=%left,%right
+  batch 2: records=1 replays=1
+    record 0: admission=%last source=%source admissions=1 transfers=1 final_release=no destinations=%left
+
+// ====
+// RUN: emit pipeline-transport @stream
+
+// A copy between acquisitions does not prove serial source lifetimes: the
+// first record still owns a fanout obligation when the second is admitted.
+func.def @distribute(%source: channel<tile<1xi32>>, %left: channel<tile<1xi32>>, %right: channel<tile<1xi32>>) {
+  %first, %first_payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %first_left, %first_right = channel.fanout %first : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>)
+  %left_write, %left_payload = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %first_left -> %left_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %second, %second_payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %right_write, %right_payload = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %first_right -> %right_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %second_write, %second_target = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %second -> %second_write : read<tile<1xi32>>, write<tile<1xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%input: buffer, %left_output: buffer, %right_output: buffer) {
+  %origin = index.constant 0 : offset
+  %two_slots = index.constant 2 : index
+  %one_slot = index.constant 1 : index
+  %source_slots = buffer.view %input[%origin] : buffer -> view<2x1xi32>
+  %left_slots = buffer.view %left_output[%origin] : buffer -> view<1x1xi32>
+  %right_slots = buffer.view %right_output[%origin] : buffer -> view<1x1xi32>
+  %source = channel.bind<fifo> %source_slots, %two_slots : view<2x1xi32>, index -> channel<tile<1xi32>>
+  %left = channel.bind<fifo> %left_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %right = channel.bind<fifo> %right_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @distribute(%source, %left, %right) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=1
+  batch 0: records=1 replays=1
+    record 0: admission=%first source=%source admissions=1 transfers=1 final_release=no destinations=%left,%right
+  batch 1: records=1 replays=1
+    record 0: admission=%second source=%source admissions=1 transfers=1 final_release=no destinations=%left
+
+// ====
+// RUN: emit pipeline-transport @stream
+
+// Repeated delivery to one receiver needs an ordered program even with one
+// admission. Distinct fanout destinations still share the same source lifetime.
+func.def @distribute(%source: channel<tile<1xi32>>, %left: channel<tile<1xi32>>, %right: channel<tile<1xi32>>) {
+  %read, %payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %left_read, %right_read, %repeat_read = channel.fanout %read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>)
+  %left_write, %left_target = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %left_read -> %left_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %right_write, %right_target = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %right_read -> %right_write : read<tile<1xi32>>, write<tile<1xi32>>
+  %repeat_write, %repeat_target = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %repeat_read -> %repeat_write : read<tile<1xi32>>, write<tile<1xi32>>
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%input: buffer, %left_output: buffer, %right_output: buffer) {
+  %origin = index.constant 0 : offset
+  %one_slot = index.constant 1 : index
+  %two_slots = index.constant 2 : index
+  %source_slots = buffer.view %input[%origin] : buffer -> view<1x1xi32>
+  %left_slots = buffer.view %left_output[%origin] : buffer -> view<2x1xi32>
+  %right_slots = buffer.view %right_output[%origin] : buffer -> view<1x1xi32>
+  %source = channel.bind<fifo> %source_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %left = channel.bind<fifo> %left_slots, %two_slots : view<2x1xi32>, index -> channel<tile<1xi32>>
+  %right = channel.bind<fifo> %right_slots, %one_slot : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @distribute(%source, %left, %right) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=channel-copy execution_counts=exact batches=1 streams=0
+  copy_stream: source=%source records=1 repetitions=1
+    copy_order: %read->%left %read->%right %read->%left
+  batch 0: records=1 replays=0
+    record 0: admission=%read source=%source admissions=1 transfers=1 final_release=no destinations=%left,%right,%left

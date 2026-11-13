@@ -197,6 +197,7 @@ loom_test(
         "joined_phases.loom",
         "ordered_geometry.loom",
         "packet_phases.loom",
+        "packet_stream.loom",
         "retained_copy.loom",
         "retained_handoff.loom",
         "shim_placement.loom",

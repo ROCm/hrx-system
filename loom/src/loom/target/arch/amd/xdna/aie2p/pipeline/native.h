@@ -513,12 +513,16 @@ typedef struct loom_aie2p_native_distribution_t {
 
 // A contiguous source range delivered to one immutable packet class.
 typedef struct loom_aie2p_native_distribution_range_t {
-  // First source record within the retained batch.
+  // First source slot within a retained batch or rotating FIFO.
   uint32_t first;
   // Consecutive records coalesced into one DMA packet.
   uint32_t count;
   // Index in the distribution path's retained destination-class table.
   uint8_t packet;
+  // First packet consuming one source ownership interval.
+  bool acquire;
+  // Last packet reclaiming that source ownership interval.
+  bool release;
 } loom_aie2p_native_distribution_range_t;
 
 // Ordered source ranges and destination classes before queue/descriptor layout.
@@ -527,11 +531,17 @@ typedef struct loom_aie2p_native_packet_program_t {
   loom_aie2p_native_distribution_range_t* ranges;
   // Number of source descriptors required by those ranges.
   uint16_t range_count;
-  // Finite task publications covering the retained source admissions.
+  // Prefix covering one complete address period; zero for a partial-only run.
+  uint16_t period_range_count;
+  // Complete address periods preceding the optional partial tail.
+  uint32_t period_repetitions;
+  // Next source slot after the complete program, for invocation ownership.
+  uint32_t terminal_slot;
+  // Finite task publications covering complete periods and the partial tail.
   uint8_t task_count;
 } loom_aie2p_native_packet_program_t;
 
-// One retained source batch awaiting physical descriptor and route selection.
+// One retained batch or FIFO stream awaiting physical descriptor selection.
 typedef struct loom_aie2p_native_distribution_batch_t {
   // Canonical geometry supplying this batch's source and receiver endpoints.
   loom_aie2p_native_distribution_t* distribution;
@@ -547,7 +557,8 @@ typedef struct loom_aie2p_native_distribution_batch_t {
 typedef struct loom_aie2p_native_distribution_plan_t {
   // Occurrence-owned geometries, independent of the physical owner's list.
   loom_aie2p_native_distribution_t* geometries;
-  // Batch requests indexed by the common transport plan's batch ordinal.
+  // Requests in phase order; an independent-record stream has one complete
+  // phase.
   loom_aie2p_native_distribution_batch_t* batches;
   // Sender/receiver admission windows, or NULL for complete finite programs.
   uint32_t* windows;
