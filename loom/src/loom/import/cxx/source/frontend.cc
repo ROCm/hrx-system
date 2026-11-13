@@ -162,9 +162,9 @@ class SourceToolchain final : public cxx::Toolchain {
     auto layout = std::make_unique<cxx::MemoryLayout>(
         options.data_model == LOOM_CXX_DATA_MODEL_ILP32 ? 32 : 64);
     layout->setSizeOfLongLong(8);
+    layout->setSizeOfLongDouble(8, 53);
     if (options.data_model == LOOM_CXX_DATA_MODEL_LLP64) {
       layout->setSizeOfLong(4);
-      layout->setSizeOfLongDouble(8, 53);
       layout->setWideCharUnderlyingType(2, false);
     }
     layout->setTriple(string(options.triple));
@@ -189,6 +189,21 @@ class SourceToolchain final : public cxx::Toolchain {
     defineMacro("__SIZEOF_LONG_LONG__", "8");
     defineMacro("__loom__", "1");
     addCommonMacros();
+    // The source data models use binary64 long double. System headers inspect
+    // these limits even when no long-double value reaches Loom lowering.
+    defineMacro("__SIZEOF_LONG_DOUBLE__", "8");
+    defineMacro("__LDBL_DECIMAL_DIG__", "17");
+    defineMacro("__LDBL_DENORM_MIN__", "4.9406564584124654e-324L");
+    defineMacro("__LDBL_DIG__", "15");
+    defineMacro("__LDBL_EPSILON__", "2.2204460492503131e-16L");
+    defineMacro("__LDBL_MANT_DIG__", "53");
+    defineMacro("__LDBL_MAX_10_EXP__", "308");
+    defineMacro("__LDBL_MAX_EXP__", "1024");
+    defineMacro("__LDBL_MAX__", "1.7976931348623157e+308L");
+    defineMacro("__LDBL_MIN_10_EXP__", "(-307)");
+    defineMacro("__LDBL_MIN_EXP__", "(-1021)");
+    defineMacro("__LDBL_MIN__", "2.2250738585072014e-308L");
+    defineMacro("__LDBL_NORM_MAX__", "1.7976931348623157e+308L");
     if (language() == cxx::LanguageKind::kC) {
       addCommonC23Macros();
     } else {
