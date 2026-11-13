@@ -75,18 +75,25 @@ iree_status_t loom_aie2p_native_select_channel_endpoint(
   }
   uint32_t words[8] = {0};
   words[0] = length_units - dma->transfer_length_offset;
+  // A retained receiver publishes the complete batch only after every record
+  // arrives. Repeated admissions need one credit for each downstream replay;
+  // acquiring that same quantum prevents replacement during a later replay.
+  const uint32_t lock_credits =
+      !sender && batch_records ? channel->replay.credits : 1;
   words[layout->lock_word] =
       loom_xdna_register_field_encode(
           layout->locks.acquire_id,
           layout->local_lock_base +
               (sender ? channel->ready_lock : channel->free_lock)) |
-      loom_xdna_register_field_encode(layout->locks.acquire_value, -1) |
+      loom_xdna_register_field_encode(layout->locks.acquire_value,
+                                      -(int32_t)lock_credits) |
       loom_xdna_register_field_encode(layout->locks.acquire_enable, 1) |
       loom_xdna_register_field_encode(
           layout->locks.release_id,
           layout->local_lock_base +
               (sender ? channel->free_lock : channel->ready_lock)) |
-      loom_xdna_register_field_encode(layout->locks.release_value, 1) |
+      loom_xdna_register_field_encode(layout->locks.release_value,
+                                      lock_credits) |
       loom_xdna_register_field_encode(layout->locks.valid, 1);
   *out_endpoint = (loom_aie2p_native_distribution_endpoint_t){
       .channel = channel, .tile = tile, .engine = engine};

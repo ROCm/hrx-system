@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
 
 #include <array>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -702,6 +703,43 @@ TEST_P(DistributionPathTest, EveryGeometryMustSupportSharedFraming) {
   workers_[Producer(0)].channels.remote_count = 1;
   IREE_ASSERT_OK(loom_aie2p_native_prepare_sharing(&context_, &realization_));
   EXPECT_EQ(context_.deliveries[pools_[1] - context_.tiles], nullptr);
+}
+
+TEST_P(DistributionPathTest, RetainedReceiversOwnTheCompleteReplayBudget) {
+  auto& channel = channels_[1];
+  sources_[1].capacity = 2;
+  channel.replay.record_count = 2;
+  const auto* tile = pools_[1];
+  const auto* layout = tile->memory_layout;
+  for (uint32_t credits : {1u, 3u, 63u}) {
+    channel.replay.credits = credits;
+    for (auto direction : {LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+                           LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY}) {
+      loom_aie2p_native_distribution_endpoint_t endpoint = {};
+      iree_string_view_t reason = iree_string_view_empty();
+      bool valid = false;
+      IREE_ASSERT_OK(loom_aie2p_native_select_channel_endpoint(
+          &context_, &realization_.invocations, &constructions_[1], &channel,
+          direction, 4, 1, 0, 0, nullptr, &endpoint, &reason, &valid));
+      ASSERT_TRUE(valid) << std::string(reason.data, reason.size);
+      ASSERT_EQ(endpoint.sequence.descriptor_count, 1);
+      const auto* words = endpoint.sequence.words[0];
+      EXPECT_EQ(words[0], 2 * channel.record_byte_length /
+                                  tile->facts->dma.transfer_length_granularity -
+                              tile->facts->dma.transfer_length_offset);
+      // A sender consumes and retires each replay independently. A receiver
+      // can overwrite the batch only after every old replay has retired.
+      const int64_t quantum =
+          direction == LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY ? credits : 1;
+      for (auto [field, expected] :
+           {std::pair{layout->locks.acquire_value, -quantum},
+            std::pair{layout->locks.release_value, quantum}}) {
+        EXPECT_EQ(words[layout->lock_word] &
+                      loom_xdna_register_field_encode(field, -1),
+                  loom_xdna_register_field_encode(field, expected));
+      }
+    }
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(
