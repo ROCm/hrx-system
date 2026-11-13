@@ -462,6 +462,12 @@ class KernelQueueTest : public MemoryBackendTest {
                           words[cursor + 5],
                       words[cursor + 4]);
             break;
+          case 0x40:  // Confirmed immediate COPY_DATA store.
+            ASSERT_EQ(words[cursor + 1] & 0xf, 5u);
+            ASSERT_NE(words[cursor + 1] & (1u << 20), 0u);
+            std::memcpy(reinterpret_cast<void*>(address(4)), words + cursor + 2,
+                        words[cursor + 1] & (1u << 16) ? 8 : 4);
+            break;
           case 0x46:  // EVENT_WRITE joins preceding shader work.
             EXPECT_EQ(length, 2u);
             EXPECT_EQ(words[cursor + 1], 0x80000407u);
@@ -844,6 +850,7 @@ TEST_F(KernelQueueTest, NarrowFillAcquiresPayloadWithoutUsingArguments) {
 }
 
 TEST_F(KernelQueueTest, MetadataPreservesBusyCommandAndItsCausalFrontier) {
+  ASSERT_NO_FATAL_FAILURE(BeginProfile());
   auto first = Semaphore(), foreign = Semaphore(), second = Semaphore(),
        later = Semaphore();
   iree_hal_semaphore_t* first_handle = first;
@@ -856,7 +863,11 @@ TEST_F(KernelQueueTest, MetadataPreservesBusyCommandAndItsCausalFrontier) {
   IREE_ASSERT_OK(iree_hal_queue_barrier(
       queues_[1], {}, {1, &foreign_handle, &one}, nullptr, 0));
   native_queues_[0].busy = true;
-  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {1, &foreign_handle, &one},
+  std::array<iree_hal_semaphore_t*, 2> dependencies = {first_handle,
+                                                       foreign_handle};
+  std::array<uint64_t, 2> values = {one, one};
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0],
+                                        {2, dependencies.data(), values.data()},
                                         {1, &second_handle, &one}, nullptr, 0));
   ASSERT_EQ(native_queues_[0].attempts.size(), 2u);
   const auto prepared = native_queues_[0].attempts.back();
@@ -872,6 +883,12 @@ TEST_F(KernelQueueTest, MetadataPreservesBusyCommandAndItsCausalFrontier) {
   Publish(0);
   ASSERT_EQ(native_queues_[0].attempts.size(), 4u);
   EXPECT_EQ(native_queues_[0].attempts[2], prepared);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  const auto event = std::find_if(
+      profile_sink_.queue_events.begin(), profile_sink_.queue_events.end(),
+      [](const auto& value) { return value.wait_count == 2; });
+  ASSERT_NE(event, profile_sink_.queue_events.end());
+  EXPECT_EQ(event->barrier_count, 1u);
   for (auto* semaphore : {second_handle, later_handle}) {
     iree_hal_amd_gpu_semaphore_wait_t wait = {};
     IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(semaphore, one,
@@ -961,6 +978,189 @@ TEST_F(KernelQueueTest, ReleaseOnlyCompletionPreservesEachObserver) {
   expect_packets(native_queues_[0].commands.back(), {0x37, 0x49}, {0x1600});
   ASSERT_NO_FATAL_FAILURE(Execute(0));
   Poll(0);
+}
+
+TEST_F(KernelQueueTest, LocalExecutionAndVisibilityJoinOnlyTheirOwnProducers) {
+  ASSERT_NO_FATAL_FAILURE(BeginProfile());
+  struct Scenario {
+    // Which producer queues contribute dependencies to queue zero.
+    uint32_t producer_mask;
+    // Execution domain joined before the consumer payload.
+    iree_hal_execution_stage_t source_stage;
+    // Whether that boundary performs full system acquisition.
+    bool acquire;
+    // Producer queues whose explicit memory predicates remain in the stream.
+    uint32_t packet_producer_mask;
+  };
+  const Scenario scenarios[] = {
+      {1, IREE_HAL_EXECUTION_STAGE_DISPATCH, true, 0},
+      {2, IREE_HAL_EXECUTION_STAGE_DISPATCH, true, 2},
+      {3, IREE_HAL_EXECUTION_STAGE_DISPATCH, true, 2},
+      {1, IREE_HAL_EXECUTION_STAGE_DISPATCH, false, 1},
+      {1, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE, true, 1},
+      {1, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE, false, 1},
+  };
+  for (const auto& scenario : scenarios) {
+    SCOPED_TRACE(scenario.producer_mask);
+    SCOPED_TRACE(scenario.source_stage);
+    SCOPED_TRACE(scenario.acquire);
+    auto local = Semaphore(), foreign = Semaphore(), consumer = Semaphore();
+    std::array<iree_hal_semaphore_t*, 2> producers = {local, foreign};
+    auto* consumer_handle = consumer.get();
+    std::array<uint64_t, 2> values = {1, 1};
+    std::vector<uint64_t> expected_addresses;
+    for (uint32_t i = 0; i < 2; ++i) {
+      IREE_ASSERT_OK(iree_hal_queue_barrier(
+          queues_[i], {}, {1, &producers[i], values.data()}, nullptr, 0));
+      Publish(i);
+      iree_hal_amd_gpu_semaphore_wait_t point = {};
+      IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
+          producers[i], 1, &context_, &point));
+      ASSERT_EQ(point.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+      if (scenario.packet_producer_mask & (1u << i)) {
+        expected_addresses.push_back(point.signal->device_address);
+      }
+      iree_hal_amd_gpu_signal_release(point.signal);
+    }
+    std::vector<iree_hal_semaphore_t*> waits;
+    for (uint32_t i = 0; i < 2; ++i) {
+      if (scenario.producer_mask & (1u << i)) {
+        waits.push_back(producers[i]);
+      }
+    }
+    const iree_hal_barrier_t acquire = {
+        .source_stage_mask = scenario.source_stage,
+        .flags = static_cast<iree_hal_barrier_flags_t>(
+            scenario.acquire ? IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE
+                             : IREE_HAL_BARRIER_FLAG_NONE),
+    };
+    const iree_hal_barrier_list_t before = {1, &acquire}, after = {};
+    const iree_hal_queue_barriers_t barriers = {&before, &after};
+    IREE_ASSERT_OK(iree_hal_queue_barrier(
+        queues_[0], {waits.size(), waits.data(), values.data()},
+        {1, &consumer_handle, values.data()}, &barriers, 0));
+    Publish(0);
+    const auto& command = native_queues_[0].commands.back();
+    const auto* words = Words(command);
+    std::vector<uint32_t> opcodes;
+    std::vector<uint64_t> addresses;
+    for (size_t cursor = 0; cursor < command.byte_length / 4;) {
+      const uint32_t length = ((words[cursor] >> 16) & 0x3fff) + 2;
+      ASSERT_LE(cursor + length, command.byte_length / 4);
+      const uint32_t opcode = (words[cursor] >> 8) & 255;
+      if (opcode != 0x10) {
+        opcodes.push_back(opcode);
+      }
+      if (opcode == 0x3c) {
+        addresses.push_back(uint64_t(words[cursor + 2]) |
+                            (uint64_t(words[cursor + 3]) << 32));
+      }
+      if (opcode == 0x58) {
+        const std::vector<uint32_t> expected = {
+            0xc0065800, 0, UINT32_MAX, 0xff,
+            0,          0, 0x0a,       barrier_profile_.acquire};
+        EXPECT_EQ(
+            std::vector<uint32_t>(words + cursor, words + cursor + length),
+            expected);
+      }
+      cursor += length;
+    }
+    EXPECT_EQ(addresses, expected_addresses);
+    std::vector<uint32_t> expected(expected_addresses.size(), 0x3c);
+    if (scenario.source_stage == IREE_HAL_EXECUTION_STAGE_DISPATCH) {
+      expected.push_back(0x46);
+    }
+    if (scenario.acquire) {
+      expected.push_back(0x58);
+    }
+    expected.push_back(0x49);
+    EXPECT_EQ(opcodes, expected);
+
+    // Publication retains every producer even when its memory wait vanished.
+    auto* queue =
+        reinterpret_cast<iree_hal_amd_gpu_pm4_queue_t*>(queues_[0].get());
+    const uint64_t position = native_queues_[0].commands.size() - 1;
+    auto* submission = iree_hal_amd_gpu_pm4_retirement_submission(
+        &queue->issued[position & queue->retirement.capacity_mask].action);
+    EXPECT_EQ(submission->native_wait_count, waits.size());
+    IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+    ASSERT_FALSE(profile_sink_.queue_events.empty());
+    EXPECT_EQ(profile_sink_.queue_events.back().barrier_count,
+              expected_addresses.size());
+    ASSERT_NO_FATAL_FAILURE(Execute(1));
+    ASSERT_NO_FATAL_FAILURE(Execute(0));
+    Poll(1);
+    Poll(0);
+    uint64_t value = 0;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(consumer, &value));
+    EXPECT_EQ(value, 1u);
+  }
+}
+
+TEST_F(KernelQueueTest, TransfersAndControlShareTheLocalVisibilityBoundary) {
+  native_.atomics[0][0] = AMDF_ATOMIC_OPERATION_STORE;
+  Ref<iree_hal_pool_t> pool;
+  Ref<iree_hal_buffer_t> buffer;
+  // Queue-native atomic targets require the provider's coherent control view.
+  // Queue-owned allocations retain their independently selected access policy.
+  native_.access_flags[0] =
+      AMDF_MEMORY_FLAG_QUEUE_STORAGE | AMDF_MEMORY_FLAG_HOST_COHERENT;
+  iree_status_t status = CreatePool(
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+      IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_NONE,
+      {.device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE}, pool.out());
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_pool_allocate_buffer(
+        pool, iree_hal_make_pool_reservation_request(4, 64),
+        iree_infinite_timeout(), buffer.out());
+  }
+  native_.access_flags[0] = 0;
+  IREE_ASSERT_OK(status);
+  for (bool control : {false, true}) {
+    SCOPED_TRACE(control);
+    auto producer = Semaphore(), consumer = Semaphore();
+    auto* producer_handle = producer.get();
+    auto* consumer_handle = consumer.get();
+    uint64_t one = 1;
+    IREE_ASSERT_OK(iree_hal_queue_barrier(
+        queues_[0], {}, {1, &producer_handle, &one}, nullptr, 0));
+    const uint32_t pattern = control ? 0x17171717 : 0x39393939;
+    if (control) {
+      IREE_ASSERT_OK(iree_hal_queue_atomic_store(
+          queues_[0], {1, &producer_handle, &one}, {1, &consumer_handle, &one},
+          buffer, 0, {.value = pattern, .width = IREE_HAL_ATOMIC_WIDTH_32},
+          nullptr));
+    } else {
+      IREE_ASSERT_OK(iree_hal_queue_fill(
+          queues_[0], {1, &producer_handle, &one}, {1, &consumer_handle, &one},
+          buffer, 0, 4, &pattern, sizeof(pattern), nullptr, 0));
+    }
+    Publish(0);
+    const auto& command = native_queues_[0].commands.back();
+    const auto* words = Words(command);
+    std::vector<uint32_t> opcodes;
+    for (size_t cursor = 0; cursor < command.byte_length / 4;) {
+      const uint32_t length = ((words[cursor] >> 16) & 0x3fff) + 2;
+      ASSERT_LE(cursor + length, command.byte_length / 4);
+      const uint32_t opcode = (words[cursor] >> 8) & 255;
+      if (opcode != 0x10) {
+        opcodes.push_back(opcode);
+      }
+      cursor += length;
+    }
+    const std::vector<uint32_t> expected =
+        control
+            ? std::vector<uint32_t>{0x46, 0x58, 0x40, 0x46, 0x58, 0x49}
+            : std::vector<uint32_t>{0x46, 0x58, 0x50, 0x46, 0x50, 0x58, 0x49};
+    EXPECT_EQ(opcodes, expected);
+    ASSERT_NO_FATAL_FAILURE(Execute(0));
+    Poll(0);
+    uint64_t value = 0;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(consumer, &value));
+    EXPECT_EQ(value, one);
+    EXPECT_EQ(Read(buffer, 4), std::vector<uint8_t>(4, pattern & 255));
+  }
 }
 
 TEST_F(KernelQueueTest, RetiredProducerSignalSurvivesDependentExecution) {

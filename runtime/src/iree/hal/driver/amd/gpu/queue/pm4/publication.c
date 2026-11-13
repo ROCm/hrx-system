@@ -12,6 +12,54 @@
 #include "iree/hal/driver/amd/gpu/queue/dma_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/state.h"
 
+// A local compute join followed by full cache acquisition establishes the
+// payload dependency independently of the producer's asynchronous signal write.
+// Earlier publications drain their own CP DMA and confirm native control
+// writes. Signal references still join producer host retirement and preserve
+// failure. A membership slot reuses its pool only after accepted work and
+// native shutdown join, so a retained point from a previous incarnation is also
+// covered.
+static const iree_hal_amd_gpu_signal_pool_t*
+iree_hal_amd_gpu_pm4_joined_signal_pool(
+    const iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_pm4_barrier_t before) {
+  return (before.execution & IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE) &&
+                 (before.acquire_cache_control &
+                  queue->options.barriers.acquire) ==
+                     queue->options.barriers.acquire
+             ? &queue->options.signals->pool
+             : NULL;
+}
+
+static uint32_t iree_hal_amd_gpu_pm4_wait_word_count(
+    const iree_hal_amd_gpu_signal_pool_t* joined_pool,
+    iree_host_size_t wait_count,
+    const iree_hal_amd_gpu_pm4_submission_wait_t* waits,
+    uint32_t native_wait_count) {
+  if (joined_pool) {
+    for (iree_host_size_t i = 0; i < wait_count; ++i) {
+      if (waits[i].signal && waits[i].signal->block->pool == joined_pool) {
+        --native_wait_count;
+      }
+    }
+  }
+  return native_wait_count * 7;
+}
+
+static uint32_t* iree_hal_amd_gpu_pm4_wait_emit(
+    uint32_t* words, const iree_hal_amd_gpu_signal_pool_t* joined_pool,
+    iree_host_size_t wait_count,
+    const iree_hal_amd_gpu_pm4_submission_wait_t* waits) {
+  for (iree_host_size_t i = 0; i < wait_count; ++i) {
+    if (waits[i].signal && waits[i].signal->block->pool != joined_pool) {
+      words = iree_hal_amd_gpu_pm4_emit_wait32(
+          words, waits[i].signal->device_address, 1, UINT32_MAX,
+          IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
+    }
+  }
+  return words;
+}
+
 // Native acceptance is irrevocable here. Finish every capture access before
 // exposing the retirement record, transferring the final publication reference
 // directly to completion. Only a piece with an unpublished suffix needs another
@@ -55,9 +103,10 @@ iree_hal_amd_gpu_pm4_publish_accepted(
     if (queue->kernel) {
       iree_hal_amd_gpu_byte_storage_pool_accept(queue->samples);
     }
-    iree_hal_amd_gpu_profile_operation_record(
-        queue->profile, iree_hal_amd_gpu_pm4_submission_profile(submission),
-        true, submission->native_wait_count);
+    iree_hal_amd_gpu_profile_operation_t* profile =
+        iree_hal_amd_gpu_pm4_submission_profile(submission);
+    iree_hal_amd_gpu_profile_operation_record(queue->profile, profile, true,
+                                              profile->event.barrier_count);
   }
   if (!terminal) {
     iree_hal_amd_gpu_pm4_submission_retain(submission);
@@ -162,9 +211,10 @@ iree_hal_amd_gpu_pm4_publish_commit(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position,
     const iree_hal_amd_gpu_pm4_ring_reservation_t* reservation,
-    uint32_t body_words, uint32_t entry_word_count, uint32_t* words,
-    iree_hal_amd_gpu_pm4_barrier_t after, uint64_t argument_end,
-    iree_hal_amd_gpu_download_t download, bool terminal) {
+    uint32_t body_words, uint32_t entry_word_count, uint32_t wait_packet_count,
+    uint32_t* words, iree_hal_amd_gpu_pm4_barrier_t after,
+    uint64_t argument_end, iree_hal_amd_gpu_download_t download,
+    bool terminal) {
   iree_hal_amd_gpu_pm4_retirement_t* action =
       &queue->issued[position & queue->retirement.capacity_mask].action;
   *action = (iree_hal_amd_gpu_pm4_retirement_t){
@@ -172,6 +222,12 @@ iree_hal_amd_gpu_pm4_publish_commit(
       .consumed_arguments = argument_end,
       .download = download,
   };
+  iree_hal_amd_gpu_profile_operation_t* profile =
+      iree_hal_amd_gpu_pm4_submission_profile(submission);
+  if (profile && !profile->recorded) {
+    // KERNEL capacity retries retain this count with the prepared command.
+    profile->event.barrier_count = wait_packet_count;
+  }
   uint32_t release_cache_control = 0;
   words = iree_hal_amd_gpu_pm4_barrier_emit_tail(words, after,
                                                  &release_cache_control);
@@ -280,10 +336,12 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   // packets even at the maximum admitted native fan-in.
   const uint32_t word_budget =
       iree_min(queue->producer.ring.capacity / 2, 16384u);
-  const uint32_t wait_words = first ? submission->native_wait_count * 7 : 0;
+  const uint32_t maximum_wait_words =
+      first ? submission->native_wait_count * 7 : 0;
   iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
-  const uint32_t word_capacity = iree_min(
-      IREE_HAL_AMD_GPU_DMA_TRANSFER_MAX_WORDS, word_budget - wait_words - 96);
+  const uint32_t word_capacity =
+      iree_min(IREE_HAL_AMD_GPU_DMA_TRANSFER_MAX_WORDS,
+               word_budget - maximum_wait_words - 96);
   const iree_byte_span_t bytes = iree_make_byte_span(
       storage ? storage->memory.contents.data + offset : NULL,
       program ? available : iree_min(available, staging_window_length));
@@ -337,6 +395,13 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
     native_signal |=
         iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
   }
+  const iree_hal_amd_gpu_signal_pool_t* joined_pool =
+      iree_hal_amd_gpu_pm4_joined_signal_pool(queue, before);
+  const uint32_t wait_words =
+      first ? iree_hal_amd_gpu_pm4_wait_word_count(
+                  joined_pool, submission->wait_count, submission->waits,
+                  submission->native_wait_count)
+            : 0;
   const uint32_t body_words =
       wait_words + chunk.word_count +
       iree_hal_amd_gpu_pm4_barrier_word_count(before) +
@@ -371,20 +436,15 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
                                         : 0;
   queue->producer.ring.reserved_words = candidate.reserved_words;
   transfer->cursor = chunk.next;
-  uint32_t* words = reservation.words;
-  for (iree_host_size_t i = 0; first && i < submission->wait_count; ++i) {
-    if (submission->waits[i].signal) {
-      words = iree_hal_amd_gpu_pm4_emit_wait32(
-          words, submission->waits[i].signal->device_address, 1, UINT32_MAX,
-          IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
-    }
-  }
+  uint32_t* words = iree_hal_amd_gpu_pm4_wait_emit(
+      reservation.words, joined_pool, first ? submission->wait_count : 0,
+      submission->waits);
   words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
   iree_memcpy_write_only(words, chunk.words, chunk.word_count * sizeof(*words));
   words += chunk.word_count;
   return iree_hal_amd_gpu_pm4_publish_commit(
-      queue, submission, position, &reservation, body_words, 0, words, after,
-      arguments->end, chunk.download, terminal);
+      queue, submission, position, &reservation, body_words, 0, wait_words / 7,
+      words, after, arguments->end, chunk.download, terminal);
 }
 
 // One bounded primary sequence invokes the entire resident program. Native
@@ -551,14 +611,10 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   }
   queue->producer.ring.reserved_words = candidate.reserved_words;
   queue->producer.dispatch_count = dispatch_id + command->dispatch_count;
-  uint32_t* words = reservation.words;
-  for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
-    if (submission->waits[i].signal) {
-      words = iree_hal_amd_gpu_pm4_emit_wait32(
-          words, submission->waits[i].signal->device_address, 1, UINT32_MAX,
-          IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
-    }
-  }
+  // Program fixups and scratch accesses precede the recorded payload barriers.
+  // Those later boundaries cannot replace entry dependencies.
+  uint32_t* words = iree_hal_amd_gpu_pm4_wait_emit(
+      reservation.words, NULL, submission->wait_count, submission->waits);
   words = iree_hal_amd_gpu_pm4_scratch_emit(words, &queue->producer.scratch,
                                             scratch_words);
   words = iree_hal_amd_gpu_pm4_program_emit(
@@ -566,8 +622,9 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
       arguments->address + offset, values_address, (void*)upload, fixup_count,
       fixup_word_count, fixup_words, root_padding, words);
   return iree_hal_amd_gpu_pm4_publish_commit(
-      queue, submission, position, &reservation, body_words, entry_words, words,
-      after, arguments->end, (iree_hal_amd_gpu_download_t){0}, true);
+      queue, submission, position, &reservation, body_words, entry_words,
+      submission->native_wait_count, words, after, arguments->end,
+      (iree_hal_amd_gpu_download_t){0}, true);
 }
 
 iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
@@ -695,8 +752,13 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
   }
   const uint32_t scratch_words = iree_hal_amd_gpu_pm4_scratch_word_count(
       &queue->producer.scratch, scratch_required, queue->kernel != NULL);
+  const iree_hal_amd_gpu_signal_pool_t* joined_pool =
+      iree_hal_amd_gpu_pm4_joined_signal_pool(queue, before);
+  const uint32_t wait_words = iree_hal_amd_gpu_pm4_wait_word_count(
+      joined_pool, request->wait_count, request->waits,
+      request->native_wait_count);
   const uint32_t body_words =
-      request->native_wait_count * 7 + launch_words + scratch_words +
+      wait_words + launch_words + scratch_words +
       (cooperative ? 4 + sizeof(iree_hal_amd_gpu_grid_sync_t) / sizeof(uint32_t)
                    : 0) +
       (sample_length ? 16 : 0) +
@@ -803,14 +865,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
       inputs[1] = packet_address;
     }
   }
-  uint32_t* words = reservation.words;
-  for (iree_host_size_t i = 0; i < request->wait_count; ++i) {
-    if (request->waits[i].signal) {
-      words = iree_hal_amd_gpu_pm4_emit_wait32(
-          words, request->waits[i].signal->device_address, 1, UINT32_MAX,
-          IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
-    }
-  }
+  uint32_t* words = iree_hal_amd_gpu_pm4_wait_emit(
+      reservation.words, joined_pool, request->wait_count, request->waits);
   if (cooperative) {
     // Reuse the record on the device timeline. The existing mandatory acquire
     // follows the confirmed TC/L2 write, making it visible to the next grid.
@@ -879,8 +935,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_dispatch(
     }
   }
   return iree_hal_amd_gpu_pm4_publish_commit(
-      queue, submission, position, &reservation, body_words, 0, words, after,
-      argument_end, (iree_hal_amd_gpu_download_t){0}, true);
+      queue, submission, position, &reservation, body_words, 0, wait_words / 7,
+      words, after, argument_end, (iree_hal_amd_gpu_download_t){0}, true);
 }
 
 iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_control(
@@ -940,8 +996,13 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_control(
     native_signal |=
         iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i]);
   }
+  const iree_hal_amd_gpu_signal_pool_t* joined_pool =
+      iree_hal_amd_gpu_pm4_joined_signal_pool(queue, before);
+  const uint32_t wait_words = iree_hal_amd_gpu_pm4_wait_word_count(
+      joined_pool, submission->wait_count, submission->waits,
+      submission->native_wait_count);
   const uint32_t body_words =
-      submission->native_wait_count * 7 +
+      wait_words +
       (program
            ? 31
            : iree_hal_amd_gpu_control_word_count(submission->control.command)) +
@@ -965,14 +1026,9 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_control(
     }
   }
   queue->producer.ring.reserved_words = candidate.reserved_words;
-  uint32_t* words = reservation.words;
-  for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
-    if (submission->waits[i].signal) {
-      words = iree_hal_amd_gpu_pm4_emit_wait32(
-          words, submission->waits[i].signal->device_address, 1, UINT32_MAX,
-          IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
-    }
-  }
+  uint32_t* words =
+      iree_hal_amd_gpu_pm4_wait_emit(reservation.words, joined_pool,
+                                     submission->wait_count, submission->waits);
   words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
   if (program) {
     *(iree_hal_amd_gpu_control_program_arguments_t*)(arguments->memory.contents
@@ -992,6 +1048,6 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_control(
                                           submission->control.command);
   }
   return iree_hal_amd_gpu_pm4_publish_commit(
-      queue, submission, position, &reservation, body_words, 0, words, after,
-      argument_end, (iree_hal_amd_gpu_download_t){0}, true);
+      queue, submission, position, &reservation, body_words, 0, wait_words / 7,
+      words, after, argument_end, (iree_hal_amd_gpu_download_t){0}, true);
 }

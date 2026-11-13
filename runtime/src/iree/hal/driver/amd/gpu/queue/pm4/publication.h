@@ -42,7 +42,7 @@ typedef struct iree_hal_amd_gpu_pm4_dispatch_publication_t {
   const iree_hal_amd_gpu_pm4_submission_wait_t* waits;
   // Number of entries in waits, including already-completed dependencies.
   iree_host_size_t wait_count;
-  // Number of native readers requiring a device wait.
+  // Number of retained native producer points, including locally joined edges.
   uint32_t native_wait_count;
   // Borrowed output timelines and values, retained before native acceptance.
   iree_hal_semaphore_list_t signals;

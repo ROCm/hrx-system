@@ -1018,43 +1018,46 @@ TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
   if (HasFatalFailure()) {
     return;
   }
-  using iree::hal::cts::Ref;
-  Ref<iree_hal_semaphore_t> paused, producer, consumer;
-  CreateSemaphore(paused.out());
-  CreateSemaphore(producer.out());
-  CreateSemaphore(consumer.out());
-  iree_hal_semaphore_t* paused_handle = paused;
-  iree_hal_semaphore_t* producer_handle = producer;
-  iree_hal_semaphore_t* consumer_handle = consumer;
-  uint64_t one = 1;
+  for (uint32_t producer_queue : {0u, 1u}) {
+    SCOPED_TRACE(producer_queue);
+    using iree::hal::cts::Ref;
+    Ref<iree_hal_semaphore_t> paused, producer, consumer;
+    CreateSemaphore(paused.out());
+    CreateSemaphore(producer.out());
+    CreateSemaphore(consumer.out());
+    iree_hal_semaphore_t* paused_handle = paused;
+    iree_hal_semaphore_t* producer_handle = producer;
+    iree_hal_semaphore_t* consumer_handle = consumer;
+    uint64_t one = 1;
 
-  // A public completion callback holds the device's single completion owner.
-  // Native submission remains live, so both operations below can reach the
-  // hardware before any host observer retires the producer.
-  CompletionPause pause{
-      reinterpret_cast<iree_async_semaphore_t*>(paused_handle)};
-  IREE_ASSERT_OK(pause.Arm(one));
-  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {},
-                                        {1, &paused_handle, &one}, nullptr, 0));
-  pause.entered.acquire();
-  IREE_ASSERT_OK(iree_hal_queue_barrier(
-      queues_[1], {}, {1, &producer_handle, &one}, nullptr, 0));
-  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {1, &producer_handle, &one},
-                                        {1, &consumer_handle, &one}, nullptr,
-                                        0));
-  // A published native consumer proves the dependency was admitted without
-  // waiting on the producer's host timeline, which is still held above.
-  iree_hal_amd_gpu_semaphore_wait_t published = {};
-  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
-      consumer, one, native_domain, &published));
-  EXPECT_EQ(published.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
-  iree_hal_amd_gpu_signal_release(published.signal);
-  iree_hal_semaphore_fail(
-      producer, iree_make_status(IREE_STATUS_ABORTED, "producer failed"));
-  pause.Join();
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_ABORTED,
-      iree_hal_semaphore_wait(consumer, one, iree_infinite_timeout(), 0));
+    // A public completion callback holds the device's single completion owner.
+    // Native submission remains live, so both operations below can reach the
+    // hardware before any host observer retires the producer.
+    CompletionPause pause{
+        reinterpret_cast<iree_async_semaphore_t*>(paused_handle)};
+    IREE_ASSERT_OK(pause.Arm(one));
+    IREE_ASSERT_OK(iree_hal_queue_barrier(
+        queues_[0], {}, {1, &paused_handle, &one}, nullptr, 0));
+    pause.entered.acquire();
+    IREE_ASSERT_OK(iree_hal_queue_barrier(
+        queues_[producer_queue], {}, {1, &producer_handle, &one}, nullptr, 0));
+    IREE_ASSERT_OK(
+        iree_hal_queue_barrier(queues_[0], {1, &producer_handle, &one},
+                               {1, &consumer_handle, &one}, nullptr, 0));
+    // A published native consumer proves the dependency was admitted without
+    // waiting on the producer's host timeline, which is still held above.
+    iree_hal_amd_gpu_semaphore_wait_t published = {};
+    IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
+        consumer, one, native_domain, &published));
+    EXPECT_EQ(published.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+    iree_hal_amd_gpu_signal_release(published.signal);
+    iree_hal_semaphore_fail(
+        producer, iree_make_status(IREE_STATUS_ABORTED, "producer failed"));
+    pause.Join();
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_ABORTED,
+        iree_hal_semaphore_wait(consumer, one, iree_infinite_timeout(), 0));
+  }
   // Fixture teardown joins device ownership and checks complete reclamation.
 }
 
