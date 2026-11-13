@@ -7,9 +7,11 @@ in JSON or multipart form data. Names come from
 architecture. An absent model returns 404.
 
 The text, image, embedding, speech and transcription profiles use familiar
-OpenAI response shapes, but are not the entire OpenAI API. Supported fields are
-explicit; unsupported execution options reject rather than being silently
-ignored. The server has no built-in authentication or TLS termination.
+OpenAI response shapes, but are not the entire OpenAI API. Each profile describes
+the fields it consumes and the options delegated to the model. Chat requests
+accept additional fields so clients can send metadata and model-specific
+extensions. Acceptance alone does not establish that an option affects
+generation. The server has no built-in authentication or TLS termination.
 
 ## Request framing
 
@@ -233,11 +235,16 @@ trusted-network boundary as model registration.
 Omitted, false or null `stream` selects one `chat.completion` JSON response with
 the complete assistant message, finish reason and usage. `stream:true` selects
 incremental `chat.completion.chunk` SSE events. `stream_options.include_usage`
-adds a final usage-only chunk and requires streaming. Both modes use the same
-generation and retained-session path.
+adds a final usage-only chunk when streaming; null or omission leaves it off.
+`stream_options` has no effect on a nonstreaming response, and additional members
+such as `include_obfuscation` are ignored. Both modes use the same generation
+and retained-session path.
 
-Either `max_tokens` or `max_completion_tokens` sets the output limit, from 1
-through 16384; supplying both rejects. Omission uses the deployment default.
+`max_completion_tokens` sets the output limit. If it is absent or null,
+`max_tokens` applies; if both are absent or null, the deployment default applies.
+When both have values, `max_completion_tokens` takes precedence. The selected
+limit must be an integer from 1 through 2147483647 and fit the deployment's
+context and output allowance.
 The limit counts selected tokens, including terminal EOS when generated, so
 completion-token usage can exceed the number of visibly decoded tokens.
 Input and reserved output must fit the deployment's context. Overflow rejects
@@ -266,13 +273,44 @@ model package defines which controls it consumes, their types, and how top-level
 and nested spellings combine. Native admission interprets only transport and
 resource controls; other request fields remain intact for the model program.
 
+### Request compatibility
+
+Additional members in request, message, supported content-part, image/video
+descriptor, and tool-call history objects do not cause rejection. The complete
+original request remains available to the model program. Required values,
+supported content types, and the types and bounds of consumed fields are still
+checked: an unknown content type is an error rather than a silently omitted
+part of the prompt. Duplicate native fields reject, including a null followed
+by another value.
+
+Optional native controls accept null as omission. This includes `tools`, output
+limits, `stream_options`, `media_io_kwargs`, image `detail`, and optional message
+fields such as `reasoning_content` and `tool_calls`. Source-owned sampling and
+template options use the model package's defaults and validation rules.
+
+| Request fields | Behavior |
+| --- | --- |
+| `model`, `messages`, `stream`, output limits, `stream_options.include_usage` | Native routing, input preparation, response framing, and resource limits. |
+| `tools`, `tool_choice`, `parallel_tool_calls`, template and sampling options | Passed to the model program; supported behavior belongs to its package. |
+| `stop`, `presence_penalty`, `frequency_penalty`, `response_format` | Passed to the model program. Native acceptance does not promise stop-string matching, penalties, or constrained output. A policy that does not consume them ignores them. |
+| `n`, `logprobs`, `top_logprobs` | Accepted and passed through. The native chat response currently contains one choice and `logprobs:null`. |
+| `user`, `metadata`, `store`, and other unconsumed extensions | Accepted without a native effect; available to model policy. `store` does not create a retrievable completion archive or control session/prefix caching. |
+
+Clients can send familiar defaults such as `n:1`, `stop:null`, `logprobs:false`,
+zero penalties, and `response_format:{"type":"text"}` without a native
+unsupported-field error. Model documentation specifies which non-default
+options affect generation. Model configuration and administration endpoints
+retain their own documented schemas.
+
+### Tools and output
+
 `tools` accepts up to 4096 entries. The catalog, `tool_choice` (including
 `"required"` and named-function objects), parameter schemas, and metadata such
 as `strict` pass through to the model program. They are not a native execution
 allowlist or a promise of constrained generation. Model-specific prompting and
 sampling determine how choices affect generation. The server returns generated
 calls without checking their names against the catalog or rejecting them based
-on `tool_choice`. `store` may be omitted or false.
+on `tool_choice`. Null or omitted `tools` supplies an empty catalog.
 The source policy owns tool grammar, safe output boundaries and canonical
 history. Generated calls become structured `tool_calls`; the server never runs
 the tools. Argument strings are opaque at the HTTP boundary: unknown functions,

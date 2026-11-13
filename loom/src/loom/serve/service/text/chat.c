@@ -17,6 +17,22 @@
 #include "loom/serve/service/text/tool_schemas.h"
 #include "loom/util/json.h"
 
+// Public request objects are extensible. Normalize explicitly nullable fields
+// after parsing so null still participates in duplicate-field detection. The
+// borrowed original request remains unchanged for source policy.
+static iree_status_t loom_serve_text_chat_request_fields(
+    iree_string_view_t object, iree_host_size_t count,
+    loom_serve_text_chat_field_t* fields) {
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
+      object, count, fields, LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (fields[i].type == IREE_JSON_VALUE_TYPE_NULL) {
+      fields[i].value = iree_string_view_empty();
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_serve_text_chat_append_decoded(
     iree_string_builder_t* output, iree_string_view_t raw) {
   char* data = NULL;
@@ -47,8 +63,8 @@ static iree_status_t loom_serve_text_chat_text_part(void* user_data,
   loom_serve_text_chat_field_t fields[] = {
       {"type", LOOM_SERVE_TEXT_CHAT_STRING},
       {"text", LOOM_SERVE_TEXT_CHAT_STRING}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields, 0));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      value, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
   if (!iree_string_view_equal(fields[0].value, IREE_SV("text"))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -125,21 +141,24 @@ static iree_status_t loom_serve_text_chat_video_options_read(
     return iree_ok_status();
   }
   loom_serve_text_chat_field_t modalities[] = {
-      {"video", LOOM_SERVE_TEXT_CHAT_OBJECT}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      object, IREE_ARRAYSIZE(modalities), modalities, 0));
+      {"video", LOOM_SERVE_TEXT_CHAT_OBJECT | LOOM_SERVE_TEXT_CHAT_NULL}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      object, IREE_ARRAYSIZE(modalities), modalities));
   if (!modalities[0].value.data) {
     return iree_ok_status();
   }
   loom_serve_text_chat_field_t fields[] = {
-      {"fps", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"frames_indices", LOOM_SERVE_TEXT_CHAT_ARRAY},
-      {"total_num_frames", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"duration", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"num_frames", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"do_sample_frames", LOOM_SERVE_TEXT_CHAT_BOOL}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      modalities[0].value, IREE_ARRAYSIZE(fields), fields, 0));
+      {"fps", LOOM_SERVE_TEXT_CHAT_NUMBER | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"frames_indices",
+       LOOM_SERVE_TEXT_CHAT_ARRAY | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"total_num_frames",
+       LOOM_SERVE_TEXT_CHAT_NUMBER | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"duration", LOOM_SERVE_TEXT_CHAT_NUMBER | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"num_frames", LOOM_SERVE_TEXT_CHAT_NUMBER | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"do_sample_frames",
+       LOOM_SERVE_TEXT_CHAT_BOOL | LOOM_SERVE_TEXT_CHAT_NULL}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      modalities[0].value, IREE_ARRAYSIZE(fields), fields));
   if (fields[0].value.data &&
       (!iree_string_view_atod(fields[0].value, &options->fps) ||
        !isfinite(options->fps) || options->fps <= 0.0)) {
@@ -336,9 +355,9 @@ static iree_status_t loom_serve_text_chat_image_part(
     iree_string_view_t value) {
   loom_serve_text_chat_field_t fields[] = {
       {"url", LOOM_SERVE_TEXT_CHAT_STRING},
-      {"detail", LOOM_SERVE_TEXT_CHAT_STRING}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields, 0));
+      {"detail", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NULL}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      value, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
   loom_serve_text_chat_image_detail_t detail;
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_media_detail(&fields[1], &detail));
@@ -391,8 +410,8 @@ static iree_status_t loom_serve_text_chat_video_part(
     iree_string_view_t value) {
   loom_serve_text_chat_field_t fields[] = {
       {"url", LOOM_SERVE_TEXT_CHAT_STRING}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields, 0));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      value, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
   iree_string_view_t cursor = fields[0].value;
   const iree_string_view_t header =
@@ -482,8 +501,8 @@ static iree_status_t loom_serve_text_chat_ordered_content_part(
       {"text", LOOM_SERVE_TEXT_CHAT_STRING},
       {"image_url", LOOM_SERVE_TEXT_CHAT_OBJECT},
       {"video_url", LOOM_SERVE_TEXT_CHAT_OBJECT}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields, 0));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      value, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
   if (iree_string_view_equal(fields[0].value, IREE_SV("text"))) {
     IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
@@ -1034,13 +1053,14 @@ iree_status_t loom_serve_text_chat_prepare_input(
 // history and generated output. The scratch owner retains both through the
 // synchronous source formatter call.
 static iree_status_t loom_serve_text_chat_function_decode(
-    iree_string_view_t value, iree_string_builder_t* scratch,
-    iree_string_view_t* out_name, iree_string_view_t* out_arguments) {
+    iree_string_view_t value, loom_serve_text_chat_field_flags_t flags,
+    iree_string_builder_t* scratch, iree_string_view_t* out_name,
+    iree_string_view_t* out_arguments) {
   loom_serve_text_chat_field_t fields[] = {
       {"name", LOOM_SERVE_TEXT_CHAT_STRING},
       {"arguments", LOOM_SERVE_TEXT_CHAT_STRING}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields, 0));
+      value, IREE_ARRAYSIZE(fields), fields, flags));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
   iree_string_builder_reset(scratch);
@@ -1147,11 +1167,11 @@ static iree_status_t loom_serve_text_chat_history_tool(
         LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT);
   }
   loom_serve_text_chat_field_t fields[] = {
-      {"id", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"id", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NULL},
       {"type", LOOM_SERVE_TEXT_CHAT_STRING},
       {"function", LOOM_SERVE_TEXT_CHAT_OBJECT}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields, 0));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      value, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[2]));
   if (!iree_string_view_equal(fields[1].value, IREE_SV("function"))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1159,7 +1179,8 @@ static iree_status_t loom_serve_text_chat_history_tool(
   }
   iree_string_view_t name, arguments;
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_decode(
-      fields[2].value, &history->arguments, &name, &arguments));
+      fields[2].value, LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN,
+      &history->arguments, &name, &arguments));
   return loom_serve_text_chat_function_render(history->chat->policy, name,
                                               arguments, index, &history->calls,
                                               history->chat->host_allocator);
@@ -1177,13 +1198,13 @@ static iree_status_t loom_serve_text_chat_history_message(
       {"role", LOOM_SERVE_TEXT_CHAT_STRING},
       {"content", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_ARRAY |
                       LOOM_SERVE_TEXT_CHAT_NULL},
-      {"reasoning_content", LOOM_SERVE_TEXT_CHAT_STRING},
-      {"tool_calls", LOOM_SERVE_TEXT_CHAT_ARRAY},
-      {"tool_call_id", LOOM_SERVE_TEXT_CHAT_STRING},
-      {"name", LOOM_SERVE_TEXT_CHAT_STRING}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields,
-      LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN));
+      {"reasoning_content",
+       LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"tool_calls", LOOM_SERVE_TEXT_CHAT_ARRAY | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"tool_call_id", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"name", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NULL}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      value, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
   const iree_host_size_t first_image = history->chat->images.count;
   iree_host_size_t content_count = 0;
@@ -1244,22 +1265,22 @@ static iree_status_t loom_serve_text_chat_request_render(
       {"model", LOOM_SERVE_TEXT_CHAT_STRING},
       {"messages", LOOM_SERVE_TEXT_CHAT_ARRAY},
       {"stream", LOOM_SERVE_TEXT_CHAT_BOOL | LOOM_SERVE_TEXT_CHAT_NULL},
-      {"tools", LOOM_SERVE_TEXT_CHAT_ARRAY},
-      {"max_tokens", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"max_completion_tokens", LOOM_SERVE_TEXT_CHAT_NUMBER},
+      {"tools", LOOM_SERVE_TEXT_CHAT_ARRAY | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"max_tokens", LOOM_SERVE_TEXT_CHAT_NUMBER | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"max_completion_tokens",
+       LOOM_SERVE_TEXT_CHAT_NUMBER | LOOM_SERVE_TEXT_CHAT_NULL},
       {"stream_options",
        LOOM_SERVE_TEXT_CHAT_OBJECT | LOOM_SERVE_TEXT_CHAT_NULL},
-      {"store", LOOM_SERVE_TEXT_CHAT_BOOL},
-      {"media_io_kwargs", LOOM_SERVE_TEXT_CHAT_OBJECT}};
+      {"media_io_kwargs",
+       LOOM_SERVE_TEXT_CHAT_OBJECT | LOOM_SERVE_TEXT_CHAT_NULL}};
   // Only native transport and resource controls are decoded here. Source
   // receives the complete request and owns its model-specific options.
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      object, IREE_ARRAYSIZE(fields), fields,
-      LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+      object, IREE_ARRAYSIZE(fields), fields));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_video_options_read(
-      fields[8].value, history->chat->policy->images.maximum_count,
+      fields[7].value, history->chat->policy->images.maximum_count,
       &history->video));
   iree_string_builder_reset(&history->scratch);
   IREE_RETURN_IF_ERROR(
@@ -1273,16 +1294,8 @@ static iree_status_t loom_serve_text_chat_request_render(
   if (fields[2].value.data && fields[2].type == IREE_JSON_VALUE_TYPE_TRUE) {
     history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_STREAM;
   }
-  if (fields[7].value.data && fields[7].type != IREE_JSON_VALUE_TYPE_FALSE) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "only store=false is supported");
-  }
-  if (fields[4].value.data && fields[5].value.data) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "specify one output token limit");
-  }
   const iree_string_view_t limit =
-      fields[4].value.data ? fields[4].value : fields[5].value;
+      fields[5].value.data ? fields[5].value : fields[4].value;
   if (limit.data) {
     uint64_t max_tokens = 0;
     IREE_RETURN_IF_ERROR(iree_json_parse_uint64(limit, &max_tokens));
@@ -1292,16 +1305,14 @@ static iree_status_t loom_serve_text_chat_request_render(
     }
     history->chat->max_tokens = (iree_host_size_t)max_tokens;
   }
-  if (fields[6].value.data && fields[6].type != IREE_JSON_VALUE_TYPE_NULL) {
-    if (!iree_any_bit_set(history->chat->flags,
-                          LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "stream_options requires stream=true");
-    }
+  if (fields[6].value.data &&
+      iree_any_bit_set(history->chat->flags,
+                       LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
     loom_serve_text_chat_field_t options[] = {
-        {"include_usage", LOOM_SERVE_TEXT_CHAT_BOOL}};
-    IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-        fields[6].value, IREE_ARRAYSIZE(options), options, 0));
+        {"include_usage",
+         LOOM_SERVE_TEXT_CHAT_BOOL | LOOM_SERVE_TEXT_CHAT_NULL}};
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_request_fields(
+        fields[6].value, IREE_ARRAYSIZE(options), options));
     if (options[0].value.data && options[0].type == IREE_JSON_VALUE_TYPE_TRUE) {
       history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE;
     }
@@ -1611,7 +1622,7 @@ static iree_status_t loom_serve_text_chat_completion_tool(
   }
   iree_string_view_t name, arguments;
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_decode(
-      call[1].value, &tools->scratch->arguments, &name, &arguments));
+      call[1].value, 0, &tools->scratch->arguments, &name, &arguments));
   IREE_RETURN_IF_ERROR(loom_serve_text_tool_calls_append(
       tools->calls, tools->request_id, name, arguments));
   const loom_serve_text_tool_call_t decoded_call =
