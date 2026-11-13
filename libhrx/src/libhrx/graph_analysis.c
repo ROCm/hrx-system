@@ -147,6 +147,19 @@ static iree_status_t hrx_graph_topological_sort(hrx_graph_analysis_t* analysis,
   return iree_ok_status();
 }
 
+// Empty nodes carry dependencies but no operation. Keep their topological
+// positions so they still separate recording ranges; the existing join between
+// those ranges orders every transitive predecessor without an empty submission.
+static uint32_t hrx_graph_partition_begin(const hrx_graph_analysis_t* analysis,
+                                          uint32_t start) {
+  while (start < analysis->node_count &&
+         (analysis->flags[analysis->order[start]] &
+          HRX_GRAPH_ANALYSIS_NODE_KIND_MASK) == HRX_GRAPH_ANALYSIS_NODE_EMPTY) {
+    ++start;
+  }
+  return start;
+}
+
 static uint32_t hrx_graph_partition_end(const hrx_graph_analysis_t* analysis,
                                         uint32_t start) {
   uint32_t end = start + 1;
@@ -251,26 +264,31 @@ iree_status_t hrx_graph_analyze(hrx_graph_analysis_t* analysis,
   // descriptors, not a worst-case node-sized table held for its whole lifetime.
   uint32_t partition_count = 0;
   uint32_t maximum_partition_size = 0;
-  for (uint32_t start = 0; start < analysis->node_count;) {
+  for (uint32_t start = hrx_graph_partition_begin(analysis, 0);
+       start < analysis->node_count;) {
     const uint32_t end = hrx_graph_partition_end(analysis, start);
     maximum_partition_size = iree_max(maximum_partition_size, end - start);
     ++partition_count;
-    start = end;
+    start = hrx_graph_partition_begin(analysis, end);
   }
   hrx_graph_partition_t* partitions = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_allocate(
-              arena, (iree_host_size_t)partition_count * sizeof(*partitions),
-              (void**)&partitions));
+  if (partition_count) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_arena_allocate(
+                arena, (iree_host_size_t)partition_count * sizeof(*partitions),
+                (void**)&partitions));
+  }
   // Reused by every partition; these predecessor frontiers avoid an edge walk
   // after workstream joins have resolved their final assignments.
   uint32_t* frontiers = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_arena_allocate(arena, maximum_partition_size * sizeof(*frontiers),
-                          (void**)&frontiers));
+  if (maximum_partition_size) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_arena_allocate(arena, maximum_partition_size * sizeof(*frontiers),
+                            (void**)&frontiers));
+  }
   uint32_t block_count = 0;
-  uint32_t start = 0;
+  uint32_t start = hrx_graph_partition_begin(analysis, 0);
   for (uint32_t p = 0; p < partition_count; ++p) {
     const uint32_t end = hrx_graph_partition_end(analysis, start);
     uint32_t stream_count = 1;
@@ -286,7 +304,7 @@ iree_status_t hrx_graph_analyze(hrx_graph_analysis_t* analysis,
         .stream_count = stream_count,
     };
     block_count += stream_count;
-    start = end;
+    start = hrx_graph_partition_begin(analysis, end);
   }
   *out_schedule = (hrx_graph_schedule_t){
       .node_count = analysis->node_count,

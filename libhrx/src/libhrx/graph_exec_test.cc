@@ -367,8 +367,11 @@ TEST_P(GraphKernelTest, ReorderedBranchesJoinAcrossHostAndDeviceOperations) {
   hrx_graph_node_t root = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_kernel_node(graph_, nullptr, 0, &attrs, &root)));
-  const hrx_graph_node_t from[] = {root, root, branches[0], branches[1], host};
-  const hrx_graph_node_t to[] = {branches[0], branches[1], host, host, tail};
+  hrx_graph_node_t join = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_empty_node(
+      graph_, branches, IREE_ARRAYSIZE(branches), &join)));
+  const hrx_graph_node_t from[] = {root, root, join, host};
+  const hrx_graph_node_t to[] = {branches[0], branches[1], host, tail};
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_graph_add_dependencies(graph_, from, to, IREE_ARRAYSIZE(from))));
   IREE_ASSERT_OK(hrx_status_to_iree(

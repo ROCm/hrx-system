@@ -1638,10 +1638,7 @@ static iree_status_t iree_hal_streaming_graph_exec_compile_schedule(
         schedule->flags[first_index] & HRX_GRAPH_ANALYSIS_NODE_KIND_MASK;
     iree_hal_streaming_graph_node_t* first_node =
         schedule->sources[first_index];
-    const iree_hal_streaming_graph_node_type_t type =
-        kind == HRX_GRAPH_ANALYSIS_NODE_EMPTY
-            ? IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EMPTY
-            : first_node->type;
+    const iree_hal_streaming_graph_node_type_t type = first_node->type;
     uint16_t wait_semaphore_count = 0;
     if (p > 0) {
       const hrx_graph_partition_t* prev_partition =
@@ -1814,8 +1811,9 @@ static iree_status_t iree_hal_streaming_graph_exec_compile_schedule(
           IREE_RETURN_AND_END_ZONE_IF_ERROR(
               z0, iree_hal_resource_set_insert(exec->resource_set, 1,
                                                &ptrs.attrs->memory.allocation));
-        } else if (type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
-                   type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT) {
+        } else {
+          // Event record/wait are the remaining isolated operations. Empty
+          // and disabled nodes have no partition in the compiled schedule.
           const iree_hal_streaming_graph_block_type_t block_type =
               type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD
                   ? IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD
@@ -1826,13 +1824,6 @@ static iree_status_t iree_hal_streaming_graph_exec_compile_schedule(
                   exec, block_type, partition->start_index, partition->count,
                   wait_semaphore_count, signal_semaphore_count, node,
                   node->attrs.event.event, &block, &ptrs));
-        } else {
-          // Empty/barrier partition.
-          IREE_RETURN_AND_END_ZONE_IF_ERROR(
-              z0, iree_hal_streaming_graph_create_barrier_block(
-                      exec, partition->start_index, partition->count,
-                      wait_semaphore_count, signal_semaphore_count,
-                      IREE_HAL_QUEUE_BARRIER_FLAG_NONE, &block, &ptrs));
         }
       }
       if (wait_semaphore_count > 0) {

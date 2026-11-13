@@ -447,27 +447,18 @@ static iree_status_t hrx_graph_recording_compile_schedule(
     } else {
       hrx_graph_exec_block_t* block = NULL;
       hrx_graph_block_ptrs_t ptrs;
-      if (kind == HRX_GRAPH_ANALYSIS_NODE_ISOLATED) {
-        hrx_graph_node_s* node = schedule->sources[first_index];
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0,
-            hrx_graph_block_allocate(&recording->arena_allocator,
-                                     HRX_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL,
-                                     partition->start_index, partition->count,
-                                     wait_semaphore_count,
-                                     signal_semaphore_count, &block, &ptrs));
-        ptrs.attrs->host_call.fn = node->attrs.host.fn;
-        ptrs.attrs->host_call.user_data = node->attrs.host.user_data;
-        ptrs.attrs->host_call.flags = IREE_HAL_HOST_CALL_FLAG_NONE;
-      } else {
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0,
-            hrx_graph_block_allocate(
-                &recording->arena_allocator, HRX_GRAPH_BLOCK_TYPE_QUEUE_BARRIER,
-                partition->start_index, partition->count, wait_semaphore_count,
-                signal_semaphore_count, &block, &ptrs));
-        ptrs.attrs->barrier.flags = IREE_HAL_QUEUE_BARRIER_FLAG_NONE;
-      }
+      // Host calls are the only isolated operations; empty nodes have no
+      // partition in the compiled schedule.
+      hrx_graph_node_s* node = schedule->sources[first_index];
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, hrx_graph_block_allocate(&recording->arena_allocator,
+                                       HRX_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL,
+                                       partition->start_index, partition->count,
+                                       wait_semaphore_count,
+                                       signal_semaphore_count, &block, &ptrs));
+      ptrs.attrs->host_call.fn = node->attrs.host.fn;
+      ptrs.attrs->host_call.user_data = node->attrs.host.user_data;
+      ptrs.attrs->host_call.flags = IREE_HAL_HOST_CALL_FLAG_NONE;
       if (wait_semaphore_count > 0) {
         for (uint16_t w = 0; w < wait_semaphore_count; w++) {
           ptrs.wait_semaphore_indices[w] =

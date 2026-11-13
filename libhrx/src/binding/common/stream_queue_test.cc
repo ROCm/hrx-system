@@ -841,9 +841,15 @@ TEST_F(StreamQueueLeaseTest, GraphLaunchExtendsTheAcceptedStreamLease) {
   std::unique_ptr<iree_hal_streaming_graph_t,
                   decltype(&iree_hal_streaming_graph_release)>
       owned_graph(graph, iree_hal_streaming_graph_release);
+  iree_hal_streaming_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  events_.push_back(event);
   iree_hal_streaming_graph_node_t* node = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_streaming_graph_add_empty_node(graph, nullptr, 0, &node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_event_node(
+      graph, nullptr, 0, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, event,
+      &node));
   iree_hal_streaming_graph_exec_t* exec = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
