@@ -1,0 +1,66 @@
+// RUN: pass canonicalize
+
+// Narrowing cannot manufacture NaNs, including when overflow saturates.
+func.def @narrow_non_nan(%input: f32) -> (i1, i1, i1, i1) {
+  %known = scalar.assume %input [not_nan(%input)] : f32
+  %half = scalar.fptrunc %known : f32 to f16
+  %brain = scalar.fptrunc %known : f32 to bf16
+  %finite_byte = scalar.fptrunc %known : f32 to f8E4M3
+  %ieee_byte = scalar.fptrunc %known : f32 to f8E5M2
+  %half_nan = scalar.isnanf %half : f16
+  %brain_nan = scalar.isnanf %brain : bf16
+  %finite_byte_nan = scalar.isnanf %finite_byte : f8E4M3
+  %ieee_byte_nan = scalar.isnanf %ieee_byte : f8E5M2
+  func.return %half_nan, %brain_nan, %finite_byte_nan, %ieee_byte_nan : i1, i1, i1, i1
+}
+
+// ----
+func.def @narrow_non_nan(%input: f32) -> (i1, i1, i1, i1) {
+  %half_nan = scalar.constant false : i1
+  %brain_nan = scalar.constant false : i1
+  %finite_byte_nan = scalar.constant false : i1
+  %ieee_byte_nan = scalar.constant false : i1
+  func.return %half_nan, %brain_nan, %finite_byte_nan, %ieee_byte_nan : i1, i1, i1, i1
+}
+
+// ====
+
+// Finite F32 values can overflow BF16, even with matching exponent widths.
+func.def @narrow_finite_may_overflow(%input: f32) -> (i1, i1) {
+  %finite = scalar.assume %input [finite(%input)] : f32
+  %narrow = scalar.fptrunc %finite : f32 to bf16
+  %is_nan = scalar.isnanf %narrow : bf16
+  %is_inf = scalar.isinff %narrow : bf16
+  func.return %is_nan, %is_inf : i1, i1
+}
+
+// ----
+func.def @narrow_finite_may_overflow(%input: f32) -> (i1, i1) {
+  %finite = scalar.assume %input [finite(%input)] : f32
+  %narrow = scalar.fptrunc %finite : f32 to bf16
+  %is_nan = scalar.constant false : i1
+  %is_inf = scalar.isinff %narrow : bf16
+  func.return %is_nan, %is_inf : i1, i1
+}
+
+// ====
+
+// The finite-only format contributes its domain without an authored promise.
+// NaNs remain possible, while neither conversion can produce an infinity.
+func.def @finite_format_domains(%input: f8E4M3, %wide: f64) -> (i1, i1, i1) {
+  %extended = scalar.extf %input : f8E4M3 to f32
+  %narrow = scalar.fptrunc %wide : f64 to f8E4M3
+  %extended_inf = scalar.isinff %extended : f32
+  %narrow_inf = scalar.isinff %narrow : f8E4M3
+  %narrow_nan = scalar.isnanf %narrow : f8E4M3
+  func.return %extended_inf, %narrow_inf, %narrow_nan : i1, i1, i1
+}
+
+// ----
+func.def @finite_format_domains(%input: f8E4M3, %wide: f64) -> (i1, i1, i1) {
+  %narrow = scalar.fptrunc %wide : f64 to f8E4M3
+  %extended_inf = scalar.constant false : i1
+  %narrow_inf = scalar.constant false : i1
+  %narrow_nan = scalar.isnanf %narrow : f8E4M3
+  func.return %extended_inf, %narrow_inf, %narrow_nan : i1, i1, i1
+}

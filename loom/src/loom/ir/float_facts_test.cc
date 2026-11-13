@@ -793,6 +793,101 @@ TEST(FloatFacts, ConversionFlushingPreservesRepresentableFormats) {
   }
 }
 
+TEST(FloatFacts, ConversionRetainsClassFactsAcrossFormatsAndPolicies) {
+  struct Format {
+    // Source format of the class-only facts.
+    loom_scalar_type_t type;
+    // Destinations that cannot overflow a finite source, including saturation.
+    loom_scalar_type_set_t finite_destinations;
+    // Destinations that keep a normal-or-zero source out of subnormals.
+    loom_scalar_type_set_t normal_destinations;
+  };
+  const Format formats[] = {
+      {LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_SET_FLOAT,
+       LOOM_SCALAR_TYPE_SET_FLOAT},
+      {LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_SET_FLOAT,
+       LOOM_SCALAR_TYPE_SET_FLOAT & ~LOOM_SCALAR_TYPE_SET_F8E4M3},
+      {LOOM_SCALAR_TYPE_F16,
+       LOOM_SCALAR_TYPE_SET_FLOAT & ~LOOM_SCALAR_TYPE_SET_F8E5M2,
+       LOOM_SCALAR_TYPE_SET_FLOAT & ~LOOM_SCALAR_TYPE_SET_F8E4M3},
+      {LOOM_SCALAR_TYPE_BF16,
+       LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_BF16 |
+           LOOM_SCALAR_TYPE_SET_F32 | LOOM_SCALAR_TYPE_SET_F64,
+       LOOM_SCALAR_TYPE_SET_BF16 | LOOM_SCALAR_TYPE_SET_F32 |
+           LOOM_SCALAR_TYPE_SET_F64},
+      {LOOM_SCALAR_TYPE_F32,
+       LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F32 |
+           LOOM_SCALAR_TYPE_SET_F64,
+       LOOM_SCALAR_TYPE_SET_BF16 | LOOM_SCALAR_TYPE_SET_F32 |
+           LOOM_SCALAR_TYPE_SET_F64},
+      {LOOM_SCALAR_TYPE_F64,
+       LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F64,
+       LOOM_SCALAR_TYPE_SET_F64},
+  };
+  const uint32_t classes[] = {
+      0,
+      LOOM_VALUE_FACT_NOT_NAN,
+      LOOM_VALUE_FACT_NOT_INF,
+      LOOM_VALUE_FACT_FINITE,
+      LOOM_VALUE_FACT_NOT_SUBNORMAL,
+      LOOM_VALUE_FACT_NAN | LOOM_VALUE_FACT_NOT_INF |
+          LOOM_VALUE_FACT_NOT_SUBNORMAL,
+      LOOM_VALUE_FACT_INF | LOOM_VALUE_FACT_NOT_NAN |
+          LOOM_VALUE_FACT_NOT_SUBNORMAL,
+  };
+  for (const Format& source : formats) {
+    SCOPED_TRACE(loom_scalar_type_name(source.type));
+    for (const Format& destination : formats) {
+      SCOPED_TRACE(loom_scalar_type_name(destination.type));
+      for (uint32_t classification : classes) {
+        SCOPED_TRACE(classification);
+        if (source.type == LOOM_SCALAR_TYPE_F8E4M3 &&
+            (classification & LOOM_VALUE_FACT_INF)) {
+          continue;
+        }
+        loom_value_facts_t input = loom_value_facts_unknown();
+        input.flags = LOOM_VALUE_FACT_FLOAT | classification;
+        for (bool flush_input : {false, true}) {
+          for (bool flush_result : {false, true}) {
+            SCOPED_TRACE(flush_input);
+            SCOPED_TRACE(flush_result);
+            const loom_float_conversion_policy_t policy = {
+                .may_flush_input_subnormal = flush_input,
+                .may_flush_result_subnormal = flush_result,
+            };
+            loom_value_facts_t result;
+            loom_value_facts_eval_float_conversion(
+                source.type, destination.type, policy, &input, &result);
+            const bool not_nan = loom_value_facts_is_not_nan(input);
+            const bool not_inf =
+                loom_value_facts_is_nan(input) ||
+                destination.type == LOOM_SCALAR_TYPE_F8E4M3 ||
+                ((source.type == LOOM_SCALAR_TYPE_F8E4M3 ||
+                  loom_value_facts_is_not_inf(input)) &&
+                 loom_scalar_type_set_contains(source.finite_destinations,
+                                               destination.type));
+            EXPECT_EQ(loom_value_facts_is_not_nan(result), not_nan);
+            EXPECT_EQ(loom_value_facts_is_not_inf(result), not_inf);
+            EXPECT_EQ(loom_value_facts_is_finite(result), not_nan && not_inf);
+            EXPECT_EQ(loom_value_facts_is_nan(result),
+                      loom_value_facts_is_nan(input));
+            EXPECT_EQ(loom_value_facts_is_inf(result),
+                      loom_value_facts_is_inf(input) && !not_inf);
+            if (loom_value_facts_is_nan(input) ||
+                loom_value_facts_is_inf(input)) {
+              EXPECT_TRUE(loom_value_facts_is_not_subnormal(result));
+            } else if (loom_value_facts_is_not_subnormal(input)) {
+              EXPECT_EQ(loom_value_facts_is_not_subnormal(result),
+                        loom_scalar_type_set_contains(
+                            source.normal_destinations, destination.type));
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(FloatFacts, FlushedSubnormalAlternativesRetainFormatsButNotExactValues) {
   const loom_float_conversion_policy_t flush_both = {
       .may_flush_input_subnormal = true,
