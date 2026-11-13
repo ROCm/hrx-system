@@ -442,9 +442,15 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   }
   // Prepare the terminal packet before a retirement slot can be consumed.
   // A ready request may borrow the same capture which native retirement frees.
-  const uint32_t dispatch_header = IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
-                                   IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
-                                   (after & (3u << 11));
+  // Every host-authored input in a finite run precedes its first valid header.
+  // Its SYSTEM acquisition covers that publication on every memory route;
+  // later dispatches retain their requested payload scopes. Standalone work
+  // has the same host-to-device boundary, even without invocation arguments.
+  const uint32_t acquire = grouped && !first_in_run
+                               ? before & (3u << 9)
+                               : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
+  const uint32_t dispatch_header =
+      IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | acquire | (after & (3u << 11));
   iree_hal_amd_gpu_aql_packet_t payload =
       dispatch ? iree_hal_amd_gpu_aql_dispatch_packet(
                      request->function, &request->geometry, dispatch_header,

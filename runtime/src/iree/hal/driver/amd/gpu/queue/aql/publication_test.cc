@@ -174,7 +174,8 @@ class AqlPublicationTest
 
   void Publish(iree_hal_semaphore_t* output,
                std::vector<iree_hal_amd_gpu_aql_wait_t>& waits,
-               bool reverse_scopes = false) {
+               bool reverse_scopes = false,
+               uint32_t acquire = IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM) {
     iree_hal_amd_gpu_aql_wait_counts_t counts;
     iree_host_size_t wait_index = 0;
     iree_hal_amd_gpu_aql_wait_kind_t kind;
@@ -182,7 +183,7 @@ class AqlPublicationTest
         &context_, &signals_[0].cache.pool, waits.size(), waits.data(), true,
         &counts, &wait_index, &kind));
     ASSERT_EQ(kind, IREE_HAL_AMD_GPU_AQL_WAIT_READY);
-    uint32_t before = IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
+    uint32_t before = acquire;
     uint32_t after = IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
     if (reverse_scopes) {
       before |= IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
@@ -289,6 +290,34 @@ TEST_P(AqlPublicationTest, SharedCompletionPreservesEveryDispatchBoundary) {
     EXPECT_EQ(packets_[i].words[0], header);
     EXPECT_EQ(PacketAddress(i, 14),
               i == 4 ? issued_[1].signal->device_address : 0u);
+  }
+}
+
+TEST_P(AqlPublicationTest, HostPublicationAcquiresEachRunBeforePayloadScopes) {
+  std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
+  Publish(Semaphore(), waits, false, 0);
+  const uint32_t system_header = (1u << 16) |
+                                 IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+                                 IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                                 IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+                                 IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM;
+  EXPECT_EQ(packets_[0].words[0], system_header);
+  for (uint32_t acquire : {0u, 1u << 9, 2u << 9}) {
+    const uint64_t first = queue_.producer.ring.reserved;
+    const uint32_t payload_header = (system_header & ~(3u << 9)) | acquire;
+    for (uint32_t i = 0; i < 4; ++i) {
+      Publish(Semaphore(), waits, false, acquire);
+      EXPECT_EQ(packets_[first].words[0], IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+      if (i) {
+        EXPECT_EQ(packets_[first + i].words[0], payload_header);
+      }
+    }
+    ASSERT_EQ(iree_hal_amd_gpu_aql_publish_run(&queue_), AMDF_STATUS_OK);
+    EXPECT_EQ(packets_[first].words[0], system_header);
+    for (uint32_t i = 1; i < 4; ++i) {
+      EXPECT_EQ(packets_[first + i].words[0], payload_header);
+    }
+    EXPECT_EQ(doorbell_, first + 3);
   }
 }
 

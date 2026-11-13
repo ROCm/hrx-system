@@ -64,9 +64,19 @@ struct LaunchBoundaryQueue {
           EXPECT_EQ(barriers->after->count, 1u);
           const auto& before = barriers->before->values[0];
           const auto& after = barriers->after->values[0];
-          EXPECT_EQ(before.flags, IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE);
+          EXPECT_EQ(before.flags, 0u);
+          EXPECT_EQ(before.source_stage_mask,
+                    IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                        IREE_HAL_EXECUTION_STAGE_TRANSFER);
           EXPECT_EQ(before.target_stage_mask,
                     IREE_HAL_EXECUTION_STAGE_DISPATCH);
+          EXPECT_EQ(before.memory_barrier_count, 1u);
+          if (before.memory_barrier_count) {
+            EXPECT_EQ(before.memory_barriers[0].source_scope, 0u);
+            EXPECT_EQ(before.memory_barriers[0].target_scope,
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                          IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE);
+          }
           EXPECT_EQ(after.flags, IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE);
           EXPECT_EQ(after.source_stage_mask, IREE_HAL_EXECUTION_STAGE_DISPATCH);
         }
@@ -161,7 +171,7 @@ TEST_F(StreamTest, ConcurrentFirstUseAndCompletion) {
   }
 }
 
-TEST_F(StreamTest, NativeLaunchesRequestDirectionalSystemBoundaries) {
+TEST_F(StreamTest, NativeLaunchesAcquireDeviceWritesAndReleaseSystemResults) {
   static const iree_hal_queue_vtable_t queue_vtable = {
       .destroy = LaunchBoundaryQueue::Destroy,
       .dispatch = LaunchBoundaryQueue::Dispatch,

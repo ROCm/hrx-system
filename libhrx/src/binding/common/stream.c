@@ -1667,12 +1667,20 @@ iree_status_t iree_hal_streaming_launch_kernel(
       flags |= IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
     }
 
-    // Native pointer arguments acquire published inputs before execution and
-    // release results before stream completion. Bound HAL operands retain the
-    // default range maintenance required by their memory contracts.
+    // Native input publication acquires host-authored arguments before the
+    // dispatch can execute. Each launch also acquires earlier device writes
+    // and releases results to the system before stream completion. Bound HAL
+    // operands retain their default range maintenance.
+    static const iree_hal_memory_barrier_t native_acquire = {
+        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+    };
     static const iree_hal_barrier_t native_before = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                             IREE_HAL_EXECUTION_STAGE_TRANSFER,
         .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
-        .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+        .memory_barrier_count = 1,
+        .memory_barriers = &native_acquire,
     };
     static const iree_hal_barrier_t native_after = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
