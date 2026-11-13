@@ -10,6 +10,8 @@
 
 #include "loom/analysis/liveness_uses.h"
 #include "loom/analysis/motion.h"
+#include "loom/analysis/read_motion.h"
+#include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
 #include "loom/ir/context.h"
@@ -23,12 +25,14 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/special_values.h"
+#include "loom/ops/target/facts.h"
 #include "loom/ops/view/ops.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/util/dominance.h"
 #include "loom/util/fact_extensions.h"
+#include "loom/util/reference_facts.h"
 
 typedef enum loom_cmd_launch_count_value_kind_e {
   LOOM_CMD_LAUNCH_COUNT_VALUE_UNSEEN = 0,
@@ -55,6 +59,13 @@ typedef struct loom_cmd_launch_count_read_t {
   // Reference read at that observation.
   loom_value_id_t reference;
 } loom_cmd_launch_count_read_t;
+
+typedef struct loom_cmd_launch_count_storage_t {
+  // Canonical comparable alias scope, or NONE when none is proven.
+  loom_value_fact_alias_scope_id_t alias_scope;
+  // Canonical invocation-relative storage origin.
+  loom_value_fact_reference_origin_t origin;
+} loom_cmd_launch_count_storage_t;
 
 typedef struct loom_cmd_launch_count_closure_t {
   // Source module containing the normalized command root.
@@ -212,7 +223,19 @@ typedef struct loom_cmd_launch_count_cluster_t {
   // Whether a crossed command may have written through a reference argument.
   bool has_possible_writes;
 
-  // Whether a source-placement or alias constraint prevents later joins.
+  // Origin guarantee common to all possible writes crossed by this cluster.
+  loom_value_fact_reference_origin_t write_origin;
+
+  // Whether a possible write lacks a comparable alias scope.
+  bool has_unscoped_writes;
+
+  // Origin guarantee common to writes without comparable alias scopes.
+  loom_value_fact_reference_origin_t unscoped_write_origin;
+
+  // An intervening ordering boundary forbids hoisting new observations.
+  bool has_observation_barrier;
+
+  // Whether the consumer's execution scope prevents later joins.
   bool closed;
 } loom_cmd_launch_count_cluster_t;
 
@@ -591,9 +614,28 @@ static iree_status_t loom_cmd_launch_count_collect_dispatches(
   return iree_ok_status();
 }
 
-static bool loom_cmd_launch_count_symbol_refs_equal(loom_symbol_ref_t left,
-                                                    loom_symbol_ref_t right) {
-  return left.module_id == right.module_id && left.symbol_id == right.symbol_id;
+static iree_status_t loom_cmd_launch_count_targets_are_equivalent(
+    const loom_module_t* module, loom_symbol_fact_table_t* symbol_facts,
+    loom_symbol_ref_t left, loom_symbol_ref_t right, bool* out_equivalent) {
+  *out_equivalent =
+      left.module_id == right.module_id && left.symbol_id == right.symbol_id;
+  if (*out_equivalent || !loom_symbol_ref_is_valid(left) ||
+      !loom_symbol_ref_is_valid(right)) {
+    return iree_ok_status();
+  }
+  // Independent library imports may name the same target semantics through
+  // distinct symbols. Reuse the canonical projection and equivalence relation;
+  // symbol identity alone does not require another count producer.
+  const loom_symbol_facts_base_t* left_facts = NULL;
+  const loom_symbol_facts_base_t* right_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(symbol_facts, module,
+                                                         left, &left_facts));
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(symbol_facts, module,
+                                                         right, &right_facts));
+  *out_equivalent = loom_target_facts_are_equivalent(
+      loom_target_symbol_facts_cast(left_facts)->projection,
+      loom_target_symbol_facts_cast(right_facts)->projection);
+  return iree_ok_status();
 }
 
 static loom_symbol_ref_t loom_cmd_launch_count_dispatch_target(
@@ -612,53 +654,42 @@ static bool loom_cmd_launch_count_has_serial_parent(const loom_op_t* dispatch) {
   return loom_command_composition_is_serial(dispatch->parent_op);
 }
 
-static bool loom_cmd_launch_count_can_cross_operations(
-    const loom_module_t* module, const loom_op_t* left,
-    const loom_op_t* right) {
-  if (left->parent_block != right->parent_block) {
-    return false;
-  }
-  const loom_trait_flags_t forbidden_traits =
-      LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_NON_DETERMINISTIC |
-      LOOM_TRAIT_UNKNOWN_EFFECTS | LOOM_TRAIT_UNIQUE_IDENTITY |
-      LOOM_TRAIT_CONVERGENT | LOOM_TRAIT_MEMORY_FENCE |
-      LOOM_TRAIT_OBSERVABLE_EFFECT | LOOM_TRAIT_COMMAND_EFFECT;
-  for (const loom_op_t* operation = left->next_op; operation != NULL;
+static void loom_cmd_launch_count_record_intervening_barriers(
+    loom_cmd_launch_count_cluster_t* cluster, const loom_op_t* right) {
+  for (const loom_op_t* operation = cluster->frontier->next_op;
+       !cluster->has_observation_barrier && operation != right;
        operation = operation->next_op) {
-    if (operation == right) {
-      return true;
-    }
     if (operation->flags & LOOM_OP_FLAG_DEAD) {
       continue;
     }
-    if (operation->region_count != 0 ||
-        iree_any_bit_set(loom_op_effective_traits(module, operation),
-                         forbidden_traits)) {
-      return false;
-    }
+    cluster->has_observation_barrier =
+        !loom_motion_read_can_cross_op(cluster->closure.module, operation);
   }
-  return false;
 }
 
-static bool loom_cmd_launch_count_reference_alias_scope(
-    const loom_value_fact_table_t* facts, loom_value_id_t reference,
-    loom_value_fact_alias_scope_id_t* out_alias_scope) {
-  *out_alias_scope = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+static loom_cmd_launch_count_storage_t loom_cmd_launch_count_reference_storage(
+    const loom_value_fact_table_t* facts, loom_value_id_t reference) {
   const loom_value_facts_t reference_facts =
       loom_value_fact_table_lookup(facts, reference);
   loom_value_fact_buffer_reference_t buffer_reference = {0};
   if (loom_value_facts_query_buffer_reference(&facts->context, reference_facts,
                                               &buffer_reference)) {
-    *out_alias_scope = buffer_reference.alias_scope_id;
-  } else {
-    loom_value_fact_view_reference_t view_reference = {0};
-    if (!loom_value_facts_query_view_reference(&facts->context, reference_facts,
-                                               &view_reference)) {
-      return false;
-    }
-    *out_alias_scope = view_reference.alias_scope_id;
+    return (loom_cmd_launch_count_storage_t){
+        .alias_scope = buffer_reference.alias_scope_id,
+        .origin = buffer_reference.origin,
+    };
   }
-  return *out_alias_scope != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+  loom_value_fact_view_reference_t view_reference = {0};
+  if (loom_value_facts_query_view_reference(&facts->context, reference_facts,
+                                            &view_reference)) {
+    return (loom_cmd_launch_count_storage_t){
+        .alias_scope = view_reference.alias_scope_id,
+        .origin = view_reference.origin,
+    };
+  }
+  return (loom_cmd_launch_count_storage_t){
+      .alias_scope = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+  };
 }
 
 static uint64_t loom_cmd_launch_count_tuple_hash(
@@ -791,38 +822,70 @@ static bool loom_cmd_launch_count_new_arguments_available_before_cluster(
   for (iree_host_size_t i = first_new_argument; i < closure->argument_count;
        ++i) {
     if (!loom_value_is_available_before_op(dominance, closure->arguments[i],
-                                           cluster->first_consumer)) {
+                                           cluster->producer_before)) {
       return false;
     }
   }
   return true;
 }
 
-static bool loom_cmd_launch_count_new_reads_conflict_with_writes(
+static bool loom_cmd_launch_count_read_conflicts_with_writes(
     const loom_cmd_launch_count_root_t* root,
-    const loom_cmd_launch_count_cluster_t* cluster,
-    iree_host_size_t first_new_read) {
+    const loom_cmd_launch_count_cluster_t* cluster, loom_value_id_t reference) {
   if (!cluster->has_possible_writes) {
     return false;
   }
+  const loom_cmd_launch_count_storage_t storage =
+      loom_cmd_launch_count_reference_storage(cluster->closure.facts,
+                                              reference);
+  if (loom_value_fact_reference_origins_are_disjoint(storage.origin,
+                                                     cluster->write_origin)) {
+    return false;
+  }
+  if (cluster->has_unscoped_writes &&
+      !loom_value_fact_reference_origins_are_disjoint(
+          storage.origin, cluster->unscoped_write_origin)) {
+    return true;
+  }
+  const loom_value_ordinal_t ordinal =
+      loom_local_value_domain_try_ordinal(&root->domain, storage.alias_scope);
+  return ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+         root->write_scope_generations[ordinal] == cluster->closure.generation;
+}
+
+static iree_status_t loom_cmd_launch_count_new_reads_can_join(
+    const loom_cmd_launch_count_root_t* root,
+    const loom_cmd_launch_count_cluster_t* cluster,
+    iree_host_size_t first_new_read, const loom_op_t* consumer,
+    bool* out_can_join) {
+  *out_can_join = true;
   const loom_cmd_launch_count_closure_t* closure = &cluster->closure;
-  for (iree_host_size_t i = first_new_read; i < closure->read_reference_count;
-       ++i) {
-    loom_value_fact_alias_scope_id_t alias_scope =
-        LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-    if (!loom_cmd_launch_count_reference_alias_scope(
-            closure->facts, closure->read_references[i].reference,
-            &alias_scope)) {
-      return true;
+  for (iree_host_size_t i = first_new_read;
+       *out_can_join && i < closure->read_reference_count; ++i) {
+    const loom_cmd_launch_count_read_t* read = &closure->read_references[i];
+    const loom_op_t* before = cluster->producer_before;
+    if (read->operation == before) {
+      continue;
     }
-    const loom_value_ordinal_t ordinal =
-        loom_local_value_domain_try_ordinal(&root->domain, alias_scope);
-    if (ordinal == LOOM_VALUE_ORDINAL_INVALID ||
-        root->write_scope_generations[ordinal] == cluster->closure.generation) {
-      return true;
+    if (read->operation->parent_block == before->parent_block &&
+        read->operation->block_ordinal < before->block_ordinal) {
+      // This observation precedes the producer. Later consumer writes cannot
+      // invalidate it; only effects between the read and producer matter.
+      IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
+          *closure->read_barriers, read->operation, before, out_can_join));
+    } else {
+      // A new observation after the producer must be safe both at its own
+      // consumer and across the writes crossed while hoisting it.
+      *out_can_join = !cluster->has_observation_barrier &&
+                      !loom_cmd_launch_count_read_conflicts_with_writes(
+                          root, cluster, read->reference);
+      if (*out_can_join) {
+        IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
+            *closure->read_barriers, read->operation, consumer, out_can_join));
+      }
     }
   }
-  return false;
+  return iree_ok_status();
 }
 
 static void loom_cmd_launch_count_cluster_record_possible_writes(
@@ -836,18 +899,23 @@ static void loom_cmd_launch_count_cluster_record_possible_writes(
     if (!loom_type_is_buffer(type) && !loom_type_is_view(type)) {
       continue;
     }
+    const loom_cmd_launch_count_storage_t storage =
+        loom_cmd_launch_count_reference_storage(cluster->closure.facts,
+                                                argument);
+    cluster->write_origin = cluster->has_possible_writes
+                                ? loom_value_fact_reference_origin_meet(
+                                      cluster->write_origin, storage.origin)
+                                : storage.origin;
     cluster->has_possible_writes = true;
-    loom_value_fact_alias_scope_id_t alias_scope =
-        LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-    if (!loom_cmd_launch_count_reference_alias_scope(cluster->closure.facts,
-                                                     argument, &alias_scope)) {
-      cluster->closed = true;
-      continue;
-    }
     const loom_value_ordinal_t ordinal =
-        loom_local_value_domain_try_ordinal(&root->domain, alias_scope);
+        loom_local_value_domain_try_ordinal(&root->domain, storage.alias_scope);
     if (ordinal == LOOM_VALUE_ORDINAL_INVALID) {
-      cluster->closed = true;
+      cluster->unscoped_write_origin =
+          cluster->has_unscoped_writes
+              ? loom_value_fact_reference_origin_meet(
+                    cluster->unscoped_write_origin, storage.origin)
+              : storage.origin;
+      cluster->has_unscoped_writes = true;
       continue;
     }
     root->write_scope_generations[ordinal] = cluster->closure.generation;
@@ -905,8 +973,8 @@ static iree_status_t loom_cmd_launch_count_cluster_visit_counts(
   loom_cmd_launch_count_closure_t* closure = &cluster->closure;
   if (closure->invalid_observation == NULL && closure->needs_source_placement &&
       cluster->demand_count == 0) {
-    // A scalar sampled before a write stays at that observation. Such a
-    // producer cannot join a later configuration cluster across the write.
+    // A scalar sampled before a write stays at that observation. Later uses
+    // may share this producer without taking a new memory observation.
     const loom_op_t* last_read = closure->read_references[0].operation;
     for (iree_host_size_t i = 1; i < closure->read_reference_count; ++i) {
       const loom_op_t* read = closure->read_references[i].operation;
@@ -940,7 +1008,7 @@ static iree_status_t loom_cmd_launch_count_cluster_visit_counts(
       }
     }
     cluster->producer_before = before;
-    cluster->closed = true;
+    cluster->has_observation_barrier = true;
   }
   if (cluster->closure.invalid_observation != NULL) {
     *out_valid = false;
@@ -1485,6 +1553,7 @@ static iree_status_t loom_cmd_launch_count_flush_cluster(
 static iree_status_t loom_cmd_launch_count_plan_root(
     loom_module_t* module, loom_op_t* root_op,
     const loom_value_fact_table_t* facts,
+    loom_symbol_fact_table_t* symbol_facts,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* scratch_arena,
     iree_arena_allocator_t* plan_arena,
@@ -1526,15 +1595,14 @@ static iree_status_t loom_cmd_launch_count_plan_root(
       const bool can_cross =
           !cluster.closed &&
           loom_cmd_launch_count_has_serial_parent(dispatch) &&
-          dispatch->parent_block == cluster.block &&
-          loom_cmd_launch_count_can_cross_operations(module, cluster.frontier,
-                                                     dispatch);
+          dispatch->parent_block == cluster.block;
       if (!can_cross) {
         status = loom_cmd_launch_count_flush_cluster(
             &cluster, &cluster_checkpoint, &cluster_active, plan_arena,
             plan_tail);
         continue;
       }
+      loom_cmd_launch_count_record_intervening_barriers(&cluster, dispatch);
       cluster.frontier = dispatch;
       loom_cmd_launch_count_cluster_record_possible_writes(&root, &cluster,
                                                            dispatch);
@@ -1562,28 +1630,32 @@ static iree_status_t loom_cmd_launch_count_plan_root(
 
     const loom_symbol_ref_t target =
         loom_cmd_launch_count_dispatch_target(module, dispatch);
-    bool can_join =
-        cluster_active && !cluster.closed &&
-        loom_cmd_launch_count_has_serial_parent(dispatch) &&
-        dispatch->parent_block == cluster.block &&
-        loom_cmd_launch_count_symbol_refs_equal(target, cluster.target) &&
-        loom_cmd_launch_count_can_cross_operations(module, cluster.frontier,
-                                                   dispatch);
+    bool can_join = cluster_active && !cluster.closed &&
+                    loom_cmd_launch_count_has_serial_parent(dispatch) &&
+                    dispatch->parent_block == cluster.block;
+    if (can_join) {
+      status = loom_cmd_launch_count_targets_are_equivalent(
+          module, symbol_facts, target, cluster.target, &can_join);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+    }
     bool demand_committed = false;
     if (can_join) {
+      loom_cmd_launch_count_record_intervening_barriers(&cluster, dispatch);
       loom_cmd_launch_count_transaction_t transaction = {0};
       loom_cmd_launch_count_transaction_begin(&cluster, scratch_arena,
                                               &transaction);
       status = loom_cmd_launch_count_cluster_visit_counts(
           &cluster, dispatch, &dominance, diagnostic_emitter, out_valid);
       if (iree_status_is_ok(status) && *out_valid) {
-        can_join = !cluster.closure.needs_source_placement &&
-                   loom_cmd_launch_count_new_arguments_available_before_cluster(
-                       &cluster, transaction.prior_closure.argument_count,
-                       &dominance) &&
-                   !loom_cmd_launch_count_new_reads_conflict_with_writes(
-                       &root, &cluster,
-                       transaction.prior_closure.read_reference_count);
+        can_join = loom_cmd_launch_count_new_arguments_available_before_cluster(
+            &cluster, transaction.prior_closure.argument_count, &dominance);
+        if (can_join) {
+          status = loom_cmd_launch_count_new_reads_can_join(
+              &root, &cluster, transaction.prior_closure.read_reference_count,
+              dispatch, &can_join);
+        }
       }
       if (!iree_status_is_ok(status) || !*out_valid) {
         loom_cmd_launch_count_transaction_rollback(&cluster, &transaction);
@@ -1663,6 +1735,8 @@ iree_status_t loom_cmd_launch_count_realize(
 
   iree_arena_allocator_t plan_arena;
   iree_arena_initialize(block_pool, &plan_arena);
+  loom_symbol_fact_table_t symbol_facts;
+  loom_symbol_fact_table_initialize(&symbol_facts, &plan_arena);
   loom_cmd_launch_count_plan_t* plans = NULL;
   loom_cmd_launch_count_plan_t** plan_tail = &plans;
   bool valid = true;
@@ -1681,8 +1755,8 @@ iree_status_t loom_cmd_launch_count_realize(
     const iree_arena_checkpoint_t checkpoint =
         iree_arena_checkpoint_save(scratch_arena);
     status = loom_cmd_launch_count_plan_root(
-        module, root_ops[i], facts, diagnostic_emitter, block_pool,
-        scratch_arena, &plan_arena, &plan_tail, &valid);
+        module, root_ops[i], facts, &symbol_facts, diagnostic_emitter,
+        block_pool, scratch_arena, &plan_arena, &plan_tail, &valid);
     iree_arena_checkpoint_restore(&checkpoint);
   }
 
