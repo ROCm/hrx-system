@@ -197,6 +197,20 @@ static loomc_status_t loomc_link_validate_options(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "root_provider_count is non-zero but root_provider_ordinals is NULL");
   }
+  const loomc_host_size_t base_provider_count =
+      options->link_index
+          ? loom_link_module_index_provider_count(
+                loomc_link_index_module_index(options->link_index))
+          : 0;
+  for (loomc_host_size_t i = 0; i < options->root_provider_count; ++i) {
+    const loomc_host_size_t ordinal = options->root_provider_ordinals[i];
+    if (ordinal >= base_provider_count &&
+        ordinal - base_provider_count >= options->module_provider_count) {
+      return loomc_make_status(
+          LOOMC_STATUS_OUT_OF_RANGE,
+          "root provider ordinal is outside the supplied providers");
+    }
+  }
   if ((options->flags & ~LOOMC_LINK_KNOWN_FLAGS) != 0) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link options contain unknown flag bits");

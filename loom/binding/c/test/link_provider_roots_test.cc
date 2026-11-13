@@ -173,19 +173,24 @@ TEST_F(LinkProviderRootsTest, SelectsDirectExportsAndReachableClosure) {
   EXPECT_THAT(text, ::testing::Not(::testing::HasSubstr("unused_export")));
 }
 
-TEST_F(LinkProviderRootsTest, ReportsOutOfRangeProviderOrdinal) {
+TEST_F(LinkProviderRootsTest, RejectsOutOfRangeProviderOrdinal) {
   const loomc_host_size_t invalid_provider_ordinal =
       loomc_link_index_provider_count(link_index_.get());
-  ResultPtr result;
-  ModulePtr module = Link(&invalid_provider_ordinal, 1, &result);
+  const loomc_link_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+      .structure_size = sizeof(options),
+      .link_index = link_index_.get(),
+      .mode = LOOMC_LINK_MODE_LINK,
+      .root_provider_ordinals = &invalid_provider_ordinal,
+      .root_provider_count = 1,
+  };
+  loomc_module_t* module = nullptr;
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_OUT_OF_RANGE,
+                         loomc_link_module(linker_.get(), workspace_.get(),
+                                           &options, &module, &result));
   EXPECT_EQ(module, nullptr);
-  ASSERT_NE(result, nullptr);
-  EXPECT_FALSE(loomc_result_succeeded(result.get()));
-  ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
-  EXPECT_THAT(
-      std::string(loomc_result_diagnostic_at(result.get(), 0)->message.data,
-                  loomc_result_diagnostic_at(result.get(), 0)->message.size),
-      ::testing::HasSubstr("outside the 3-provider index"));
+  EXPECT_EQ(result, nullptr);
 }
 
 TEST_F(LinkProviderRootsTest, RejectsMissingProviderOrdinalArray) {

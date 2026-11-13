@@ -424,7 +424,7 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
       .planned_symbol_capacity = planned_symbol_capacity,
       .diagnostic_emitter = {.fn = loom_link_source_snapshots_emit,
                              .user_data = &source_capture},
-      .source_callback = {.fn = environment->source_entry
+      .source_callback = {.fn = environment->diagnostics.source_entry
                                     ? loom_link_source_snapshots_capture
                                     : NULL,
                           .user_data = &source_capture},

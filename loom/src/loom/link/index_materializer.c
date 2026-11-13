@@ -205,7 +205,8 @@ static iree_status_t loom_link_index_materialize_link(
     loom_link_plan_t* plan = NULL;
     status = loom_link_index_build_plan(index, plan_options, &provider_roots,
                                         environment->allocator, &plan);
-    if (!iree_status_is_ok(status)) {
+    accepted = plan != NULL;
+    if (!iree_status_is_ok(status) || !accepted) {
       break;
     }
     if (loom_link_plan_demanded_template_family_count(plan) == 0) {
@@ -298,6 +299,9 @@ static iree_status_t loom_link_index_materialize_merge(
   loom_link_plan_t* plan = NULL;
   IREE_RETURN_IF_ERROR(
       loom_link_plan_build(index, plan_options, environment->allocator, &plan));
+  if (!plan) {
+    return iree_ok_status();
+  }
   iree_arena_initialize(environment->block_pool, &out_materialization->arena);
   iree_status_t status = loom_link_plan_materialize(
       plan, environment, module_name, &out_materialization->arena,
@@ -335,11 +339,9 @@ iree_status_t loom_link_index_materialize(
   IREE_ASSERT_ARGUMENT(environment->block_pool);
   IREE_ASSERT_ARGUMENT(out_materialization);
   *out_materialization = (loom_link_index_materialization_t){0};
-  if (plan_options->template_provider_roots.count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "index materialization owns template provider roots");
-  }
+  loom_link_plan_options_t resolved_options = *plan_options;
+  resolved_options.diagnostics = environment->diagnostics;
+  plan_options = &resolved_options;
   iree_status_t status = iree_ok_status();
   switch (plan_options->mode) {
     case LOOM_LINK_PLAN_MERGE:

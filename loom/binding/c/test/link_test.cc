@@ -1053,6 +1053,18 @@ func.def public @entry(%x: i32) -> (i32) {
   EXPECT_EQ(result, nullptr);
 
   module_provider.role = LOOMC_LINK_PROVIDER_ROLE_INPUT;
+  const loomc_host_size_t invalid_provider_ordinal = 1;
+  options.mode = LOOMC_LINK_MODE_LINK;
+  options.root_provider_count = 1;
+  options.root_provider_ordinals = &invalid_provider_ordinal;
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_OUT_OF_RANGE,
+                         loomc_link_module(linker.get(), workspace.get(),
+                                           &options, &output_module, &result));
+  EXPECT_EQ(output_module, nullptr);
+  EXPECT_EQ(result, nullptr);
+  options.mode = LOOMC_LINK_MODE_MERGE;
+  options.root_provider_count = 0;
+  options.root_provider_ordinals = nullptr;
   BuilderPtr input_builder = CreateBuilder(context.get());
   AddSource(input_builder.get(), source.get(), "frozen-input",
             LOOMC_LINK_PROVIDER_ROLE_INPUT);
@@ -1115,7 +1127,7 @@ func.def public @c(%x: i32) -> (i32) {
   LinkArtifact unresolved = LinkLibrarySourcesToBytecode(
       partial_a.bytecode.get(), /*libraries=*/{}, /*flags=*/0);
   EXPECT_EQ(unresolved.bytecode.get(), nullptr);
-  ExpectFailedResultCode(unresolved.result.get(), "LINK/MATERIALIZE");
+  ExpectFailedResultCode(unresolved.result.get(), "SYMBOL/020");
 
   LinkArtifact final_ab =
       LinkLibrarySourcesToBytecode(partial_a.bytecode.get(),
@@ -1807,57 +1819,84 @@ TEST(LinkTest, DuplicatePublicDefinitionsProduceFailedResult) {
            LOOMC_SOURCE_RETENTION_METADATA_ONLY,
        }) {
     SCOPED_TRACE(retention);
-    ContextPtr context = CreateContext(retention);
-    BuilderPtr builder = CreateBuilder(context.get());
-    SourcePtr first = CreateTextSource("first.loom", R"(
+    for (bool bytecode : {false, true}) {
+      SCOPED_TRACE(bytecode);
+      for (loomc_link_mode_t mode :
+           {LOOMC_LINK_MODE_MERGE, LOOMC_LINK_MODE_LINK}) {
+        SCOPED_TRACE(mode);
+        ContextPtr context = CreateContext(retention);
+        BuilderPtr builder = CreateBuilder(context.get());
+        SourcePtr first = CreateTextSource("first.loom", R"(
 func.def public @entry(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )");
-    SourcePtr second = CreateTextSource("second.loom", R"(
+        SourcePtr second = CreateTextSource("second.loom", R"(
 func.def public @entry(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )");
-    AddSource(builder.get(), first.get(), "first",
-              LOOMC_LINK_PROVIDER_ROLE_INPUT);
-    AddSource(builder.get(), second.get(), "second",
-              LOOMC_LINK_PROVIDER_ROLE_INPUT);
+        if (bytecode) {
+          WorkspacePtr input_workspace = CreateWorkspace();
+          ModulePtr first_module = DeserializeModuleFromSource(
+              context.get(), input_workspace.get(), first.get());
+          ModulePtr second_module = DeserializeModuleFromSource(
+              context.get(), input_workspace.get(), second.get());
+          first = SerializeModuleToSource(
+              first_module.get(), LOOMC_SOURCE_FORMAT_BYTECODE, "first.loombc");
+          second = SerializeModuleToSource(second_module.get(),
+                                           LOOMC_SOURCE_FORMAT_BYTECODE,
+                                           "second.loombc");
+        }
+        AddSource(builder.get(), first.get(), "first",
+                  LOOMC_LINK_PROVIDER_ROLE_INPUT);
+        AddSource(builder.get(), second.get(), "second",
+                  LOOMC_LINK_PROVIDER_ROLE_INPUT);
 
-    LinkIndexPtr link_index;
-    FinishIndex(builder.get(), &link_index);
-    LinkerPtr linker = CreateLinker(context.get());
-    WorkspacePtr workspace = CreateWorkspace();
-    ResultPtr result;
-    ModulePtr module = LinkIndex(linker.get(), workspace.get(),
-                                 link_index.get(), nullptr, &result);
+        LinkIndexPtr link_index;
+        FinishIndex(builder.get(), &link_index);
+        LinkerPtr linker = CreateLinker(context.get());
+        WorkspacePtr workspace = CreateWorkspace();
+        ResultPtr result;
+        const loomc_string_view_t root = loomc_make_cstring_view("@entry");
+        loomc_link_options_t options = {
+            .mode = mode,
+            .root_symbols = mode == LOOMC_LINK_MODE_LINK ? &root : nullptr,
+            .root_symbol_count = mode == LOOMC_LINK_MODE_LINK ? 1u : 0u,
+        };
+        ModulePtr module = LinkIndex(linker.get(), workspace.get(),
+                                     link_index.get(), &options, &result);
 
-    first.reset();
-    second.reset();
-    builder.reset();
-    link_index.reset();
-    EXPECT_EQ(module.get(), nullptr);
-    ASSERT_FALSE(loomc_result_succeeded(result.get()));
-    ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
-    const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
-    EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/005");
-    ASSERT_NE(diagnostic->range.source, nullptr);
-    EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
-              "second.loom");
-    EXPECT_EQ(diagnostic->range.start_line, 2u);
-    EXPECT_EQ(diagnostic->range.start_column, 1u);
-    EXPECT_EQ(diagnostic->range.end_line, 4u);
-    EXPECT_EQ(loomc_source_contents(diagnostic->range.source).data_length != 0,
-              retention == LOOMC_SOURCE_RETENTION_EXACT);
-    ASSERT_EQ(diagnostic->related_location_count, 1u);
-    const auto& previous = diagnostic->related_locations[0].range;
-    ASSERT_NE(previous.source, nullptr);
-    EXPECT_EQ(ToString(loomc_source_identifier(previous.source)), "first.loom");
-    EXPECT_EQ(previous.start_line, 2u);
-    EXPECT_EQ(previous.start_column, 1u);
-    EXPECT_EQ(previous.end_line, 4u);
-    EXPECT_EQ(loomc_source_contents(previous.source).data_length != 0,
-              retention == LOOMC_SOURCE_RETENTION_EXACT);
+        first.reset();
+        second.reset();
+        builder.reset();
+        link_index.reset();
+        EXPECT_EQ(module.get(), nullptr);
+        ASSERT_FALSE(loomc_result_succeeded(result.get()));
+        ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+        const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+        EXPECT_EQ(ToString(diagnostic->code), "SYMBOL/005");
+        ASSERT_NE(diagnostic->range.source, nullptr);
+        EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+                  "second.loom");
+        EXPECT_EQ(diagnostic->range.start_line, 2u);
+        EXPECT_EQ(diagnostic->range.start_column, 1u);
+        EXPECT_EQ(diagnostic->range.end_line, 4u);
+        EXPECT_EQ(
+            loomc_source_contents(diagnostic->range.source).data_length != 0,
+            !bytecode && retention == LOOMC_SOURCE_RETENTION_EXACT);
+        ASSERT_EQ(diagnostic->related_location_count, 1u);
+        const auto& previous = diagnostic->related_locations[0].range;
+        ASSERT_NE(previous.source, nullptr);
+        EXPECT_EQ(ToString(loomc_source_identifier(previous.source)),
+                  "first.loom");
+        EXPECT_EQ(previous.start_line, 2u);
+        EXPECT_EQ(previous.start_column, 1u);
+        EXPECT_EQ(previous.end_line, 4u);
+        EXPECT_EQ(loomc_source_contents(previous.source).data_length != 0,
+                  !bytecode && retention == LOOMC_SOURCE_RETENTION_EXACT);
+      }
+    }
   }
 }
 

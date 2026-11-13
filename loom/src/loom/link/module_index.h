@@ -450,13 +450,6 @@ loom_link_module_index_next_template_provider(
     const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
 
-// Annotates |status| with the indexed provider and module locations of two
-// conflicting global definitions.
-iree_status_t loom_link_module_index_annotate_global_collision(
-    iree_status_t status, const loom_link_module_index_t* index,
-    const loom_link_module_index_symbol_t* selected,
-    const loom_link_module_index_symbol_t* duplicate);
-
 #ifdef __cplusplus
 }
 #endif

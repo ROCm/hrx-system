@@ -152,7 +152,7 @@ iree_status_t loom_cmd_program_plan_build_from_index(
   loom_link_index_materialization_t materialization = {0};
   loom_link_plan_materialization_environment_t environment =
       *materialization_environment;
-  environment.diagnostic_emitter = diagnostic_emitter;
+  environment.diagnostics.emitter = diagnostic_emitter;
   iree_status_t status = loom_link_index_materialize(
       index, &link_options, &environment, IREE_SV("command_program_roots"),
       &materialization);

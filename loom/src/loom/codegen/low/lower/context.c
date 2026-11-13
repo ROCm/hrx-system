@@ -98,28 +98,35 @@ bool loom_low_lower_context_diagnostic_limit_reached(
          context->result->error_count >= context->options->max_errors;
 }
 
-static iree_status_t loom_low_lower_emit(loom_low_lower_context_t* context,
-                                         const loom_op_t* source_op,
-                                         const loom_error_def_t* error,
-                                         const loom_diagnostic_param_t* params,
-                                         iree_host_size_t param_count) {
-  if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_ERROR) {
+iree_status_t loom_low_lower_emit_diagnostic(
+    loom_low_lower_context_t* context,
+    const loom_diagnostic_emission_t* emission) {
+  if (loom_error_def_severity(emission->error) == LOOM_DIAGNOSTIC_ERROR) {
     // Successful planning closes authored-input rejection before publication.
     IREE_ASSERT(context->low_func_op == NULL);
     if (loom_low_lower_context_diagnostic_limit_reached(context)) {
       return iree_ok_status();
     }
     ++context->result->error_count;
-  } else if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_REMARK) {
+  } else if (loom_error_def_severity(emission->error) ==
+             LOOM_DIAGNOSTIC_REMARK) {
     ++context->result->remark_count;
   }
+  return iree_diagnostic_emit(context->diagnostic_emitter, emission);
+}
+
+static iree_status_t loom_low_lower_emit(loom_low_lower_context_t* context,
+                                         const loom_op_t* source_op,
+                                         const loom_error_def_t* error,
+                                         const loom_diagnostic_param_t* params,
+                                         iree_host_size_t param_count) {
   loom_diagnostic_emission_t emission = {
       .op = source_op,
       .error = error,
       .params = params,
       .param_count = param_count,
   };
-  return iree_diagnostic_emit(context->diagnostic_emitter, &emission);
+  return loom_low_lower_emit_diagnostic(context, &emission);
 }
 
 IREE_ATTRIBUTE_COLD IREE_ATTRIBUTE_NOINLINE iree_status_t

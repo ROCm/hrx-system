@@ -85,20 +85,27 @@ static bool loom_low_verify_should_stop(const loom_low_verify_state_t* state) {
          state->result->error_count >= state->max_errors;
 }
 
+static iree_status_t loom_low_verify_counting_emitter(
+    void* user_data, const loom_diagnostic_emission_t* emission) {
+  loom_low_verify_state_t* state = user_data;
+  if (loom_low_verify_should_stop(state)) {
+    return iree_ok_status();
+  }
+  if (loom_error_def_severity(emission->error) == LOOM_DIAGNOSTIC_ERROR) {
+    ++state->result->error_count;
+  } else if (loom_error_def_severity(emission->error) ==
+             LOOM_DIAGNOSTIC_WARNING) {
+    ++state->result->warning_count;
+  }
+  return iree_diagnostic_emit(state->emitter, emission);
+}
+
 static iree_status_t loom_low_verify_emit(
     loom_low_verify_state_t* state, const loom_op_t* op,
     const loom_error_def_t* error, const loom_diagnostic_param_t* params,
     iree_host_size_t param_count,
     const loom_diagnostic_related_op_t* related_ops,
     iree_host_size_t related_op_count) {
-  if (loom_low_verify_should_stop(state)) {
-    return iree_ok_status();
-  }
-  if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_ERROR) {
-    ++state->result->error_count;
-  } else if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_WARNING) {
-    ++state->result->warning_count;
-  }
   loom_diagnostic_emission_t emission = {
       .op = op,
       .error = error,
@@ -107,15 +114,7 @@ static iree_status_t loom_low_verify_emit(
       .related_ops = related_ops,
       .related_op_count = related_op_count,
   };
-  return iree_diagnostic_emit(state->emitter, &emission);
-}
-
-static iree_status_t loom_low_verify_counting_emitter(
-    void* user_data, const loom_diagnostic_emission_t* emission) {
-  loom_low_verify_state_t* state = (loom_low_verify_state_t*)user_data;
-  return loom_low_verify_emit(
-      state, emission->op, emission->error, emission->params,
-      emission->param_count, emission->related_ops, emission->related_op_count);
+  return loom_low_verify_counting_emitter(state, &emission);
 }
 
 const loom_module_t* loom_low_verify_context_module(

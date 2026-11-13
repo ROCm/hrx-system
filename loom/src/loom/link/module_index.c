@@ -2013,29 +2013,3 @@ loom_link_module_index_next_template_provider(
   return loom_link_module_index_symbol_at(
       index, extension->first_local_provider_ordinal);
 }
-
-iree_status_t loom_link_module_index_annotate_global_collision(
-    iree_status_t status, const loom_link_module_index_t* index,
-    const loom_link_module_index_symbol_t* selected,
-    const loom_link_module_index_symbol_t* duplicate) {
-  IREE_ASSERT_ARGUMENT(index);
-  IREE_ASSERT_ARGUMENT(selected);
-  IREE_ASSERT_ARGUMENT(duplicate);
-  const loom_link_module_index_module_t* selected_module =
-      loom_link_module_index_symbol_module(index, selected);
-  const loom_link_module_index_module_t* duplicate_module =
-      loom_link_module_index_symbol_module(index, duplicate);
-  const loom_link_module_index_provider_t* selected_provider =
-      loom_link_module_index_symbol_provider(index, selected);
-  const loom_link_module_index_provider_t* duplicate_provider =
-      loom_link_module_index_symbol_provider(index, duplicate);
-  return iree_status_annotate_f(
-      status,
-      "global symbol '@%.*s' selected from provider '%.*s' module '%.*s' "
-      "conflicts with provider '%.*s' module '%.*s'",
-      (int)selected->name.size, selected->name.data,
-      (int)selected_provider->name.size, selected_provider->name.data,
-      (int)selected_module->name.size, selected_module->name.data,
-      (int)duplicate_provider->name.size, duplicate_provider->name.data,
-      (int)duplicate_module->name.size, duplicate_module->name.data);
-}

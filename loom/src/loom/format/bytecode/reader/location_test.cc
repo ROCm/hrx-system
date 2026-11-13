@@ -7,10 +7,12 @@
 #include "loom/format/bytecode/reader/location.h"
 
 #include <cstring>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/format/bytecode/format.h"
+#include "loom/format/bytecode/indexed_source.h"
 
 namespace loom {
 namespace {
@@ -150,6 +152,74 @@ TEST_F(BytecodeLocationTest, IndexesExactEntryRanges) {
   EXPECT_EQ(entries[4].entry_offset, 62u);
   EXPECT_EQ(entries[4].entry_length, 7u);
   EXPECT_EQ(error_count_, 0u);
+}
+
+TEST_F(BytecodeLocationTest, IndexedRangesPreserveSingleOrigins) {
+  // Place the section at a nonzero file offset, as it is in a real container.
+  std::vector<uint8_t> bytes(41, 0);
+  bytes.insert(bytes.end(), std::begin(kLocationTable),
+               std::end(kLocationTable));
+  bytes[41] = 6;
+  const uint8_t tagged_file[] = {LOOM_LOCATION_TAGGED, 0, 1, 1, 0};
+  bytes.insert(bytes.end(), std::begin(tagged_file), std::end(tagged_file));
+  const auto section = MakeSection(bytes.data() + 41, bytes.size() - 41);
+  loom_bytecode_module_metadata_t metadata = {
+      .sources = {IREE_ARRAYSIZE(source_names_), source_names_},
+  };
+  IREE_ASSERT_OK(loom_bytecode_location_table_index(
+      &decoder_, &module_view_, &section, &retained_arena_,
+      &metadata.locations.entries, &metadata.locations.count));
+  ASSERT_EQ(error_count_, 0u);
+  for (loom_location_id_t location = 0; location < 6; ++location) {
+    loom_source_range_t range = {};
+    const bool resolved = loom_bytecode_index_resolve_source(
+        iree_make_const_byte_span(bytes.data(), bytes.size()), &metadata,
+        location, &range);
+    EXPECT_EQ(resolved, location == 1 || location == 5);
+    if (!resolved) {
+      continue;
+    }
+    EXPECT_EQ(range.provenance, LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
+    EXPECT_TRUE(iree_string_view_equal(range.filename, source_names_[0]));
+    EXPECT_EQ(range.start_line, 1u);
+    EXPECT_EQ(range.start_column, 2u);
+    EXPECT_EQ(range.end_line, 3u);
+    EXPECT_EQ(range.end_column, 4u);
+  }
+}
+
+TEST_F(BytecodeLocationTest, IndexedRangesPreserveWideCoordinates) {
+  const uint8_t table[] = {
+      2,    LOOM_LOCATION_NONE,
+      0,    LOOM_LOCATION_FILE,
+      0,    0,
+      0x80, 0x80,
+      0x04,  // Line 65536.
+      0x81, 0x80,
+      0x04,  // Column 65537.
+      0xff, 0xff,
+      0xff, 0xff,
+      0x0f,  // Line UINT32_MAX.
+      0xfe, 0xff,
+      0xff, 0xff,
+      0x0f,  // Column UINT32_MAX - 1.
+  };
+  auto section = MakeSection(table, sizeof(table));
+  section.absolute_offset = 0;
+  loom_bytecode_module_metadata_t metadata = {
+      .sources = {IREE_ARRAYSIZE(source_names_), source_names_},
+  };
+  IREE_ASSERT_OK(loom_bytecode_location_table_index(
+      &decoder_, &module_view_, &section, &retained_arena_,
+      &metadata.locations.entries, &metadata.locations.count));
+  ASSERT_EQ(error_count_, 0u);
+  loom_source_range_t range = {};
+  ASSERT_TRUE(loom_bytecode_index_resolve_source(
+      iree_make_const_byte_span(table, sizeof(table)), &metadata, 1, &range));
+  EXPECT_EQ(range.start_line, 65536u);
+  EXPECT_EQ(range.start_column, 65537u);
+  EXPECT_EQ(range.end_line, UINT32_MAX);
+  EXPECT_EQ(range.end_column, UINT32_MAX - 1);
 }
 
 TEST_F(BytecodeLocationTest, RejectsCountBeforeRetainingEntryRanges) {

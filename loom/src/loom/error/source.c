@@ -13,7 +13,7 @@
 
 // Tagged locations preserve a single origin. Fused locations have no designated
 // primary file and cannot be represented by one source range.
-static const loom_location_entry_t* loom_source_file_location(
+const loom_location_entry_t* loom_source_file_location(
     const loom_module_t* module, loom_location_id_t location) {
   if (!module) {
     return NULL;
@@ -76,7 +76,10 @@ void loom_source_resolve_diagnostic(
       .source_location = {.provenance =
                               LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE},
   };
-  if (emission->op) {
+  if (emission->origin) {
+    out_diagnostic->origin = *emission->origin;
+    out_diagnostic->source_location = *emission->origin;
+  } else if (emission->op) {
     loom_source_range_t range;
     if (loom_source_resolve(resolver, out_diagnostic->module,
                             emission->op->location, &range)) {
@@ -89,8 +92,11 @@ void loom_source_resolve_diagnostic(
     const loom_module_t* related_module =
         related->module ? related->module : module;
     loom_source_range_t range;
-    if (!related->op || !loom_source_resolve(resolver, related_module,
-                                             related->op->location, &range)) {
+    if (related->origin) {
+      range = *related->origin;
+    } else if (!related->op ||
+               !loom_source_resolve(resolver, related_module,
+                                    related->op->location, &range)) {
       continue;
     }
     if (out_diagnostic->related_location_count ==
@@ -373,6 +379,12 @@ bool loom_source_table_resolve(void* user_data, const loom_module_t* module,
   const loom_source_entry_t* source_entry =
       &table->entries[entry->file.source_id];
 
+  return loom_source_resolve_snapshot(source_entry, entry, out_range);
+}
+
+bool loom_source_resolve_snapshot(const loom_source_entry_t* source_entry,
+                                  const loom_location_entry_t* entry,
+                                  loom_source_range_t* out_range) {
   // Only an ordered range actually present in the snapshot has exact spelling.
   // Explicit debug locations can name unavailable or out-of-snapshot positions.
   iree_host_size_t start_offset = 0, end_offset = 0;

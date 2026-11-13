@@ -11,12 +11,11 @@
 
 // Resolves an op in its producer's module, which may differ from the
 // verifier's.
-static bool loom_verify_resolve_location(const loom_verify_state_t* state,
+static bool loom_verify_resolve_location(loom_source_resolver_t resolver,
                                          const loom_module_t* module,
                                          const loom_op_t* op,
                                          loom_source_range_t* out_range) {
-  return op && loom_source_resolve(state->source_resolver, module, op->location,
-                                   out_range);
+  return op && loom_source_resolve(resolver, module, op->location, out_range);
 }
 
 // Maximum per-token highlight ranges per diagnostic.
@@ -299,7 +298,7 @@ loom_diagnostic_param_t loom_verify_param_string_for_indexed_field(
 // Resolves labeled related ops through the source resolver.
 // Returns the number of note entries written to |out_related_locations|.
 static iree_host_size_t loom_verify_collect_related_locations(
-    const loom_verify_state_t* state,
+    const loom_verify_state_t* state, loom_source_resolver_t resolver,
     const loom_diagnostic_related_op_t* related_ops,
     iree_host_size_t related_op_count,
     loom_diagnostic_related_location_t* out_related_locations,
@@ -312,7 +311,7 @@ static iree_host_size_t loom_verify_collect_related_locations(
 
   iree_host_size_t related_location_count = 0;
   for (iree_host_size_t i = 0; i < related_op_count; ++i) {
-    if (!related_ops[i].op) {
+    if (!related_ops[i].op && !related_ops[i].origin) {
       continue;
     }
     loom_source_range_t source_location = {
@@ -320,8 +319,10 @@ static iree_host_size_t loom_verify_collect_related_locations(
     };
     const loom_module_t* module =
         related_ops[i].module ? related_ops[i].module : state->module;
-    if (!loom_verify_resolve_location(state, module, related_ops[i].op,
-                                      &source_location)) {
+    if (related_ops[i].origin) {
+      source_location = *related_ops[i].origin;
+    } else if (!loom_verify_resolve_location(
+                   resolver, module, related_ops[i].op, &source_location)) {
       continue;
     }
     if (related_location_count >= LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS) {
@@ -334,7 +335,8 @@ static iree_host_size_t loom_verify_collect_related_locations(
         .label = related_ops[i].label,
         .source_location = source_location,
     };
-    if (loom_diagnostic_field_ref_is_set(related_ops[i].field_ref)) {
+    if (related_ops[i].op &&
+        loom_diagnostic_field_ref_is_set(related_ops[i].field_ref)) {
       loom_print_field_ref_t printer_field_ref = {0};
       if (loom_verify_print_field_ref(related_ops[i].field_ref,
                                       &printer_field_ref)) {
@@ -396,6 +398,7 @@ void loom_verify_emit_diagnostic(loom_verify_state_t* state,
   diagnostic.params = emission->params;
   diagnostic.param_count = emission->param_count;
   diagnostic.emitter = LOOM_EMITTER_VERIFIER;
+  diagnostic.export_name = emission->export_name;
   diagnostic.module = emission->module ? emission->module : state->module;
   diagnostic.origin.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
   diagnostic.source_location.provenance =
@@ -405,8 +408,11 @@ void loom_verify_emit_diagnostic(loom_verify_state_t* state,
       related_locations[LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS];
   loom_highlight_range_t
       related_highlights[LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS];
+  const loom_source_resolver_t resolver = emission->source_resolver
+                                              ? *emission->source_resolver
+                                              : state->source_resolver;
   diagnostic.related_location_count = loom_verify_collect_related_locations(
-      state, emission->related_ops, emission->related_op_count,
+      state, resolver, emission->related_ops, emission->related_op_count,
       related_locations, related_highlights,
       &diagnostic.related_location_omitted_count);
   if (diagnostic.related_location_count > 0) {
@@ -421,13 +427,21 @@ void loom_verify_emit_diagnostic(loom_verify_state_t* state,
   loom_highlight_range_t highlights[LOOM_VERIFY_MAX_HIGHLIGHTS];
 
   const loom_module_t* module = diagnostic.module;
-  bool resolved = loom_verify_resolve_location(state, module, emission->op,
-                                               &diagnostic.source_location);
+  bool resolved = emission->origin != NULL;
+  if (emission->origin) {
+    diagnostic.source_location = *emission->origin;
+  } else {
+    resolved = loom_verify_resolve_location(resolver, module, emission->op,
+                                            &diagnostic.source_location);
+  }
   if (resolved) {
     diagnostic.origin = diagnostic.source_location;
-    diagnostic.highlight_count = loom_collect_source_backed_highlights(
-        module, emission->op, &diagnostic.source_location, highlight_targets,
-        highlight_target_count, IREE_ARRAYSIZE(highlights), highlights);
+    diagnostic.highlight_count =
+        emission->op ? loom_collect_source_backed_highlights(
+                           module, emission->op, &diagnostic.source_location,
+                           highlight_targets, highlight_target_count,
+                           IREE_ARRAYSIZE(highlights), highlights)
+                     : 0;
     if (diagnostic.highlight_count > 0) {
       diagnostic.highlights = highlights;
     }

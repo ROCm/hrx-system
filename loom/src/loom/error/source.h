@@ -63,6 +63,11 @@ void loom_source_resolve_diagnostic(
     loom_diagnostic_related_location_t* related_locations,
     loom_diagnostic_t* out_diagnostic);
 
+// Returns the file origin of a location, following transparent tags. Fused and
+// opaque locations have no designated origin and return NULL.
+const loom_location_entry_t* loom_source_file_location(
+    const loom_module_t* module, loom_location_id_t location);
+
 // Source bytes associated with a source identity in the module being resolved.
 typedef struct loom_source_entry_t {
   // Module-local source identity, or LOOM_SOURCE_ID_INVALID for an empty entry.
@@ -72,6 +77,13 @@ typedef struct loom_source_entry_t {
   // Borrowed source filename.
   iree_string_view_t filename;
 } loom_source_entry_t;
+
+// Resolves a file-location entry against the matching exact snapshot. Returns
+// false for coordinates outside the snapshot; the recorded metadata remains
+// usable through loom_source_resolve without source text.
+bool loom_source_resolve_snapshot(const loom_source_entry_t* source_entry,
+                                  const loom_location_entry_t* file_location,
+                                  loom_source_range_t* out_range);
 
 // Borrowed source entries for loom_source_table_resolve. Entries are indexed
 // by source ID; missing snapshots have an invalid source ID. Linking projects

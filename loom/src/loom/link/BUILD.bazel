@@ -258,11 +258,28 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "index_diagnostics",
+    srcs = ["index_diagnostics.c"],
+    hdrs = ["index_diagnostics.h"],
+    deps = [
+        ":module_index",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:source",
+        "//loom/src/loom/format/bytecode:indexed_source",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "planner",
     srcs = ["planner.c"],
     hdrs = ["planner.h"],
     deps = [
+        ":index_diagnostics",
         ":module_index",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//runtime/src/iree/base",
     ],
 )
@@ -282,6 +299,7 @@ loom_cc_library(
     name = "materialization_environment",
     hdrs = ["materialization_environment.h"],
     deps = [
+        ":index_diagnostics",
         ":module_index",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:source",

@@ -10,6 +10,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/error/error_catalog.h"
 
 namespace loom {
 namespace {
@@ -113,6 +114,35 @@ TEST_F(LowLowerContextTest, EmissionScopeReleasesScratchStorage) {
     EXPECT_EQ(context_.emission_arena.used_allocation_size, retained_used);
     EXPECT_EQ(context_.emission_arena.total_allocation_size, retained_reserved);
   }
+}
+
+TEST_F(LowLowerContextTest, DiagnosticsRetainContextAndRejectWithoutCallback) {
+  loom_low_lower_options_t options = {.max_errors = 1};
+  loom_low_lower_result_t result = {};
+  context_.options = &options;
+  context_.result = &result;
+  loom_diagnostic_emission_t emission = {.error = LOOM_ERR_TARGET_051};
+  const loom_diagnostic_emission_t* received = nullptr;
+  context_.diagnostic_emitter = {
+      [](void* user_data, const loom_diagnostic_emission_t* value) {
+        *static_cast<const loom_diagnostic_emission_t**>(user_data) = value;
+        return iree_ok_status();
+      },
+      &received,
+  };
+  IREE_ASSERT_OK(loom_low_lower_emit_diagnostic(&context_, &emission));
+  // Forward the original request, including indexed origins and related ranges.
+  EXPECT_EQ(received, &emission);
+  EXPECT_EQ(result.error_count, 1u);
+  received = nullptr;
+  IREE_ASSERT_OK(loom_low_lower_emit_diagnostic(&context_, &emission));
+  EXPECT_EQ(received, nullptr);
+  EXPECT_EQ(result.error_count, 1u);
+
+  context_.diagnostic_emitter = {};
+  result.error_count = 0;
+  IREE_ASSERT_OK(loom_low_lower_emit_diagnostic(&context_, &emission));
+  EXPECT_EQ(result.error_count, 1u);
 }
 
 }  // namespace

@@ -562,13 +562,17 @@ loomc_link_materialization_state_environment(
       .block_pool = loomc_workspace_block_pool(state->composition.workspace),
       .low_repr_environment = low_repr_environment,
       .diagnostic_sink = loomc_link_materialization_diagnostic_sink,
-      .diagnostic_emitter = {.fn = loomc_link_materialization_capture_emission,
-                             .user_data = state},
-      .source_entry =
-          loomc_context_source_retention(state->composition.context) ==
-                  LOOMC_SOURCE_RETENTION_EXACT
-              ? loomc_link_materialization_source_entry
-              : NULL,
+      .diagnostics =
+          {
+              .emitter = {.fn = loomc_link_materialization_capture_emission,
+                          .user_data = state},
+              .source_entry =
+                  loomc_context_source_retention(state->composition.context) ==
+                          LOOMC_SOURCE_RETENTION_EXACT
+                      ? loomc_link_materialization_source_entry
+                      : NULL,
+              .user_data = state,
+          },
       .prepare_module = loomc_link_materialization_prepare_module,
       .user_data = state,
       .allocator = iree_allocator_from_loomc(state->allocator),

@@ -262,6 +262,42 @@ ERR_SYMBOL_019 = ErrorDef(
     params=(ErrorParam("filename", ParamKind.STRING),),
 )
 
+ERR_SYMBOL_020 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=20,
+    severity=Severity.ERROR,
+    summary="Required definition is unavailable.",
+    message="no accessible matching definition for declaration '@{symbol_name}'",
+    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+)
+
+ERR_SYMBOL_021 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=21,
+    severity=Severity.ERROR,
+    summary="Required symbol was stripped.",
+    message="required symbol '@{symbol_name}' was stripped",
+    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+)
+
+ERR_SYMBOL_022 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=22,
+    severity=Severity.ERROR,
+    summary="Private root is ambiguous.",
+    message="root symbol '@{symbol_name}' is private in multiple modules",
+    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+)
+
+ERR_SYMBOL_023 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=23,
+    severity=Severity.ERROR,
+    summary="Link selection has no roots.",
+    message="link selection contains no roots; select a symbol or export",
+    params=(),
+)
+
 ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_001,
     ERR_SYMBOL_002,
@@ -282,4 +318,8 @@ ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_017,
     ERR_SYMBOL_018,
     ERR_SYMBOL_019,
+    ERR_SYMBOL_020,
+    ERR_SYMBOL_021,
+    ERR_SYMBOL_022,
+    ERR_SYMBOL_023,
 )

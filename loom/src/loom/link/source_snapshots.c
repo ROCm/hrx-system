@@ -18,7 +18,7 @@ iree_status_t loom_link_source_snapshots_initialize(
     iree_arena_allocator_t* product_arena,
     loom_link_source_snapshots_t* out_snapshots) {
   *out_snapshots = (loom_link_source_snapshots_t){.environment = environment};
-  if (!environment->source_entry) {
+  if (!environment->diagnostics.source_entry) {
     return iree_ok_status();
   }
 
@@ -75,10 +75,11 @@ iree_status_t loom_link_source_snapshots_emit(
   const loom_source_resolver_t resolver = {
       .fn = loom_link_source_snapshots_resolve, .user_data = snapshots};
   loom_diagnostic_emission_t contextual = *emission;
-  if (!contextual.source_resolver && snapshots->environment->source_entry) {
+  if (!contextual.source_resolver &&
+      snapshots->environment->diagnostics.source_entry) {
     contextual.source_resolver = &resolver;
   }
-  return iree_diagnostic_emit(snapshots->environment->diagnostic_emitter,
+  return iree_diagnostic_emit(snapshots->environment->diagnostics.emitter,
                               &contextual);
 }
 
@@ -109,9 +110,10 @@ iree_status_t loom_link_source_snapshots_capture(
   for (iree_host_size_t i = 0; i < original->sources.count &&
                                iree_status_is_ok(status) && *out_accepted;
        ++i) {
-    loom_source_entry_t entry = snapshots->environment->source_entry(
-        snapshots->environment->user_data, snapshots->input,
-        (loom_source_id_t)i);
+    loom_source_entry_t entry =
+        snapshots->environment->diagnostics.source_entry(
+            snapshots->environment->diagnostics.user_data, snapshots->input,
+            (loom_source_id_t)i);
     if (entry.source_id == LOOM_SOURCE_ID_INVALID) {
       continue;
     }
