@@ -40,7 +40,7 @@ typedef struct iree_hal_amd_gpu_byte_storage_t {
   iree_allocator_t host_allocator;
 } iree_hal_amd_gpu_byte_storage_t;
 
-// One device-only grid record for ordered direct cooperative dispatches. The
+// One device-only grid record for all ordered cooperative dispatches. The
 // command processor initializes it after the preceding grid completes; shaders
 // own it until the next ordered initialization. No CPU mapping is required.
 typedef struct iree_hal_amd_gpu_grid_storage_t {

@@ -38,7 +38,7 @@ typedef struct iree_hal_amd_gpu_dispatch_geometry_t {
 } iree_hal_amd_gpu_dispatch_geometry_t;
 
 // AMD device-library ABI referenced by hidden_multigrid_sync_arg. Each live
-// invocation owns its words through native execution completion.
+// cooperative queue owns its words; ordered resets separate live invocations.
 typedef struct iree_hal_amd_gpu_grid_sync_t {
   // Device address of cross-grid state, zero for a single-device grid.
   uint64_t multi_grid_sync;

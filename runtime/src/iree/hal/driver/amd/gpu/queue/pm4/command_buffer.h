@@ -109,10 +109,12 @@ void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
 // The shader path writes its separate values mapping. A bounded packet plan
 // keeps values on the CPU and fills out_fixup_words; its values mapping is
 // NULL. Program emission independently fills actual builtin ABI arguments.
+// cooperative_address comes from the current queue, including after trim.
 iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t dispatch_id, uint64_t continuation,
-    uint64_t profile_address, uint64_t* values, uint32_t* out_fixup_words);
+    uint32_t queue_ordinal, uint64_t cooperative_address, uint64_t dispatch_id,
+    uint64_t continuation, uint64_t profile_address, uint64_t* values,
+    uint32_t* out_fixup_words);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -734,8 +734,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
             executable, token, &dispatch.geometry, flags));
     buffer->program->required_features |=
         IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH;
-    buffer->pending_barrier.execution |=
-        IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
   }
   const bool indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
@@ -764,16 +762,33 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     buffer->pending_barrier.release_cache_control |= buffer->profile.shader;
     buffer->pending_barrier.acquire_cache_control |= buffer->profile.shader;
   }
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
-  iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
-      iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
-  const uint32_t grid_sync_offset = (storage.length + 7u) & ~7u;
+  uint32_t grid_value = 0;
   if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
-    // Recorded grid state belongs to each resident replay instance, alongside
-    // its arguments. Direct dispatches instead reuse queue-owned device state.
-    storage.alignment = iree_max(storage.alignment, 8u);
-    storage.length = grid_sync_offset + sizeof(iree_hal_amd_gpu_grid_sync_t);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_cooperative_state(
+        &buffer->inputs, &grid_value));
+    const iree_hal_amd_gpu_grid_sync_t grid =
+        iree_hal_amd_gpu_dispatch_grid_sync(&dispatch.geometry);
+    uint32_t command_offset = 0;
+    uint32_t* commands = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
+        &buffer->recording, 6 + sizeof(grid) / sizeof(uint32_t),
+        &command_offset, &commands));
+    uint32_t* cursor = iree_hal_amd_gpu_pm4_emit_compute_flush(commands);
+    iree_hal_amd_gpu_pm4_emit_write(cursor, 0, sizeof(grid) / sizeof(uint32_t),
+                                    (const uint32_t*)&grid);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+        buffer, false, command_offset + 4 * 4, grid_value, 0, false));
+    // The reset joins previous users before the confirmed write. The following
+    // acquire makes the new record visible to this dispatch's shader caches.
+    buffer->pending_barrier.execution &=
+        ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+    buffer->pending_barrier.acquire_cache_control |=
+        buffer->profile.command_processor_bypasses_l2 ? buffer->profile.acquire
+                                                      : buffer->profile.shader;
   }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
+  const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
+      iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
   uint32_t argument_offset = 0;
   void* arguments = NULL;
   if (storage.length) {
@@ -782,28 +797,13 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
         &argument_offset, &arguments));
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         function, &dispatch, constants, NULL, flags, arguments);
-    if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
-      iree_hal_amd_gpu_dispatch_emplace_grid_sync(
-          function->base.kernarg, &dispatch.geometry, 0, arguments,
-          (void*)((uint8_t*)arguments + grid_sync_offset));
-      const uint32_t grid_offset = argument_offset + grid_sync_offset;
-      if (function->base.kernarg->requirements &
-          IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC) {
-        IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
-            buffer, true,
-            argument_offset + function->base.kernarg->grid_sync_offset,
-            IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, grid_offset, true));
-      }
-      uint32_t zero = 0;
-      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_constant(
-          &buffer->inputs, 0, &zero));
-      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
-          &buffer->recording.storage,
-          grid_offset +
-              offsetof(iree_hal_amd_gpu_grid_sync_t, single_grid_sync),
-          zero, 0, 0,
-          IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
-              IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
+    if ((flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) &&
+        (function->base.kernarg->requirements &
+         IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC)) {
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+          buffer, true,
+          argument_offset + function->base.kernarg->grid_sync_offset,
+          grid_value, 0, false));
     }
   }
   uint32_t packet_offset = 0;
@@ -1089,8 +1089,9 @@ void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
 
 iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
-    uint32_t queue_ordinal, uint64_t dispatch_id, uint64_t continuation,
-    uint64_t profile_address, uint64_t* values, uint32_t* out_fixup_words) {
+    uint32_t queue_ordinal, uint64_t cooperative_address, uint64_t dispatch_id,
+    uint64_t continuation, uint64_t profile_address, uint64_t* values,
+    uint32_t* out_fixup_words) {
   const iree_hal_amd_gpu_pm4_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   uint64_t local_values[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_VALUE_CAPACITY];
@@ -1108,7 +1109,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
         profile_address ? UINT32_C(0xc0004600) : UINT32_C(0xc0061000);
   }
   iree_status_t status = iree_hal_amd_gpu_command_inputs_write(
-      &buffer->inputs, invocation->bindings, queue_ordinal,
+      &buffer->inputs, invocation->bindings, queue_ordinal, cooperative_address,
       values + iree_hal_amd_gpu_pm4_command_first_input(buffer));
   if (iree_status_is_ok(status) && packets) {
     iree_hal_amd_gpu_pm4_fixup_packets_emit(

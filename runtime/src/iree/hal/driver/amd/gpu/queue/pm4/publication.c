@@ -580,8 +580,8 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_execute(
   uint32_t fixup_words[IREE_HAL_AMD_GPU_PM4_PACKET_FIXUP_WORD_CAPACITY];
   if (fixup_count) {
     iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_write(
-        invocation, queue->options.queue_ordinal, dispatch_id, continuation,
-        sample_address,
+        invocation, queue->options.queue_ordinal, queue->grid.address,
+        dispatch_id, continuation, sample_address,
         shader_fixup ? (void*)(queue->values.current->memory.contents.data +
                                values_offset)
                      : NULL,

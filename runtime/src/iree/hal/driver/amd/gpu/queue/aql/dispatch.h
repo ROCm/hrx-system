@@ -48,8 +48,8 @@ enum {
 
 // Initializes resident barrier state through one ordered vendor IB. Only XCC0
 // writes the record; release publishes it to the following ordered dispatch's
-// system acquire. commands covers GRID_SYNC_COMMAND_LENGTH bytes of immutable
-// upload storage whose device address is command_address. Both the upload and
+// system acquire. commands covers 64 bytes for one XCC or 72 for multiple XCCs
+// of immutable upload storage at command_address. Both the upload and
 // resident state remain live through completion of the user grid.
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_grid_sync_write_packet(
     uint32_t xcc_count, uint64_t grid_address,

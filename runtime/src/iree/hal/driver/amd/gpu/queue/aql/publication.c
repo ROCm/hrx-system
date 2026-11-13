@@ -912,7 +912,7 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
       IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
   if (first && (argument_length || host_contents)) {
     *out_status = iree_hal_amd_gpu_aql_command_invocation_write(
-        invocation, queue->options.queue_ordinal,
+        invocation, queue->options.queue_ordinal, queue->grid.address,
         arguments->address + argument_offset, upload,
         queue->producer.argument_streaming,
         command_data ? queue->commands->address + command_offset : 0,

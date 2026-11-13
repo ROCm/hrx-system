@@ -476,7 +476,7 @@ iree_status_t iree_hal_amd_gpu_sdma_command_invocation_resolve(
       (const void*)invocation->command_buffer;
   invocation->values[IREE_HAL_AMD_GPU_SDMA_VALUE_PRIVATE] = private_address;
   return iree_hal_amd_gpu_command_inputs_write(
-      &buffer->inputs, invocation->bindings, queue_ordinal,
+      &buffer->inputs, invocation->bindings, queue_ordinal, 0,
       invocation->values + IREE_HAL_AMD_GPU_SDMA_VALUE_FIRST_INPUT);
 }
 
