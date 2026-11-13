@@ -45,6 +45,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     "amdgpu.s_mov_b64_exec_read": _s_mov_b64_exec_read_contract_overlay,
     "amdgpu.s_add_u32": _s_add_u32_overlay,
     "amdgpu.s_add_co_u32": _s_add_co_u32_overlay,
+    "amdgpu.s_addc_u32": _s_addc_u32_overlay,
     "amdgpu.s_sub_u32": _s_sub_u32_overlay,
     "amdgpu.s_sub_co_u32": _s_sub_co_u32_overlay,
     "amdgpu.s_subb_u32": _s_subb_u32_overlay,
@@ -73,6 +74,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     ),
     "amdgpu.v_add_u32.lit": lambda: _v_add_u32_literal_overlay("V_ADD_NC_U32"),
     "amdgpu.v_add_co_u32": _v_add_co_u32_overlay,
+    "amdgpu.v_add_co_ci_u32": _v_add_co_ci_u32_overlay,
     "amdgpu.v_sub_u32": lambda: _v_sub_u32_overlay("V_SUB_NC_U32", "v_sub_nc_u32"),
     "amdgpu.v_sub_u32.src0_inline": lambda: _v_sub_u32_src0_inline_overlay(
         "V_SUB_NC_U32", "v_sub_nc_u32"

@@ -22,6 +22,7 @@ from iree.vm.bytecode.spec.isa.core.buffer import (
     BUFFER_ATOMIC_REDUCE,
     BUFFER_ATOMIC_RMW,
     BUFFER_COMPARE,
+    BUFFER_COMPARE_ADDRESS,
     BUFFER_COPY,
     BUFFER_FILL,
     BUFFER_LENGTH,
@@ -125,6 +126,7 @@ _BUFFER_INSTRUCTIONS = (
     BUFFER_FILL,
     BUFFER_COPY,
     BUFFER_COMPARE,
+    BUFFER_COMPARE_ADDRESS,
     BUFFER_LOAD,
     BUFFER_STORE,
     BUFFER_RODATA_LOAD,
@@ -549,6 +551,8 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
                 if op in (BUFFER_LENGTH, BUFFER_LOAD)
                 else (ScalarTypeKind.I32,)
                 if op is BUFFER_COMPARE
+                else (ScalarTypeKind.I1,)
+                if op is BUFFER_COMPARE_ADDRESS
                 else (),
             )
             for op in _BUFFER_INSTRUCTIONS

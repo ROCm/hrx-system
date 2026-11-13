@@ -207,3 +207,16 @@ class BufferBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def address(
+        self,
+        *,
+        predicate: str,
+        lhs: ValueRef,
+        lhs_offset: ValueRef,
+        rhs: ValueRef,
+        rhs_offset: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

@@ -2045,22 +2045,28 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             schedule_class=_SCHEDULE_ALU,
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
-        Descriptor(
-            key="spirv.op_iequal.storage_buffer",
-            mnemonic="OpIEqual.storage_buffer",
-            semantic_tag="spirv.op_iequal.storage_buffer",
-            operands=(
-                _id_result(),
-                _ptr_storage_buffer_operand("lhs"),
-                _ptr_storage_buffer_operand("rhs"),
-            ),
-            asm_forms=_asm(
-                results=("dst",),
-                operands=("lhs", "rhs"),
-                result_value_types=(_scalar_result_value_type("i1"),),
-            ),
-            schedule_class=_SCHEDULE_ALU,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        *(
+            Descriptor(
+                key=f"spirv.op_{suffix}.storage_buffer",
+                mnemonic=f"{mnemonic}.storage_buffer",
+                semantic_tag=f"spirv.op_{suffix}.storage_buffer",
+                operands=(
+                    _id_result(),
+                    _ptr_storage_buffer_operand("lhs"),
+                    _ptr_storage_buffer_operand("rhs"),
+                ),
+                asm_forms=_asm(
+                    results=("dst",),
+                    operands=("lhs", "rhs"),
+                    result_value_types=(_scalar_result_value_type("i1"),),
+                ),
+                schedule_class=_SCHEDULE_ALU,
+                flags=(DescriptorFlag.DEAD_REMOVABLE,),
+            )
+            for suffix, mnemonic in (
+                ("iequal", "OpIEqual"),
+                ("inotequal", "OpINotEqual"),
+            )
         ),
         *_scalar_binary_descriptors(),
         *_conversion_descriptors(),

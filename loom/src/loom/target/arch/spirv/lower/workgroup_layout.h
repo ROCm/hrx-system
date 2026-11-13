@@ -65,6 +65,11 @@ void loom_spirv_workgroup_layout_lookup_low_storage(
     const loom_low_lower_context_t* context, loom_value_id_t root_value_id,
     loom_value_id_t* out_low_storage_value_id);
 
+// Returns a source allocation's byte origin in its physical Workgroup arena.
+// Dedicated roots retain origin zero. Consumes the retained packing decision.
+uint64_t loom_spirv_workgroup_layout_root_byte_offset(
+    const loom_low_lower_context_t* context, loom_value_id_t root_value_id);
+
 // Returns the packed allocation-root bias consumed by common source-memory
 // rule matching. Non-Workgroup and dedicated roots return zero.
 uint64_t loom_spirv_workgroup_layout_source_memory_root_byte_offset(

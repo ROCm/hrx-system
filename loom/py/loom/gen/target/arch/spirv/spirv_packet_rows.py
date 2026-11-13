@@ -1296,15 +1296,18 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
             immediate_count=1,
             literal_word_count=2,
         ),
-        _PacketRow(
-            "spirv.op_iequal.storage_buffer",
-            opcode="LOOM_SPIRV_OP_I_EQUAL",
-            form="LOOM_SPIRV_PACKET_FORM_COMPARE_SAME_TYPE",
-            result_type=_bool_value(),
-            operand_types=(
-                _storage_buffer_address_value(),
-                _storage_buffer_address_value(),
-            ),
+        *(
+            _PacketRow(
+                f"spirv.op_{suffix}.storage_buffer",
+                opcode=opcode,
+                form="LOOM_SPIRV_PACKET_FORM_COMPARE_SAME_TYPE",
+                result_type=_bool_value(),
+                operand_types=(
+                    _storage_buffer_address_value(),
+                    _storage_buffer_address_value(),
+                ),
+            )
+            for suffix, opcode in (("iequal", "LOOM_SPIRV_OP_I_EQUAL"), ("inotequal", "LOOM_SPIRV_OP_I_NOT_EQUAL"))
         ),
         *_scalar_binary_rows(),
         *_conversion_rows(),

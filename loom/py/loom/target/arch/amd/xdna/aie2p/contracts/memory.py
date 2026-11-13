@@ -1798,7 +1798,51 @@ def _matrix_fragment_store_rules() -> tuple[DescriptorRule, ...]:
 AIE2P_VIEW_CARRIER_RULES = _view_carrier_rules()
 
 
+def _buffer_compare_address_rules() -> tuple[DescriptorRule, ...]:
+    emits = []
+    for side in ("lhs", "rhs"):
+        emits.extend(
+            (
+                EmitRegisterCopy(
+                    source=ValueRef.operand(side),
+                    result=ValueRef.temporary(f"{side}_base"),
+                    result_type=_I32,
+                ),
+                EmitDescriptorOp(
+                    descriptor=_descriptor("amd.xdna.aie2p.add.i32"),
+                    operands={
+                        "s0": ValueRef.temporary(f"{side}_base"),
+                        "s1": ValueRef.operand(f"{side}_offset"),
+                    },
+                    results={"d0": ValueRef.temporary(f"{side}_address")},
+                    result_types={"d0": _I32},
+                    form=DescriptorEmitForm.OP,
+                ),
+            )
+        )
+    return tuple(
+        DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=(Guard.enum_attr_equals("predicate", predicate),),
+            emit=(
+                *emits,
+                EmitDescriptorOp(
+                    descriptor=_descriptor(f"amd.xdna.aie2p.cmp.{predicate}.i32"),
+                    operands={
+                        "s0": ValueRef.temporary("lhs_address"),
+                        "s1": ValueRef.temporary("rhs_address"),
+                    },
+                    results={"d0": ValueRef.result("result")},
+                    form=DescriptorEmitForm.OP,
+                ),
+            ),
+        )
+        for predicate in ("eq", "ne")
+    )
+
+
 AIE2P_BUFFER_VALUE_RULES: tuple[DescriptorRule, ...] = (
+    *_buffer_compare_address_rules(),
     DescriptorRule(
         source_op=buffer.buffer_null,
         emit=(
