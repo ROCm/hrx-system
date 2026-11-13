@@ -116,6 +116,7 @@ from loom.target.arch.spirv.contracts.ordinary_vector import (
 from loom.target.arch.spirv.contracts.ordinary_vector_alu import (
     SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,
 )
+from loom.target.arch.spirv.contracts.packed_memory import packed_storage_buffer_rules
 from loom.target.arch.spirv.contracts.predicate import integer_to_boolean_rule
 from loom.target.arch.spirv.contracts.reference_fallback import (
     SPIRV_REFERENCE_FALLBACK_CONTRACT_CASES,
@@ -1549,6 +1550,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         ),
         *_storage_buffer_rules(),
         *bfloat_carrier_memory_rules(),
+        *packed_storage_buffer_rules(),
         *SPIRV_ATOMIC_CONTRACT_CASES,
         *SPIRV_SUBGROUP_CONTRACT_CASES,
         *_control_barrier_rules(),

@@ -118,9 +118,11 @@ from loom.target.arch.spirv.scalar_conversion import (  # noqa: E402
     ScalarConversion,
 )
 from loom.target.arch.spirv.scalar_memory import (  # noqa: E402
+    PACKED_STORAGE_BUFFER_VECTORS,
     RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
     StorageBufferScalar,
+    StorageBufferVector,
 )
 from loom.target.arch.spirv.subgroup import (  # noqa: E402
     SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,
@@ -216,7 +218,11 @@ def _storage_buffer_address_value() -> str:
     return _value_type("LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS")
 
 
-def _physical_storage_buffer_pointer_value(scalar: StorageBufferScalar) -> str:
+def _physical_storage_buffer_pointer_value(
+    scalar: StorageBufferScalar | StorageBufferVector,
+) -> str:
+    if isinstance(scalar, StorageBufferVector):
+        return f"{{.value_class = LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER, .scalar_type = {scalar.scalar_enum}, .vector = {{.lane_count = {scalar.lane_count}}}}}"
     return _value_type("LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER", scalar.scalar_enum)
 
 
@@ -599,9 +605,15 @@ def _float_atomic_rows() -> list[_PacketRow]:
     return [row for scalar in ATOMIC_FLOAT_SCALARS for storage_class in ATOMIC_STORAGE_CLASSES for scope in ATOMIC_SCOPES for row in _float_atomic_rows_for_scope(scalar, storage_class, scope)]
 
 
-def _storage_buffer_rows_for_scalar(
-    scalar: StorageBufferScalar,
+def _storage_buffer_rows_for_type(
+    scalar: StorageBufferScalar | StorageBufferVector,
 ) -> tuple[_PacketRow, ...]:
+    if isinstance(scalar, StorageBufferVector):
+        value_type = f"{{.value_class = LOOM_SPIRV_VALUE_CLASS_VECTOR, .scalar_type = {scalar.scalar_enum}, .vector = {{.lane_count = {scalar.lane_count}}}}}"
+        alignment = scalar.component.byte_width
+    else:
+        value_type = _scalar_value(scalar)
+        alignment = scalar.byte_width
     return (
         _PacketRow(
             f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset",
@@ -617,9 +629,9 @@ def _storage_buffer_rows_for_scalar(
             f"spirv.op_load.storage_buffer.{scalar.suffix}",
             opcode="LOOM_SPIRV_OP_LOAD",
             form="LOOM_SPIRV_PACKET_FORM_LOAD_ALIGNED",
-            result_type=_scalar_value(scalar),
+            result_type=value_type,
             operand_types=(_physical_storage_buffer_pointer_value(scalar),),
-            memory_alignment=scalar.byte_width,
+            memory_alignment=alignment,
         ),
         _PacketRow(
             f"spirv.op_store.storage_buffer.{scalar.suffix}",
@@ -627,15 +639,15 @@ def _storage_buffer_rows_for_scalar(
             form="LOOM_SPIRV_PACKET_FORM_STORE_ALIGNED",
             operand_types=(
                 _physical_storage_buffer_pointer_value(scalar),
-                _scalar_value(scalar),
+                value_type,
             ),
-            memory_alignment=scalar.byte_width,
+            memory_alignment=alignment,
         ),
     )
 
 
 def _storage_buffer_rows() -> list[_PacketRow]:
-    return [row for scalar in STORAGE_BUFFER_SCALARS for row in _storage_buffer_rows_for_scalar(scalar)]
+    return [row for scalar in (*STORAGE_BUFFER_SCALARS, *PACKED_STORAGE_BUFFER_VECTORS) for row in _storage_buffer_rows_for_type(scalar)]
 
 
 def _raw_storage_buffer_byte_rows() -> tuple[_PacketRow, ...]:
@@ -646,7 +658,7 @@ def _raw_storage_buffer_byte_rows() -> tuple[_PacketRow, ...]:
         "LOOM_SPIRV_SCALAR_TYPE_U32",
     )
     return (
-        *_storage_buffer_rows_for_scalar(scalar),
+        *_storage_buffer_rows_for_type(scalar),
         _PacketRow(
             f"spirv.op_uconvert.{scalar.suffix}.u32",
             opcode="LOOM_SPIRV_OP_U_CONVERT",

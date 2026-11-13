@@ -14,7 +14,10 @@ from loom.target.arch.spirv.contracts.descriptor_rule import (
     descriptor_feature_guards,
     logical_core_descriptor,
 )
-from loom.target.arch.spirv.scalar_memory import StorageBufferScalar
+from loom.target.arch.spirv.scalar_memory import (
+    StorageBufferScalar,
+    StorageBufferVector,
+)
 from loom.target.contracts import (
     Guard,
     GuardDiagnostic,
@@ -77,7 +80,7 @@ def _storage_buffer_address_diagnostic() -> GuardDiagnostic:
 
 
 def storage_buffer_address_materializer(
-    scalar: StorageBufferScalar,
+    scalar: StorageBufferScalar | StorageBufferVector,
 ) -> SourceMemoryAddressMaterializer:
     # Native-width byte arithmetic preserves the complete coordinate even
     # when conservative range analysis cannot bound a loop-carried base.

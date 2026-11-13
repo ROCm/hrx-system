@@ -124,10 +124,12 @@ func.def target(@target) @storage_buffer_f16_requires_target_features(%input: bu
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @packed_storage_buffer_i32_requires_known_root_alignment(%input: buffer, %byte_offset: offset) -> (i32) {
+// Without subword storage capabilities, a byte-aligned word still cannot be
+// transferred. The diagnostic identifies the missing packet capability.
+func.def target(@target) @storage_buffer_i32_requires_byte_storage_for_unknown_root(%input: buffer, %byte_offset: offset) -> (i32) {
   %byte_offset_aligned = index.assume %byte_offset [multiple_of(%byte_offset, 4)] : offset
   %input_view = buffer.view %input[%byte_offset_aligned] : buffer -> view<1xi32, align(1)>
-  // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="1"}
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.v4i8.byte_offset", constraint_key="descriptor_available"}
   %loaded = view.load %input_view[0] : view<1xi32, align(1)> -> i32
   func.return %loaded : i32
 }
@@ -173,11 +175,11 @@ low.kernel.def target<spirv.logical.core>(@hal_target_compact_matrix) abi_layout
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @storage_buffer_i32_rejects_misaligned_static_offset(%input: buffer) -> (i32) {
+func.def target(@target) @storage_buffer_i32_requires_halfword_storage_for_offset(%input: buffer) -> (i32) {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %misaligned_base = index.constant 2 : offset
   %input_view = buffer.view %input_aligned[%misaligned_base] : buffer -> view<1xi32, align(1)>
-  // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="2"}
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.v2i16.byte_offset", constraint_key="descriptor_available"}
   %loaded = view.load %input_view[0] : view<1xi32, align(1)> -> i32
   func.return %loaded : i32
 }
@@ -188,11 +190,11 @@ spirv.target<vulkan1_3> @target
 
 // Narrowing a wide root-alignment fact must preserve a power-of-two divisor,
 // not saturate to an odd integer that shares factors with the displacement.
-func.def target(@target) @storage_buffer_i32_rejects_odd_offset_from_wide_aligned_root(%input: buffer) -> (i32) {
+func.def target(@target) @storage_buffer_i32_requires_byte_storage_for_odd_offset(%input: buffer) -> (i32) {
   %aligned = buffer.assume.alignment %input {minimum_alignment = 1099511627776} : buffer
   %offset = index.constant 5 : offset
   %input_view = buffer.view %aligned[%offset] : buffer -> view<1xi32, align(1)>
-  // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="1"}
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.v4i8.byte_offset", constraint_key="descriptor_available"}
   %loaded = view.load %input_view[0] : view<1xi32, align(1)> -> i32
   func.return %loaded : i32
 }
@@ -201,11 +203,11 @@ func.def target(@target) @storage_buffer_i32_rejects_odd_offset_from_wide_aligne
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @storage_buffer_i32_rejects_odd_stride_from_wide_aligned_root(%input: buffer, %byte_offset: offset) -> (i32) {
+func.def target(@target) @storage_buffer_i32_requires_byte_storage_for_odd_stride(%input: buffer, %byte_offset: offset) -> (i32) {
   %aligned = buffer.assume.alignment %input {minimum_alignment = 1099511627776} : buffer
   %offset = index.assume %byte_offset [range(%byte_offset, 0, 60), multiple_of(%byte_offset, 5)] : offset
   %input_view = buffer.view %aligned[%offset] : buffer -> view<1xi32, align(1)>
-  // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="1"}
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.v4i8.byte_offset", constraint_key="descriptor_available"}
   %loaded = view.load %input_view[0] : view<1xi32, align(1)> -> i32
   func.return %loaded : i32
 }

@@ -348,7 +348,7 @@ def bfloat_narrow_rules() -> tuple[DescriptorRule, ...]:
     return tuple(rules)
 
 
-def _bfloat_carrier_to_i16_emits(
+def bfloat_carrier_to_i16_emits(
     source: ValueRef, result: ValueRef
 ) -> tuple[EmitDescriptorOp, ...]:
     descriptor = logical_core_descriptor("spirv.op_s_convert.i32.i16")
@@ -364,7 +364,7 @@ def _bfloat_carrier_to_i16_emits(
 
 def bfloat_carrier_to_i16_rule() -> DescriptorRule:
     """Observes an i32-carried BF16 value through its native i16 bit view."""
-    emits = _bfloat_carrier_to_i16_emits(
+    emits = bfloat_carrier_to_i16_emits(
         ValueRef.operand("input"), ValueRef.result("result")
     )
     return DescriptorRule(
@@ -379,7 +379,7 @@ def bfloat_carrier_to_i16_rule() -> DescriptorRule:
     )
 
 
-def _bfloat_carrier_from_i16_emits(
+def bfloat_carrier_from_i16_emits(
     source: ValueRef, result: ValueRef
 ) -> tuple[EmitDescriptorOp, ...]:
     signed_to_unsigned = logical_core_descriptor("spirv.op_bitcast.i16.u16")
@@ -409,7 +409,7 @@ def _bfloat_carrier_from_i16_emits(
 
 def bfloat_carrier_from_i16_rule() -> DescriptorRule:
     """Constructs an i32-carried BF16 value from its native i16 bit view."""
-    emits = _bfloat_carrier_from_i16_emits(
+    emits = bfloat_carrier_from_i16_emits(
         ValueRef.operand("input"), ValueRef.result("result")
     )
     return DescriptorRule(
@@ -471,13 +471,13 @@ def bfloat_carrier_memory_rules() -> tuple[DescriptorRule, ...]:
             emits = (
                 (
                     memory_emit,
-                    *_bfloat_carrier_from_i16_emits(
+                    *bfloat_carrier_from_i16_emits(
                         stored_bits, ValueRef.result("result")
                     ),
                 )
                 if is_load
                 else (
-                    *_bfloat_carrier_to_i16_emits(
+                    *bfloat_carrier_to_i16_emits(
                         ValueRef.operand("value"), stored_bits
                     ),
                     memory_emit,

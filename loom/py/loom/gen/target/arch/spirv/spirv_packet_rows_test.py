@@ -84,6 +84,7 @@ from loom.target.arch.spirv.scalar_alu import (
 )
 from loom.target.arch.spirv.scalar_constant import FLOAT_CONSTANT_TYPES
 from loom.target.arch.spirv.scalar_memory import (
+    PACKED_STORAGE_BUFFER_VECTORS,
     RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
 )
@@ -330,6 +331,31 @@ def test_generation_emits_scalar_memory_packet_rows() -> None:
 
     assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in tables
     assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in tables
+
+
+def test_packed_memory_alignment_follows_the_component() -> None:
+    assert {packet.suffix for packet in PACKED_STORAGE_BUFFER_VECTORS} == {
+        "v2i8",
+        "v4i8",
+        "v2i16",
+        "v4i16",
+        "v2i32",
+    }
+    for packet in PACKED_STORAGE_BUFFER_VECTORS:
+        pointer = _packet_row(f"spirv.op_ptr_access_chain.storage_buffer.{packet.suffix}.byte_offset").result_type
+        assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in pointer
+        assert f".lane_count = {packet.lane_count}" in pointer
+        assert packet.scalar_enum in pointer
+        load = _packet_row(f"spirv.op_load.storage_buffer.{packet.suffix}")
+        store = _packet_row(f"spirv.op_store.storage_buffer.{packet.suffix}")
+        assert load.operand_types == (pointer,)
+        assert store.operand_types == (pointer, load.result_type)
+        assert "LOOM_SPIRV_VALUE_CLASS_VECTOR" in load.result_type
+        assert f".lane_count = {packet.lane_count}" in load.result_type
+        assert load.memory_alignment == store.memory_alignment == packet.component.byte_width
+        for operation in ("load", "store"):
+            descriptor = _descriptor(f"spirv.op_{operation}.storage_buffer.{packet.suffix}")
+            assert descriptor.effects[0].width_bits == packet.byte_width * 8
 
 
 def test_generation_emits_raw_storage_byte_bridge_rows() -> None:

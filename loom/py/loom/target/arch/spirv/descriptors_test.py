@@ -85,6 +85,7 @@ from loom.target.arch.spirv.scalar_conversion import (
     LOW_SCALAR_CONVERSIONS,
 )
 from loom.target.arch.spirv.scalar_memory import (
+    PACKED_STORAGE_BUFFER_VECTORS,
     RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
 )
@@ -429,6 +430,17 @@ def _cooperative_matrix_result_keys() -> list[str]:
     return keys
 
 
+def _packed_memory_result_keys() -> set[str]:
+    return {
+        key
+        for packet in PACKED_STORAGE_BUFFER_VECTORS
+        for key in (
+            f"spirv.op_ptr_access_chain.storage_buffer.{packet.suffix}.byte_offset",
+            f"spirv.op_load.storage_buffer.{packet.suffix}",
+        )
+    }
+
+
 def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
     expected_recipes: dict[str, AsmResultValueType] = {}
     carrier_only_keys: set[str] = set()
@@ -620,6 +632,8 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
                 add_scalar_recipe(load_key, scalar.source_type)
             else:
                 add_carrier_only(load_key)
+
+    carrier_only_keys.update(_packed_memory_result_keys())
 
     for key, recipe in _atomic_result_recipes().items():
         add_recipe(key, recipe)
