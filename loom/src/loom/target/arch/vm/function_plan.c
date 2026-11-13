@@ -783,35 +783,12 @@ static iree_status_t loom_vm_function_arguments(
   return status;
 }
 
-typedef struct loom_vm_call_contract_provider_context_t {
-  // Module owning callee symbol names used at the external binding boundary.
-  const loom_module_t* module;
-  // Retained symbol-indexed callable bindings.
-  const loom_vm_program_build_t* program;
-} loom_vm_call_contract_provider_context_t;
-
-static iree_status_t loom_vm_function_call_contract_validate(
-    void* user_data, loom_symbol_ref_t callee) {
-  const loom_vm_call_contract_provider_context_t* context = user_data;
-  const loom_vm_program_callable_t* binding =
-      context->program->bindings_by_symbol[callee.symbol_id];
-  if (binding != NULL) {
-    return iree_ok_status();
-  }
-  const loom_symbol_t* symbol =
-      &context->module->symbols.entries[callee.symbol_id];
-  const iree_string_view_t name =
-      loom_string_table_get(&context->module->strings, symbol->name_id);
-  return iree_make_status(
-      IREE_STATUS_NOT_FOUND,
-      "VM callee '@%.*s' has no definition or runtime import", (int)name.size,
-      name.data);
-}
-
 static const loom_low_call_contract_t* loom_vm_function_call_contract_query(
     void* user_data, loom_symbol_ref_t callee) {
-  const loom_vm_call_contract_provider_context_t* context = user_data;
-  return &context->program->bindings_by_symbol[callee.symbol_id]->call_contract;
+  const loom_vm_program_build_t* program = user_data;
+  const loom_vm_program_callable_t* binding =
+      program->bindings_by_symbol[callee.symbol_id];
+  return binding != NULL ? &binding->call_contract : NULL;
 }
 
 iree_status_t loom_vm_function_plan_write(
@@ -833,10 +810,6 @@ iree_status_t loom_vm_function_plan_write(
   diagnostic_emitter = loom_diagnostic_export_scope_emitter(&diagnostic_scope);
   uint16_t argument_count = 0;
   loom_func_like_arg_ids(function, &argument_count);
-  loom_vm_call_contract_provider_context_t call_contracts = {
-      .module = module,
-      .program = functions,
-  };
   const loom_low_emission_frame_options_t options = {
       .descriptor_registry = descriptor_registry,
       .function_target_facts = function_version != NULL
@@ -851,9 +824,8 @@ iree_status_t loom_vm_function_plan_write(
       .allocation_entry_location_count = argument_count,
       .call_contracts =
           {
-              .validate = loom_vm_function_call_contract_validate,
               .query = loom_vm_function_call_contract_query,
-              .user_data = &call_contracts,
+              .user_data = functions,
           },
       .synchronous_storage_spaces =
           LOOM_LOW_STORAGE_SPACE_SET_STACK | LOOM_LOW_STORAGE_SPACE_SET_PRIVATE,

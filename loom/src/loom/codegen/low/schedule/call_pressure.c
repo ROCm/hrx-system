@@ -26,17 +26,6 @@ struct loom_low_schedule_call_pressure_table_t {
   loom_low_schedule_call_pressure_record_t* records;
 };
 
-static const loom_low_call_contract_t* loom_low_schedule_call_pressure_contract(
-    const loom_low_schedule_build_state_t* state, iree_host_size_t call_index) {
-  const loom_low_call_contract_provider_t* provider =
-      state->options->call_contracts;
-  const loom_op_t* call = state->nodes[state->call_node_indices[call_index]].op;
-  const loom_low_call_contract_t* contract =
-      provider->query(provider->user_data, loom_low_func_call_callee(call));
-  IREE_ASSERT_NE(contract, NULL);
-  return contract;
-}
-
 static bool loom_low_schedule_call_pressure_class_limit(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id,
     uint16_t* out_pressure_set_id, uint32_t* out_limit) {
@@ -143,18 +132,6 @@ iree_status_t loom_low_schedule_call_pressure_initialize(
     return iree_ok_status();
   }
 
-  for (iree_host_size_t i = 0; i < state->call_node_count; ++i) {
-    const loom_op_t* call = state->nodes[state->call_node_indices[i]].op;
-    const loom_symbol_ref_t callee = loom_low_func_call_callee(call);
-    if (provider->validate != NULL) {
-      IREE_RETURN_IF_ERROR(provider->validate(provider->user_data, callee));
-    }
-  }
-  if (state->pressure_limits.by_reg_class == NULL ||
-      state->allocation_constraints == NULL) {
-    return iree_ok_status();
-  }
-
   const loom_low_call_clobber_list_t common_clobbers =
       provider->query_common_clobbers != NULL
           ? provider->query_common_clobbers(provider->user_data,
@@ -168,14 +145,37 @@ iree_status_t loom_low_schedule_call_pressure_initialize(
       (iree_host_size_t)descriptor_set->reg_class_count +
       descriptor_set->register_packing_resource_count;
   loom_low_schedule_call_pressure_limit_t* limits = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scratch_arena, limit_capacity, sizeof(*limits), (void**)&limits));
+  if (state->pressure_limits.by_reg_class != NULL &&
+      state->allocation_constraints != NULL) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->scratch_arena, limit_capacity,
+                                  sizeof(*limits), (void**)&limits));
+  }
   loom_low_schedule_call_pressure_table_t* table = NULL;
   for (iree_host_size_t i = 0; i < state->call_node_count; ++i) {
+    const loom_op_t* call = state->nodes[state->call_node_indices[i]].op;
+    const loom_symbol_ref_t callee = loom_low_func_call_callee(call);
+    const loom_low_call_contract_t* contract =
+        provider->query(provider->user_data, callee);
+    if (contract == NULL) {
+      if (state->failure.kind == LOOM_LOW_SCHEDULE_FAILURE_NONE) {
+        state->failure = (loom_low_schedule_failure_t){
+            .kind = LOOM_LOW_SCHEDULE_FAILURE_UNBOUND_CALL,
+            .producer_node = LOOM_LOW_SCHEDULE_NODE_NONE,
+            .consumer_node = state->call_node_indices[i],
+            .operand_index = UINT32_MAX,
+            .state_value_id = LOOM_VALUE_ID_INVALID,
+        };
+      }
+      ++state->error_count;
+      continue;
+    }
+    if (limits == NULL) {
+      continue;
+    }
     const iree_host_size_t limit_count =
-        loom_low_schedule_call_pressure_build_limits(
-            state, loom_low_schedule_call_pressure_contract(state, i),
-            common_clobbers, limits);
+        loom_low_schedule_call_pressure_build_limits(state, contract,
+                                                     common_clobbers, limits);
     if (limit_count == 0) {
       continue;
     }

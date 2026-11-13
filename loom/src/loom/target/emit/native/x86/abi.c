@@ -66,22 +66,11 @@ const loom_x86_function_abi_t* loom_x86_module_abi_lookup(
   return module_abi->functions_by_symbol[function.symbol_id];
 }
 
-iree_status_t loom_x86_function_call_contract_validate(
-    void* user_data, loom_symbol_ref_t callee) {
-  const loom_x86_module_abi_t* module_abi = user_data;
-  if (loom_x86_module_abi_lookup(module_abi, callee) == NULL) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "x86 callee has no native SysV ABI plan");
-  }
-  return iree_ok_status();
-}
-
 const loom_low_call_contract_t* loom_x86_function_call_contract(
     void* user_data, loom_symbol_ref_t callee) {
   const loom_x86_function_abi_t* function_abi =
       loom_x86_module_abi_lookup(user_data, callee);
-  IREE_ASSERT_NE(function_abi, NULL);
-  return &function_abi->call_contract;
+  return function_abi != NULL ? &function_abi->call_contract : NULL;
 }
 
 loom_low_call_clobber_list_t loom_x86_function_common_call_clobbers(

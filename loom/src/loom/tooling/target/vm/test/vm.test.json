@@ -372,7 +372,7 @@
       },
       "stderr": {
         "contains": [
-          "VM callee '@unavailable' has no definition or runtime import"
+          "source_cases.loom:32:3: error [BACKEND/059] in export 'unused': call to '@unavailable' in '@unused' has no executable binding for target 'vm-core'"
         ]
       }
     },

@@ -81,16 +81,15 @@ typedef struct loom_low_call_contract_t {
   loom_low_call_clobber_list_t clobbers;
 } loom_low_call_contract_t;
 
-// The target resolves and validates the callee's convention before allocation.
-// The query reads that retained binding; it does not inspect bodies or infer
-// effects, and must return a non-NULL contract after optional validation.
+// The target resolves the callee's convention before allocation. The query
+// reads that retained binding without inspecting bodies or inferring effects.
+// A missing executable binding returns NULL. Schedule construction diagnoses
+// that at the call operation before allocation consumes the admitted bindings.
 // Clobbers occur between argument consumption and result production: values
 // live across the boundary require preserved storage, while dying arguments
 // and new results may use these registers. Asynchronous execution contracts
 // must additionally account for outstanding physical storage leases.
 typedef struct loom_low_call_contract_provider_t {
-  // Optional target-boundary validation performed once per retained call.
-  iree_status_t (*validate)(void* user_data, loom_symbol_ref_t callee);
   // Optional infallible query; NULL when calls have no allocation contract.
   const loom_low_call_contract_t* (*query)(void* user_data,
                                            loom_symbol_ref_t callee);

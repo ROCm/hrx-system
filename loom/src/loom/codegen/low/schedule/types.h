@@ -109,6 +109,8 @@ typedef enum loom_low_schedule_failure_kind_e {
   LOOM_LOW_SCHEDULE_FAILURE_DEPENDENCY_CYCLE = 1,
   // A block overwrites architectural state that remains live at its exit.
   LOOM_LOW_SCHEDULE_FAILURE_STATE_CLOBBER = 2,
+  // A retained call has no executable target binding.
+  LOOM_LOW_SCHEDULE_FAILURE_UNBOUND_CALL = 3,
 } loom_low_schedule_failure_kind_t;
 
 enum loom_low_schedule_failure_flag_bits_e {
@@ -136,7 +138,8 @@ typedef struct loom_low_schedule_failure_t {
   uint32_t unscheduled_node_count;
   // Producer of the unresolved dependency, or the live-out state clobber.
   uint32_t producer_node;
-  // Consumer of the unresolved dependency, or the clobbering block's exit.
+  // Consumer of the unresolved dependency, clobbering block's exit, or call
+  // without an executable binding.
   uint32_t consumer_node;
   // Dependency kind for the representative unresolved edge.
   loom_low_schedule_dependency_kind_t dependency_kind;

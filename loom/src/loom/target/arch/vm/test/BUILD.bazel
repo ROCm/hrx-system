@@ -37,6 +37,7 @@ loom_check_test_suite(
     srcs = [
         "buffer_packets.loom-test",
         "buffer_projection.loom-test",
+        "call_diagnostics.loom-test",
         "call_overflow.loom-test",
         "calls.loom-test",
         "emission.loom-test",

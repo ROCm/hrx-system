@@ -12,6 +12,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
 #include "loom/ir/context.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 
 #define LOOM_LOW_SCHEDULE_MAX_PRESSURE_CONTRIBUTORS 16
@@ -106,6 +107,22 @@ static iree_string_view_t loom_low_schedule_operand_index_name(
     size = buffer_capacity - 1;
   }
   return iree_make_string_view(buffer, size);
+}
+
+static iree_status_t loom_low_schedule_emit_unbound_call(
+    const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter) {
+  const loom_op_t* call = table->nodes[table->failure.consumer_node].op;
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
+      loom_param_with_field_ref(
+          loom_param_string(loom_low_diagnostic_symbol_name(
+              table->module, loom_low_func_call_callee(call))),
+          loom_low_func_call_callee_diagnostic_ref()),
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+  };
+  return loom_low_schedule_emit(table, emitter, call, LOOM_ERR_BACKEND_059,
+                                params, IREE_ARRAYSIZE(params));
 }
 
 static iree_status_t loom_low_schedule_emit_dependency_cycle(
@@ -560,6 +577,9 @@ iree_status_t loom_low_schedule_diagnostics_emit(
     return iree_ok_status();
   }
   if (table->error_count != 0) {
+    if (table->failure.kind == LOOM_LOW_SCHEDULE_FAILURE_UNBOUND_CALL) {
+      return loom_low_schedule_emit_unbound_call(table, emitter);
+    }
     if (table->failure.kind == LOOM_LOW_SCHEDULE_FAILURE_STATE_CLOBBER) {
       return loom_low_schedule_emit_state_clobber(table, emitter,
                                                   &table->failure);

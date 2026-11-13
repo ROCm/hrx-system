@@ -138,7 +138,6 @@ static iree_status_t loom_x86_module_encode_function(
       .allocation_exit_location_count = abi->call_contract.result_count,
       .call_contracts =
           {
-              .validate = loom_x86_function_call_contract_validate,
               .query = loom_x86_function_call_contract,
               .query_common_clobbers = loom_x86_function_common_call_clobbers,
               .user_data = (void*)module_abi,
