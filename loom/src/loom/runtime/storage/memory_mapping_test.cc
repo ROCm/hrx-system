@@ -8,6 +8,15 @@
 
 namespace {
 
+using CompletedOperation =
+    std::unique_ptr<loom_runtime_memory_operation_t,
+                    decltype(&loom_runtime_memory_operation_free)>;
+
+CompletedOperation AwaitOperation(loom_runtime_memory_operation_t* operation) {
+  loom_runtime_memory_operation_await(operation);
+  return CompletedOperation(operation, loom_runtime_memory_operation_free);
+}
+
 class MemoryMappingTest : public loom_runtime::testing::memory::MemoryTest {
  protected:
   void SetUpPool() override {
@@ -128,7 +137,7 @@ TEST_F(MemoryMappingTest, SourceIoKeepsCallerOrderAndOverlappingRanges) {
       pool, IREE_ARRAYSIZE(ranges), ranges, nullptr, 0, &admission,
       &operation));
   ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
-  loom_runtime_memory_operation_await(operation);
+  const auto completed = AwaitOperation(operation);
   IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
   for (size_t i = 0; i < 4; ++i) {
     const auto input = loom_runtime_memory_operation_backing(operation, i);
@@ -138,7 +147,6 @@ TEST_F(MemoryMappingTest, SourceIoKeepsCallerOrderAndOverlappingRanges) {
     EXPECT_EQ(input.offset, published.offset);
     EXPECT_EQ(input.length, published.length);
   }
-  loom_runtime_memory_operation_free(operation);
   const auto observations = mapping_queue.WaitForMappings(1);
   ASSERT_EQ(observations[0].updates.size(), 2u);
   EXPECT_EQ(observations[0].updates[0].target_range.byte_offset, 2 * page);
@@ -163,12 +171,13 @@ TEST_F(MemoryMappingTest, GrowthRebindsRunsWithoutCopyingOrFillingHoles) {
   const auto retained = loom_runtime_memory_pool_retained_bytes(pool);
   auto* previous = loom_runtime_virtual_buffer_handle(first);
   iree_hal_buffer_retain(previous);
+  const std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      previous_owner(previous, iree_hal_buffer_release);
   loom_runtime_memory_operation_t* operation = nullptr;
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_grow_async(
       first, 9 * page, nullptr, 0, &operation));
-  loom_runtime_memory_operation_await(operation);
+  const auto completed = AwaitOperation(operation);
   IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
-  loom_runtime_memory_operation_free(operation);
   const auto observations = mapping_queue.WaitForMappings(4);
   const auto& attached = observations[2].updates;
   const auto& detached = observations[3].updates;
@@ -185,7 +194,6 @@ TEST_F(MemoryMappingTest, GrowthRebindsRunsWithoutCopyingOrFillingHoles) {
     EXPECT_EQ(detached[i].previous_source, attached[i].source);
     EXPECT_EQ(detached[i].previous_source_offset, attached[i].source_offset);
   }
-  iree_hal_buffer_release(previous);
   EXPECT_EQ(statistics[0].committed_bytes, 4 * page);
   EXPECT_EQ(loom_runtime_memory_pool_retained_bytes(pool), retained);
   EXPECT_FALSE(loom_runtime_virtual_buffer_is_backed(first, 2 * page, page));
@@ -216,9 +224,8 @@ TEST_F(MemoryMappingTest, DeferredSourcesPublishExactTailBeforeAdjacentState) {
   deferred_backing->WaitForAcquisition();
   EXPECT_FALSE(loom_runtime_memory_operation_is_complete(operation));
   deferred_backing->ResumeAcquisitions();
-  loom_runtime_memory_operation_await(operation);
+  const auto completed = AwaitOperation(operation);
   IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
-  loom_runtime_memory_operation_free(operation);
   const auto observations = mapping_queue.WaitForMappings(1);
   ASSERT_EQ(observations[0].updates.size(), 3u);
   const auto& updates = observations[0].updates;
@@ -248,10 +255,9 @@ TEST_F(MemoryMappingTest, FailedRunDetachRetainsEveryPageForCheckedCleanup) {
   loom_runtime_memory_operation_t* operation = nullptr;
   IREE_ASSERT_OK(loom_runtime_memory_pool_trim_async(pool, 1, &first, nullptr,
                                                      0, &operation));
-  loom_runtime_memory_operation_await(operation);
+  const auto completed = AwaitOperation(operation);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         loom_runtime_memory_operation_query_status(operation));
-  loom_runtime_memory_operation_free(operation);
   const auto observations = mapping_queue.WaitForMappings(3);
   ASSERT_EQ(observations[2].updates.size(), 1u);
   EXPECT_EQ(observations[2].updates[0].target_range.byte_length, 3 * page);
