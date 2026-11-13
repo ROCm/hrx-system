@@ -67,6 +67,11 @@ class AqlPublicationTest
     queue_.producer.arguments = &arguments_;
     queue_.producer.frontier = frontier_.data();
     queue_.producer.queue_count = frontier_.size();
+    command_words_.fill(0xCDCDCDCD);
+    commands_.memory.contents =
+        iree_make_byte_span(command_words_.data(), sizeof(command_words_));
+    commands_.address = 0xABCD00008000;
+    commands_.capacity = sizeof(command_words_);
     for (auto& packet : packets_) {
       packet.words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
     }
@@ -251,8 +256,12 @@ class AqlPublicationTest
   iree_atomic_int64_t write_index_ = 0;
   // Native notification destination.
   uint64_t doorbell_ = 0;
-  // Zero-argument native function needs no argument backing.
+  // Argument allocation metadata with backing supplied by individual tests.
   iree_hal_amd_gpu_byte_storage_t arguments_ = {};
+  // Command allocation metadata retained through queue teardown.
+  iree_hal_amd_gpu_byte_storage_t commands_ = {};
+  // Command allocation backing retained through queue teardown.
+  std::array<uint32_t, 512> command_words_ = {};
   // Queue's accepted causal prefix.
   std::array<uint64_t, 2> frontier_ = {};
   // Immutable zero-scratch function metadata.
@@ -809,12 +818,6 @@ TEST_P(AqlPublicationTest, ScalarCommandsUseRetirementSlotsWithFullArguments) {
         iree_hal_amd_gpu_control_rmw({.operand = 13, .width = width}));
   }
   controls.push_back(iree_hal_amd_gpu_control_timestamp());
-  std::array<uint32_t, 512> words;
-  words.fill(0xCDCDCDCD);
-  iree_hal_amd_gpu_byte_storage_t commands = {};
-  commands.memory.contents = iree_make_byte_span(words.data(), sizeof(words));
-  commands.address = 0xABCD00008000;
-  commands.capacity = sizeof(words);
   const uint32_t prefix = context_.target_info.topology.xcc_count > 1 ? 2 : 0;
   for (size_t i = 0; i < controls.size(); ++i) {
     SCOPED_TRACE(i);
@@ -830,7 +833,7 @@ TEST_P(AqlPublicationTest, ScalarCommandsUseRetirementSlotsWithFullArguments) {
       IREE_ASSERT_OK(status);
       EXPECT_EQ(queue_.producer.ring.reserved, 1u);
       EXPECT_EQ(arguments_.end, argument_bytes.size());
-      queue_.commands = &commands;
+      queue_.commands = &commands_;
     }
     ASSERT_EQ(
         iree_hal_amd_gpu_aql_publish_control(&queue_, submission, &status),
@@ -839,15 +842,16 @@ TEST_P(AqlPublicationTest, ScalarCommandsUseRetirementSlotsWithFullArguments) {
     const size_t slot = i + 1;
     const size_t offset =
         slot * IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
-    EXPECT_EQ(PacketAddress(slot, 2), commands.address + offset);
+    EXPECT_EQ(PacketAddress(slot, 2), commands_.address + offset);
     const uint32_t length = iree_hal_amd_gpu_control_word_count(controls[i]);
     EXPECT_EQ(packets_[slot].words[4], (1u << 23) | (prefix + length));
     const size_t address_word =
         offset / 4 + prefix +
         iree_hal_amd_gpu_control_address_word(controls[i]);
-    EXPECT_EQ(words[address_word], control_binding_.device_address + i * 8);
-    EXPECT_EQ(words[address_word + 1], 0u);
-    EXPECT_EQ(words[offset / 4 + prefix + length], 0xCDCDCDCDu);
+    EXPECT_EQ(command_words_[address_word],
+              control_binding_.device_address + i * 8);
+    EXPECT_EQ(command_words_[address_word + 1], 0u);
+    EXPECT_EQ(command_words_[offset / 4 + prefix + length], 0xCDCDCDCDu);
     EXPECT_EQ(issued_[slot].arguments, argument_bytes.size());
     EXPECT_EQ(arguments_.end, argument_bytes.size());
   }
@@ -890,13 +894,7 @@ TEST_P(AqlPublicationTest, CooperativeCommandsAndKernargsHaveDistinctOwners) {
   EXPECT_EQ(queue_.producer.ring.reserved, 0u);
   EXPECT_EQ(arguments_.end, 0u);
 
-  std::array<uint32_t, 512> words;
-  words.fill(0xCDCDCDCD);
-  iree_hal_amd_gpu_byte_storage_t commands = {};
-  commands.memory.contents = iree_make_byte_span(words.data(), sizeof(words));
-  commands.address = 0xABCD00008000;
-  commands.capacity = sizeof(words);
-  queue_.commands = &commands;
+  queue_.commands = &commands_;
   const uint32_t prefix = context_.target_info.topology.xcc_count > 1 ? 2 : 0;
   std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
   for (size_t i = 0; i < 2; ++i) {
@@ -904,12 +902,13 @@ TEST_P(AqlPublicationTest, CooperativeCommandsAndKernargsHaveDistinctOwners) {
     Publish(Semaphore(), waits);
     const size_t offset = i * IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
     const size_t argument_offset = i * IREE_HAL_AMD_GPU_AQL_ARGUMENT_ALIGNMENT;
-    EXPECT_EQ(PacketAddress(i * 2, 2), commands.address + offset);
+    EXPECT_EQ(PacketAddress(i * 2, 2), commands_.address + offset);
     EXPECT_EQ(PacketAddress(i * 2 + 1, 10),
               arguments_.address + argument_offset);
     EXPECT_EQ(packets_[i * 2].words[4], (1u << 23) | (prefix + 16));
     iree_hal_amd_gpu_grid_sync_t grid;
-    std::memcpy(&grid, words.data() + offset / 4 + prefix + 4, sizeof(grid));
+    std::memcpy(&grid, command_words_.data() + offset / 4 + prefix + 4,
+                sizeof(grid));
     EXPECT_EQ(grid.workgroup_count, i + 2);
     EXPECT_EQ(grid.total_workitem_count, (i + 2) * 64);
     uint64_t hidden_pointer = 0;
@@ -918,8 +917,9 @@ TEST_P(AqlPublicationTest, CooperativeCommandsAndKernargsHaveDistinctOwners) {
     EXPECT_EQ(hidden_pointer, queue_.grid.address);
     EXPECT_EQ(arguments_.end, argument_offset + 8);
   }
-  EXPECT_EQ(words[2 * IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE / 4],
-            0xCDCDCDCDu);
+  EXPECT_EQ(
+      command_words_[2 * IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE / 4],
+      0xCDCDCDCDu);
 }
 
 TEST_P(AqlPublicationTest,
@@ -937,24 +937,19 @@ TEST_P(AqlPublicationTest,
   request_.flags |= IREE_HAL_DISPATCH_FLAG_COOPERATIVE;
   queue_.grid.memory = reinterpret_cast<amdf_memory_t*>(&queue_.grid);
   queue_.grid.address = 0x123400005000;
-  std::array<uint32_t, 512> words;
-  words.fill(0xCDCDCDCD);
-  iree_hal_amd_gpu_byte_storage_t commands = {};
-  commands.memory.contents = iree_make_byte_span(words.data(), sizeof(words));
-  commands.address = 0xABCD00008000;
-  commands.capacity = sizeof(words);
-  queue_.commands = &commands;
+  queue_.commands = &commands_;
   const uint32_t prefix = context_.target_info.topology.xcc_count > 1 ? 2 : 0;
   std::vector<iree_hal_amd_gpu_aql_wait_t> waits;
   for (size_t i = 0; i < 2; ++i) {
     request_.geometry.workgroup_count[0] = i + 2;
     Publish(Semaphore(), waits);
     const size_t offset = i * IREE_HAL_AMD_GPU_AQL_INDIRECT_COMMAND_BYTE_STRIDE;
-    EXPECT_EQ(PacketAddress(i * 2, 2), commands.address + offset);
+    EXPECT_EQ(PacketAddress(i * 2, 2), commands_.address + offset);
     EXPECT_EQ(PacketAddress(i * 2 + 1, 10), 0u);
     EXPECT_EQ(packets_[i * 2].words[4], (1u << 23) | (prefix + 16));
     iree_hal_amd_gpu_grid_sync_t grid;
-    std::memcpy(&grid, words.data() + offset / 4 + prefix + 4, sizeof(grid));
+    std::memcpy(&grid, command_words_.data() + offset / 4 + prefix + 4,
+                sizeof(grid));
     EXPECT_EQ(grid.multi_grid_sync, 0u);
     EXPECT_EQ(grid.grid_ordinal, 0u);
     EXPECT_EQ(grid.grid_count, 1u);
@@ -967,7 +962,7 @@ TEST_P(AqlPublicationTest,
     EXPECT_EQ(issued_[i].arguments, 0u);
     EXPECT_EQ(arguments_.end, 0u);
     EXPECT_EQ(argument_bytes, expected_arguments);
-    EXPECT_EQ(words[offset / 4 + prefix + 16], 0xCDCDCDCDu);
+    EXPECT_EQ(command_words_[offset / 4 + prefix + 16], 0xCDCDCDCDu);
   }
 }
 
