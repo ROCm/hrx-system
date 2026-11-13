@@ -878,9 +878,9 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
            sizeof(*tsan_config));
   }
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_amd_gpu_code_publish(executable->context, options->code_queue,
-                                      variant->memory, &variant->upload);
+    status = iree_hal_amd_gpu_code_publish(
+        executable->context, options->code_queue,
+        options->code_publication_timeout, variant->memory, &variant->upload);
   }
   if (iree_status_is_ok(status) && !variant_ordinal) {
     status = iree_hal_amd_gpu_executable_initialize_contracts(

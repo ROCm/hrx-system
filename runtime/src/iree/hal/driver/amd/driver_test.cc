@@ -507,6 +507,24 @@ TEST_F(DriverTest, NumericIdsCannotBypassPassiveQualification) {
   }
 }
 
+TEST_F(DriverTest, CodePublicationTimeoutAcceptsMilliseconds) {
+  IREE_ASSERT_OK(CreateDriver());
+  auto params = iree_hal_device_create_params_default();
+  params.proactor_pool = proactors_;
+  const iree_string_pair_t option = {
+      .key = IREE_SV("code_publication_timeout_ms"),
+      .value = IREE_SV("17"),
+  };
+  iree_hal_device_t* device = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_driver_create_device_by_id(driver_, 2, 1, &option, &params,
+                                          iree_allocator_system(), &device));
+  EXPECT_EQ(device, nullptr);
+  EXPECT_EQ(native_.activation_count, 1u);
+  EXPECT_EQ(native_.activated.words[0], 2u);
+}
+
 TEST_F(DriverTest, CdnaQualifiesNativeProtocolsIndependentlyOfArchitecture) {
   auto& endpoints = NativeInstance::current->endpoints;
   for (auto& endpoint : endpoints) {

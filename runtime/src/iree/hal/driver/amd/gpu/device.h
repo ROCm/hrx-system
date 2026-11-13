@@ -41,6 +41,10 @@ typedef struct iree_hal_amd_gpu_device_options_t {
   // records; KERNEL queues retain native event/status observation.
   // Device creation with completion_wait_flags=NONE disables this budget.
   uint32_t completion_spin_ns;
+  // Per-call synchronous code-publication budget in milliseconds. The loader
+  // converts this to one absolute deadline before flushing or submitting any
+  // chunks. Zero permits only an immediate checked completion observation.
+  uint32_t code_publication_timeout_ms;
   // Software wait budget for native-stop ownership and stalled-cleanup report
   // threshold, in milliseconds. Expiry preserves unproven native ownership;
   // kernel calls and live CPU borrowers still must join. Zero reports at once.

@@ -71,10 +71,10 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
     offset += iree_align_uint64(code[i].data_length, 256);
   }
   IREE_RETURN_IF_ERROR(status);
-  return out_pool->code_upload
-             ? iree_ok_status()
-             : iree_hal_amd_gpu_code_publish(context, NULL, &out_pool->code,
-                                             &out_pool->code_upload);
+  return out_pool->code_upload ? iree_ok_status()
+                               : iree_hal_amd_gpu_code_publish(
+                                     context, NULL, iree_infinite_timeout(),
+                                     &out_pool->code, &out_pool->code_upload);
 }
 
 void iree_hal_amd_gpu_pm4_program_pool_deinitialize(

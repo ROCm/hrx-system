@@ -17,10 +17,19 @@
 enum {
   IREE_HAL_AMD_GPU_CODE_QUEUE_CAPACITY = 65536,
   IREE_HAL_AMD_GPU_CODE_QUEUE_COMMAND_OFFSET = 64,
+  // Maximum native wait between authoritative publication-status queries.
+  IREE_HAL_AMD_GPU_CODE_QUEUE_RECHECK_MILLISECONDS = 5,
   // Leaves room for the single-XCC prefix, native write header, cache action,
   // completion, and KERNEL alignment. The write body also fits PRED_EXEC.
   IREE_HAL_AMD_GPU_CODE_QUEUE_DATA_WORDS = 16320,
 };
+
+static uint64_t iree_hal_amd_gpu_code_queue_timeout_nanoseconds(
+    iree_timeout_t timeout) {
+  return iree_timeout_is_infinite(timeout)
+             ? AMDF_TIMEOUT_INFINITE
+             : (uint64_t)iree_timeout_as_duration_ns(timeout);
+}
 
 struct iree_hal_amd_gpu_code_queue_t {
   // Host metadata allocator; publication allocates no host storage.
@@ -273,7 +282,7 @@ static amdf_status_t iree_hal_amd_gpu_code_queue_submit_user(
 }
 
 static iree_status_t iree_hal_amd_gpu_code_queue_wait(
-    iree_hal_amd_gpu_code_queue_t* queue) {
+    iree_hal_amd_gpu_code_queue_t* queue, iree_timeout_t timeout) {
   const amdf_native_event_t notification =
       iree_hal_amd_fabric_event_native_handle(&queue->kernel_event);
   if (queue->kernel && amdf_status_is_ok(queue->failure)) {
@@ -294,10 +303,6 @@ static iree_status_t iree_hal_amd_gpu_code_queue_wait(
           retired >= queue->kernel->last_submission) {
         break;
       }
-      // The private event is wakeable by close. Holding the loading mutex
-      // across an infinite native fence wait would deadlock terminal stop.
-      IREE_RETURN_IF_ERROR(iree_async_event_native_wait(
-          &queue->kernel_event, iree_infinite_timeout()));
     } else {
       iree_hal_amd_gpu_aql_signal_t* signal =
           (void*)queue->control.contents.data;
@@ -309,8 +314,34 @@ static iree_status_t iree_hal_amd_gpu_code_queue_wait(
       if (completed) {
         break;
       }
-      queue->failure =
-          queue->context->gpu->event_wait(queue->event, AMDF_TIMEOUT_INFINITE);
+    }
+    if (iree_timeout_as_duration_ns(timeout) == 0) {
+      queue->failure = amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED);
+      break;
+    }
+    const iree_timeout_t wait_timeout = iree_timeout_min(
+        timeout,
+        iree_make_timeout_ms(IREE_HAL_AMD_GPU_CODE_QUEUE_RECHECK_MILLISECONDS));
+    if (queue->kernel) {
+      // The private event is wakeable by close. Each expiry returns to the
+      // authoritative native retirement query without resubmitting work.
+      iree_status_t wait_status =
+          iree_async_event_native_wait(&queue->kernel_event, wait_timeout);
+      if (iree_status_is_deadline_exceeded(wait_status)) {
+        iree_status_free(wait_status);
+        continue;
+      }
+      if (!iree_status_is_ok(wait_status)) {
+        return wait_status;
+      }
+    } else {
+      queue->failure = queue->context->gpu->event_wait(
+          queue->event,
+          iree_hal_amd_gpu_code_queue_timeout_nanoseconds(wait_timeout));
+      if (queue->failure ==
+          amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED)) {
+        queue->failure = AMDF_STATUS_OK;
+      }
     }
   }
   return IREE_HAL_AMD_STATUS_FROM_AMDF(queue->failure,
@@ -318,9 +349,10 @@ static iree_status_t iree_hal_amd_gpu_code_queue_wait(
 }
 
 iree_status_t iree_hal_amd_gpu_code_queue_publish(
-    iree_hal_amd_gpu_code_queue_t* queue, iree_hal_amd_fabric_memory_t* memory,
-    iree_const_byte_span_t contents) {
+    iree_hal_amd_gpu_code_queue_t* queue, iree_timeout_t timeout,
+    iree_hal_amd_fabric_memory_t* memory, iree_const_byte_span_t contents) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_convert_timeout_to_absolute(&timeout);
   uint64_t address = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, IREE_HAL_AMD_STATUS_FROM_AMDF(
@@ -391,7 +423,7 @@ iree_status_t iree_hal_amd_gpu_code_queue_publish(
           queue, (uint32_t)(words - begin));
     }
     accepted = amdf_status_is_ok(queue->failure);
-    status = iree_hal_amd_gpu_code_queue_wait(queue);
+    status = iree_hal_amd_gpu_code_queue_wait(queue, timeout);
     if (iree_status_is_ok(status)) {
       accepted = false;
       offset += count * 4;

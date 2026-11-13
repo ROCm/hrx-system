@@ -37,9 +37,11 @@ iree_status_t iree_hal_amd_gpu_code_queue_allocate(
 // native command was accepted without proven retirement, this owner takes
 // memory's existing handles before the failed executable can roll back. Those
 // handles remain owned until native stop; subsequent publication is rejected.
+// |timeout| is converted once to an absolute deadline before submitting the
+// first chunk and applies to the complete synchronous publication.
 iree_status_t iree_hal_amd_gpu_code_queue_publish(
-    iree_hal_amd_gpu_code_queue_t* queue, iree_hal_amd_fabric_memory_t* memory,
-    iree_const_byte_span_t contents);
+    iree_hal_amd_gpu_code_queue_t* queue, iree_timeout_t timeout,
+    iree_hal_amd_fabric_memory_t* memory, iree_const_byte_span_t contents);
 
 // Closes publication and wakes the loading caller without claiming native
 // access cessation. NULL represents mapped PM4 code needing no private queue.

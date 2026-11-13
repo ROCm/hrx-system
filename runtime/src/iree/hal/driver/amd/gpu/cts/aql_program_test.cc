@@ -59,7 +59,8 @@ class AqlProgramTest : public GpuNativeTest,
         AMDF_QUEUE_PUBLICATION_MODE_USER, &control_policy_,
         iree_allocator_system(), &code_));
     IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_publish(
-        code_, &pool_.code, iree_const_byte_span_empty()));
+        code_, iree_infinite_timeout(), &pool_.code,
+        iree_const_byte_span_empty()));
     IREE_ASSERT_OK(iree_hal_amd_fabric_memory_allocate(
         context_->api, &control_policy_,
         4096 + output_count() * sizeof(uint32_t), 256, context_->event_sink,

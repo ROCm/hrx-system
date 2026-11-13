@@ -172,6 +172,8 @@ typedef struct iree_hal_amd_gpu_device_t {
   } programs;
   // Independent compute-native upload and instruction publication owner.
   iree_hal_amd_gpu_code_queue_t* code_queue;
+  // Relative per-publication budget copied into each synchronous load call.
+  iree_timeout_t code_publication_timeout;
   // Lazy queue-local private storage shares immutable placement/geometry facts.
   struct {
     // Native scratch slot capacity and register layout.
@@ -244,6 +246,7 @@ void iree_hal_amd_gpu_device_options_initialize(
       .queue_count = 4,
       .host_numa_node = UINT32_MAX,
       .completion_spin_ns = 1000000000,
+      .code_publication_timeout_ms = 60000,
       .failure_timeout_ms = 30000,
       .queue = {.ring_byte_length = 0,
                 .retirement_capacity = 256,
@@ -1168,6 +1171,8 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                                &device->resource);
   device->host_allocator = host_allocator;
   device->context = context;
+  device->code_publication_timeout =
+      iree_make_timeout_ms(options->code_publication_timeout_ms);
   iree_slim_mutex_initialize(&device->cooperative.mutex);
   device->command_type = context->families[family_ordinal].command_type;
   device->queue_options.publication_mode = publication_mode;
@@ -1514,11 +1519,13 @@ iree_status_t iree_hal_amd_gpu_device_create(
       aql ? &device->programs.aql.code_upload
           : &device->programs.pm4.code_upload;
   if (*upload) {
-    status = iree_hal_amd_gpu_code_publish(context, device->code_queue, code,
-                                           upload);
+    status = iree_hal_amd_gpu_code_publish(context, device->code_queue,
+                                           device->code_publication_timeout,
+                                           code, upload);
   } else if (device->code_queue) {
-    status = iree_hal_amd_gpu_code_queue_publish(device->code_queue, code,
-                                                 iree_const_byte_span_empty());
+    status = iree_hal_amd_gpu_code_queue_publish(
+        device->code_queue, device->code_publication_timeout, code,
+        iree_const_byte_span_empty());
   }
   if (iree_status_is_ok(status)) {
     *out_device = base;
@@ -1643,6 +1650,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .native_family_ordinal = device->memory.families[0].queue_family_ordinal,
       .memory = &memory,
       .code_queue = device->code_queue,
+      .code_publication_timeout = device->code_publication_timeout,
       .notification = device->memory.notification,
       .frontier_tracker = device->topology.frontier.tracker,
       .feedback = device->feedback.context ? &device->feedback : NULL,

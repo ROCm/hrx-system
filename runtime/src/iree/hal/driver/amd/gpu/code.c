@@ -74,9 +74,10 @@ iree_status_t iree_hal_amd_gpu_code_allocate(
 
 iree_status_t iree_hal_amd_gpu_code_publish(
     iree_hal_amd_gpu_context_t* context, iree_hal_amd_gpu_code_queue_t* queue,
-    iree_hal_amd_fabric_memory_t* memory,
+    iree_timeout_t timeout, iree_hal_amd_fabric_memory_t* memory,
     iree_hal_amd_gpu_code_upload_t** upload_ptr) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_convert_timeout_to_absolute(&timeout);
   iree_hal_amd_gpu_code_upload_t* upload = *upload_ptr;
   *upload_ptr = NULL;
   iree_const_byte_span_t contents = iree_const_byte_span_empty();
@@ -93,7 +94,8 @@ iree_status_t iree_hal_amd_gpu_code_publish(
         "publish code host writes");
   }
   if (iree_status_is_ok(status) && queue) {
-    status = iree_hal_amd_gpu_code_queue_publish(queue, memory, contents);
+    status =
+        iree_hal_amd_gpu_code_queue_publish(queue, timeout, memory, contents);
   }
   iree_hal_amd_gpu_code_upload_free(upload);
   IREE_TRACE_ZONE_END(z0);
