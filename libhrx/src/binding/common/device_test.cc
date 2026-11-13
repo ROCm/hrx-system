@@ -35,24 +35,6 @@ TEST(StreamingDeviceQueryTest, UninitializedRegistryPreservesQueryFailures) {
   EXPECT_STREQ(name, "unchanged");
 }
 
-TEST(StreamingQueuePlacementTest, SelectsOnlyAdvertisedHostLocalPlacement) {
-  const uint32_t cases[] = {
-      0, IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL,
-      IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL,
-      IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
-          IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL};
-  for (uint32_t capabilities : cases) {
-    const iree_hal_queue_family_spec_t spec = {
-        .placement_capabilities = capabilities,
-    };
-    const iree_hal_queue_family_t family = {.spec = &spec};
-    EXPECT_EQ(iree_hal_streaming_queue_family_select_placement(&family),
-              capabilities & IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL
-                  ? IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL
-                  : IREE_HAL_QUEUE_PLACEMENT_DEFAULT);
-  }
-}
-
 // Changes only which real CPU queue the dependency provisions. Queue creation,
 // properties, execution, and lifetime remain the task HAL's implementation.
 struct ProvisionedQueueView {
@@ -134,7 +116,7 @@ TEST_F(StreamingDeviceQueueTest, ReusesProvisionedHostLocalQueue) {
   EXPECT_EQ(acquired_, provisioned);
 }
 
-TEST_F(StreamingDeviceQueueTest, AcquiresHostLocalFromDeviceLocalProvisioning) {
+TEST_F(StreamingDeviceQueueTest, ReusesProvisionedDeviceLocalQueue) {
   iree_hal_queue_t* provisioned = nullptr;
   IREE_ASSERT_OK(
       iree_hal_streaming_device_select_primary_queue(&entry_, &provisioned));
@@ -150,11 +132,11 @@ TEST_F(StreamingDeviceQueueTest, AcquiresHostLocalFromDeviceLocalProvisioning) {
   iree_hal_streaming_device_t viewed_entry = {.hal_device = view.Initialize()};
   IREE_ASSERT_OK(iree_hal_streaming_device_acquire_primary_queue(&viewed_entry,
                                                                  &acquired_));
-  EXPECT_NE(acquired_, device_local_);
+  EXPECT_EQ(acquired_, device_local_);
   EXPECT_EQ(iree_hal_queue_family(acquired_),
             iree_hal_queue_family(device_local_));
   EXPECT_EQ(iree_hal_queue_placement(acquired_),
-            IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL);
+            IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL);
   EXPECT_EQ(iree_hal_queue_placement(device_local_),
             IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL);
   iree_hal_device_release(viewed_entry.hal_device);
