@@ -341,3 +341,95 @@ func.def target(@target) @reciprocal_afn(%input: f32) -> (f32) {
   %result = scalar.divf<afn> %numerator, %input : f32
   func.return %result : f32
 }
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @vector_f32x17_arithmetic(%lhs: vector<17xf32>, %rhs: vector<17xf32>) -> (vector<17xf32>, vector<17xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<17xf32>
+  %difference = vector.subf %sum, %rhs : vector<17xf32>
+  func.return %sum, %difference : vector<17xf32>, vector<17xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32x17_arithmetic(%lhs: reg<aie2p.vec256 x4>, %rhs: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>, reg<aie2p.vec256 x4>) asm {
+  %10 = slice %lhs[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %11 = vmov.vector512.to.accumulator512 %10
+  %12 = slice %lhs[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %13 = vmov.vector512.to.accumulator512 %12
+  %14 = concat(%11, %13, %11, %13) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %15 = slice %rhs[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %16 = vmov.vector512.to.accumulator512 %15
+  %17 = slice %rhs[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %18 = vmov.vector512.to.accumulator512 %17
+  %19 = concat(%16, %18, %16, %18) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %20 = mova.i32 60
+  %21 = vadd.f32x64 %14, %19, %20
+  %22 = slice %21[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %23 = vmov.accumulator512.to.vector512 %22
+  %24 = slice %21[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %25 = vmov.accumulator512.to.vector512 %24
+  %sum = concat(%23, %25) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %28 = vmov.vector512.to.accumulator512 %23
+  %30 = vmov.vector512.to.accumulator512 %25
+  %31 = concat(%28, %30, %28, %30) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %36 = concat(%16, %18, %16, %18) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %38 = vsub.f32x64 %31, %36, %20
+  %39 = slice %38[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %40 = vmov.accumulator512.to.vector512 %39
+  %41 = slice %38[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %42 = vmov.accumulator512.to.vector512 %41
+  %difference = concat(%40, %42) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %sum, %difference
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @vector_f32x32_arithmetic(%lhs: vector<32xf32>, %rhs: vector<32xf32>) -> (vector<32xf32>, vector<32xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<32xf32>
+  %difference = vector.subf %sum, %rhs : vector<32xf32>
+  func.return %sum, %difference : vector<32xf32>, vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32x32_arithmetic(%lhs: reg<aie2p.mbms x2>, %rhs: reg<aie2p.mbms x2>) -> (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) asm {
+  %10 = concat(%lhs, %lhs) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %11 = concat(%rhs, %rhs) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %12 = mova.i32 60
+  %13 = vadd.f32x64 %10, %11, %12
+  %14 = slice %13[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %sum = copy %14 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  %16 = concat(%sum, %sum) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %17 = concat(%rhs, %rhs) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %19 = vsub.f32x64 %16, %17, %12
+  %20 = slice %19[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %difference = copy %20 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  return %sum, %difference
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @vector_f32x33_arithmetic(%lhs: vector<33xf32>, %rhs: vector<33xf32>) -> (vector<33xf32>, vector<33xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<33xf32>
+  %difference = vector.subf %sum, %rhs : vector<33xf32>
+  func.return %sum, %difference : vector<33xf32>, vector<33xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32x33_arithmetic(%lhs: reg<aie2p.mbms x4>, %rhs: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
+  %10 = mova.i32 60
+  %sum = vadd.f32x64 %lhs, %rhs, %10
+  %difference = vsub.f32x64 %sum, %rhs, %10
+  return %sum, %difference
+}

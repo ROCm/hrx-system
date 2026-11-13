@@ -21,10 +21,12 @@ from loom.target.contracts import (
     DescriptorEmitForm,
     DescriptorResultType,
     EmitDescriptorOp,
+    EmitRegisterConcat,
     EmitRegisterCopy,
     EmitRegisterSlice,
     ResultTypeBinding,
     ValueRef,
+    Vector,
     descriptor_by_key,
 )
 from loom.target.low_descriptors import Descriptor
@@ -62,6 +64,97 @@ def _constant_emit(
         immediates={"i": value},
         form=DescriptorEmitForm.CONST,
     )
+
+
+def emit_f32_full_accumulator_operand(
+    source: ValueRef,
+    prefix: str,
+    maximum_lane_count: int,
+    short_accumulator: bool,
+    emits: list[ContractEmit],
+) -> ValueRef:
+    """Places the observed lanes in a full arithmetic accumulator."""
+    if maximum_lane_count > 32:
+        return source
+    if maximum_lane_count == 32 or short_accumulator:
+        parts = [source] * (2 if maximum_lane_count == 32 else 4)
+    else:
+        parts = []
+        for ordinal in range(1 if maximum_lane_count <= 16 else 2):
+            packet = source
+            if maximum_lane_count > 16:
+                packet = ValueRef.temporary(f"{prefix}_vector_{ordinal}")
+                emits.append(
+                    EmitRegisterSlice(
+                        source=source,
+                        result=packet,
+                        unit_offset=2 * ordinal,
+                        unit_count=2,
+                    )
+                )
+            converted = ValueRef.temporary(f"{prefix}_accumulator_{ordinal}")
+            emits.append(
+                _op_emit(
+                    _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512"),
+                    operands={"src": packet},
+                    results={"dst": converted},
+                    result_types={"dst": DescriptorResultType()},
+                )
+            )
+            parts.append(converted)
+        parts *= 4 // len(parts)
+    result = ValueRef.temporary(f"{prefix}_accumulator")
+    emits.append(
+        EmitRegisterConcat(
+            sources=parts,
+            result=result,
+            result_type=Vector("f32", lanes=64),
+        )
+    )
+    return result
+
+
+def emit_f32_full_accumulator_result(
+    source: ValueRef,
+    result: ValueRef,
+    maximum_lane_count: int,
+    short_accumulator: bool,
+    emits: list[ContractEmit],
+) -> None:
+    """Binds the observed prefix of a full arithmetic accumulator."""
+
+    if maximum_lane_count == 32 or short_accumulator:
+        prefix = ValueRef.temporary("result_prefix")
+        emits.extend(
+            (
+                EmitRegisterSlice(
+                    source=source,
+                    result=prefix,
+                    unit_count=2 if maximum_lane_count == 32 else 1,
+                ),
+                EmitRegisterCopy(source=prefix, result=result),
+            )
+        )
+        return
+    packets = []
+    for ordinal in range(1 if maximum_lane_count <= 16 else 2):
+        unit = ValueRef.temporary(f"result_unit_{ordinal}")
+        packet = ValueRef.temporary(f"result_vector_{ordinal}")
+        emits.append(
+            EmitRegisterSlice(
+                source=source, result=unit, unit_offset=ordinal, unit_count=1
+            )
+        )
+        emits.append(
+            _op_emit(
+                _descriptor("amd.xdna.aie2p.move.accumulator512.to.vector512"),
+                operands={"src": unit},
+                results={"dst": packet},
+                result_types={"dst": DescriptorResultType()},
+            )
+        )
+        packets.append(packet)
+    emits.append(EmitRegisterConcat(sources=packets, result=result))
 
 
 class F32AccumulatorProgram:

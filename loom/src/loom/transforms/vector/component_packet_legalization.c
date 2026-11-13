@@ -18,6 +18,7 @@
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/packet_load.h"
 #include "loom/transforms/vector/packet_plan.h"
+#include "loom/util/fact_origin.h"
 
 #define LOOM_VECTOR_COMPONENT_INDEX_INVALID UINT32_MAX
 
@@ -68,6 +69,10 @@ typedef struct loom_vector_component_record_t {
   bool escapes;
   // True when the operation only aliases the row-major shape of its operand.
   bool shape_alias;
+  // The exact origin consumed by the authored contract requires packets.
+  bool origin_requires_packets;
+  // This union contains a member requiring whole-packet producer provenance.
+  bool union_requires_provenance;
 } loom_vector_component_record_t;
 
 typedef struct loom_vector_component_producer_closure_t {
@@ -191,6 +196,28 @@ static uint32_t loom_vector_component_expansion_op_limit(
   return policy->maximum_component_expansion_op_count != 0
              ? policy->maximum_component_expansion_op_count
              : LOOM_VECTOR_COMPONENT_PACKET_OP_LIMIT;
+}
+
+// Keeps candidate widths whose packet expansion fits the existing component
+// budget. Provenance closures use this bound before merging so rejected unions
+// remain separate bounded components connected through retained packets.
+static uint64_t loom_vector_component_bounded_candidates(
+    const loom_target_vector_packet_policy_t* policy, uint32_t lane_count,
+    uint32_t member_count, uint64_t candidate_bits) {
+  const uint32_t packet_count_limit =
+      loom_vector_component_expansion_op_limit(policy) / member_count;
+  for (uint8_t i = 0; i < policy->native_lane_count_count; ++i) {
+    const uint64_t candidate_bit = (uint64_t)1u << i;
+    if ((candidate_bits & candidate_bit) == 0) {
+      continue;
+    }
+    const uint32_t packet_count =
+        (lane_count - 1u) / policy->native_lane_counts[i] + 1u;
+    if (packet_count > packet_count_limit) {
+      candidate_bits &= ~candidate_bit;
+    }
+  }
+  return candidate_bits;
 }
 
 // A bitcast that only changes static vector shape is a row-major alias of the
@@ -371,6 +398,42 @@ static uint32_t loom_vector_component_direct_producer_record(
              : LOOM_VECTOR_COMPONENT_INDEX_INVALID;
 }
 
+// Preserves an authored native contract when packetizing its origin would
+// otherwise discard the whole-vector provenance it consumes. The exact-origin
+// fact names that producer directly, and dominance-order classification has
+// already retained its packet demand. An origin left authored needs no closure.
+static bool loom_vector_component_origin_requires_packets(
+    const loom_vector_component_plan_t* plan,
+    const loom_vector_component_record_t* record) {
+  if (record->blocked ||
+      !iree_any_bit_set(
+          record->authored_query_result.projection_flags,
+          LOOM_TARGET_CONTRACT_PROJECTION_FLAG_ROOT_PRODUCER_CLOSURE)) {
+    return false;
+  }
+  for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+    loom_value_fact_exact_lane_origin_t origin;
+    if (!loom_value_fact_table_query_exact_lane_origin(
+            plan->context->fact_table, plan->context->module,
+            loom_op_const_operands(record->op)[i], &origin)) {
+      continue;
+    }
+    const uint32_t producer_index =
+        loom_vector_component_record_for_value(plan, origin.source_value_id);
+    if (producer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+      continue;
+    }
+    const loom_vector_component_record_t* producer =
+        &plan->records[producer_index];
+    if (!producer->blocked && producer->demanded &&
+        producer->op->parent_block == record->op->parent_block &&
+        producer->lane_count == record->lane_count) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static iree_status_t loom_vector_component_classify_op(
     loom_vector_component_plan_t* plan, loom_op_t* op) {
   uint32_t lane_count = 0;
@@ -404,12 +467,15 @@ static iree_status_t loom_vector_component_classify_op(
       loom_module_value_has_type_uses(plan->context->module, result) ||
       record->authored_query_result.outcome ==
           LOOM_TARGET_CONTRACT_QUERY_INVALID_IR;
-  record->demanded = record->authored_query_result.outcome !=
-                         LOOM_TARGET_CONTRACT_QUERY_INVALID_IR &&
+  record->origin_requires_packets =
+      loom_vector_component_origin_requires_packets(plan, record);
+  record->demanded = record->origin_requires_packets ||
                      (record->authored_query_result.outcome !=
-                          LOOM_TARGET_CONTRACT_QUERY_LEGAL ||
-                      !loom_target_legalization_op_has_source_vector_carriers(
-                          plan->context, op));
+                          LOOM_TARGET_CONTRACT_QUERY_INVALID_IR &&
+                      (record->authored_query_result.outcome !=
+                           LOOM_TARGET_CONTRACT_QUERY_LEGAL ||
+                       !loom_target_legalization_op_has_source_vector_carriers(
+                           plan->context, op)));
   if (record->demanded) {
     ++plan->demanded_record_count;
   }
@@ -664,7 +730,17 @@ static loom_op_t* loom_vector_component_retained_load_for_operand(
   return *out_ordinal == LOOM_VALUE_ORDINAL_INVALID ? NULL : operand_op;
 }
 
-// Marks rejected roots that have no independent packet contract. Exact-lane
+static bool loom_vector_component_requires_producer_closure(
+    const loom_vector_component_record_t* record) {
+  const uint64_t independent_candidate_bits =
+      record->candidate_bits & ~record->producer_closure_candidate_bits;
+  return (independent_candidate_bits == 0 &&
+          record->producer_closure_candidate_bits != 0) ||
+         record->origin_requires_packets;
+}
+
+// Marks rejected roots and native roots whose selected contracts depend on
+// producer provenance that packetization must preserve. Exact-lane
 // provenance contracts must rebuild their producer chain at packet width;
 // slicing an authored aggregate would retain an offset into the wide origin
 // instead of establishing a complete packet-local origin.
@@ -678,12 +754,8 @@ static iree_status_t loom_vector_component_mark_producer_closures(
     if (!record->demanded || record->blocked) {
       continue;
     }
-    const uint64_t independent_candidate_bits =
-        record->candidate_bits & ~record->producer_closure_candidate_bits;
-    if (independent_candidate_bits == 0 &&
-        record->producer_closure_candidate_bits != 0) {
-      has_producer_closure = true;
-    }
+    has_producer_closure |=
+        loom_vector_component_requires_producer_closure(record);
     has_producer_closure |=
         loom_vector_component_result_requires_packet_retention(plan,
                                                                record_index);
@@ -706,12 +778,9 @@ static iree_status_t loom_vector_component_mark_producer_closures(
   for (uint32_t record_index = 0; record_index < plan->record_count;
        ++record_index) {
     const loom_vector_component_record_t* record = &plan->records[record_index];
-    const uint64_t independent_candidate_bits =
-        record->candidate_bits & ~record->producer_closure_candidate_bits;
     const bool provenance_demanded =
         record->demanded && !record->blocked &&
-        independent_candidate_bits == 0 &&
-        record->producer_closure_candidate_bits != 0;
+        loom_vector_component_requires_producer_closure(record);
     plan->producer_closures[record_index] =
         (loom_vector_component_producer_closure_t){
             .parent_index = record_index,
@@ -1028,6 +1097,9 @@ static void loom_vector_component_form(loom_vector_component_plan_t* plan) {
         loom_vector_component_find_root(plan, record_index);
     loom_vector_component_record_t* component_root =
         &plan->records[component_root_index];
+    component_root->union_requires_provenance |=
+        plan->producer_closures != NULL &&
+        plan->producer_closures[record_index].provenance_demanded;
     if (!component_root->demanded || component_root->blocked ||
         component_root->candidate_bits == 0) {
       continue;
@@ -1036,6 +1108,7 @@ static void loom_vector_component_form(loom_vector_component_plan_t* plan) {
     uint64_t candidate_bits = component_root->candidate_bits;
     uint32_t member_count = component_root->union_member_count;
     uint64_t insertion_ordinal = component_root->union_last_block_ordinal;
+    bool requires_provenance = component_root->union_requires_provenance;
     bool has_producer_root = false;
     bool can_merge = true;
     for (uint16_t i = 0; i < record->op->operand_count; ++i) {
@@ -1060,12 +1133,25 @@ static void loom_vector_component_form(loom_vector_component_plan_t* plan) {
         break;
       }
       candidate_bits &= producer_root->candidate_bits;
+      requires_provenance |= producer_root->union_requires_provenance;
       member_count += producer_root->union_member_count;
       insertion_ordinal =
           iree_max(insertion_ordinal, producer_root->union_last_block_ordinal);
     }
     if (!has_producer_root || !can_merge || candidate_bits == 0) {
       continue;
+    }
+
+    // Ordinary oversized graphs remain available to streaming loop lowering.
+    // Provenance closures must retain packets across component boundaries;
+    // rejecting their entire union would lose the native consumer contracts.
+    if (requires_provenance) {
+      candidate_bits = loom_vector_component_bounded_candidates(
+          plan->context->vector_packet_policy, record->lane_count, member_count,
+          candidate_bits);
+      if (candidate_bits == 0) {
+        continue;
+      }
     }
 
     if (loom_vector_component_root_has_early_external_use(
@@ -1111,6 +1197,7 @@ static void loom_vector_component_form(loom_vector_component_plan_t* plan) {
     component_root->candidate_bits = candidate_bits;
     component_root->union_member_count = member_count;
     component_root->union_last_block_ordinal = insertion_ordinal;
+    component_root->union_requires_provenance = requires_provenance;
   }
 }
 
@@ -1213,19 +1300,16 @@ static iree_status_t loom_vector_component_select(
     }
   }
 
+  const uint64_t candidate_bits = loom_vector_component_bounded_candidates(
+      policy, component->lane_count, component->member_count,
+      component->candidate_bits);
   for (uint8_t i = 0; i < policy->native_lane_count_count; ++i) {
-    if ((component->candidate_bits & ((uint64_t)1u << i)) == 0) {
+    if ((candidate_bits & ((uint64_t)1u << i)) == 0) {
       continue;
     }
     const uint32_t packet_lane_count = policy->native_lane_counts[i];
     const uint32_t packet_count =
         (component->lane_count - 1u) / packet_lane_count + 1u;
-    iree_host_size_t expanded_op_count = 0;
-    if (!iree_host_size_checked_mul(component->member_count, packet_count,
-                                    &expanded_op_count) ||
-        expanded_op_count > loom_vector_component_expansion_op_limit(policy)) {
-      continue;
-    }
     const bool candidate_has_tail =
         component->lane_count % packet_lane_count != 0;
     const bool selected_has_tail =

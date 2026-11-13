@@ -1,5 +1,28 @@
 // RUN: pass canonicalize
 
+// Class-only facts from relaxed arithmetic survive narrowing and extension.
+// The product is finite, but BF16 rounding can still overflow to infinity.
+func.def @narrow_product_classes(%left: vector<64xf32>, %right: vector<64xf32>, %seed: vector<64xf32>) -> (vector<64xi1>, vector<64xi1>) {
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %left, %right, %seed : vector<64xf32>
+  %narrow = vector.fptrunc<daz> %product : vector<64xf32> to vector<64xbf16>
+  %wide = vector.extf<daz> %narrow : vector<64xbf16> to vector<64xf32>
+  %is_nan = vector.isnanf %wide : vector<64xf32> -> vector<64xi1>
+  %is_inf = vector.isinff %wide : vector<64xf32> -> vector<64xi1>
+  func.return %is_nan, %is_inf : vector<64xi1>, vector<64xi1>
+}
+
+// ----
+func.def @narrow_product_classes(%left: vector<64xf32>, %right: vector<64xf32>, %seed: vector<64xf32>) -> (vector<64xi1>, vector<64xi1>) {
+  %product = vector.fmaf<nnan|ninf|nsz|afn> %left, %right, %seed : vector<64xf32>
+  %narrow = vector.fptrunc<daz> %product : vector<64xf32> to vector<64xbf16>
+  %wide = vector.extf<daz> %narrow : vector<64xbf16> to vector<64xf32>
+  %is_nan = vector.splati 0 : vector<64xi1>
+  %is_inf = vector.isinff %wide : vector<64xf32> -> vector<64xi1>
+  func.return %is_nan, %is_inf : vector<64xi1>, vector<64xi1>
+}
+
+// ====
+
 // Vector summaries retain one constant-time representability envelope for all
 // lanes. Complete byte domains convert exactly to F16, BF16, F32, and F64.
 func.def @integer_to_float_exact_formats(%signed: vector<8xi8>, %unsigned: vector<8xi8>) -> (i64, i64) {

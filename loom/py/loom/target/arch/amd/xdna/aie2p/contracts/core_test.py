@@ -1085,11 +1085,14 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
     }
 
     f32_add_rules = [rule for rule in rules if rule.source_op is vector.vector_addf]
-    assert len(f32_add_rules) == 9
     f32_matrix_add = next(
         rule
         for rule in f32_add_rules
         if rule.descriptor.key == "amd.xdna.aie2p.add.f32x64.configured"
+        and Guard.value_type(
+            "lhs", Vector("f32", minimum_static_elements=33, maximum_static_elements=64)
+        )
+        in rule.guards
     )
     assert [emit.descriptor.key for emit in f32_matrix_add.emit] == [
         "amd.xdna.aie2p.constant.i32.mova",

@@ -406,16 +406,42 @@ void loom_value_facts_eval_float_conversion(
         result_type, result_type, out_result_facts, out_result_facts);
   }
 
-  // A format's smallest nonzero value bounds every conversion result away
-  // from destination subnormals when the destination has enough exponent
-  // range. Flushing only adds signed zero, which is not subnormal either.
   loom_float_exact_format_t source_format;
   loom_float_exact_format_t result_format;
   if (loom_float_exact_format(source_type, &source_format) &&
-      loom_float_exact_format(result_type, &result_format) &&
-      source_format.minimum_normal_exponent - (source_format.precision - 1) >=
-          result_format.minimum_normal_exponent) {
-    out_result_facts->flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+      loom_float_exact_format(result_type, &result_format)) {
+    // Rounding cannot create a NaN. Finite values can overflow only when the
+    // destination has a smaller range and does not saturate to a finite value.
+    const bool finite_destination = result_type == LOOM_SCALAR_TYPE_F8E4M3;
+    const bool source_not_inf = source_type == LOOM_SCALAR_TYPE_F8E4M3 ||
+                                loom_value_facts_is_not_inf(*input_facts);
+    const bool result_not_inf =
+        finite_destination ||
+        (source_not_inf && source_format.maximum_finite_value <=
+                               result_format.maximum_finite_value);
+    loom_value_facts_assume_float_class(
+        out_result_facts, loom_value_facts_is_not_nan(*input_facts),
+        result_not_inf);
+    if (loom_value_facts_is_inf(*input_facts)) {
+      out_result_facts->flags |=
+          LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NOT_NAN |
+          LOOM_VALUE_FACT_NOT_SUBNORMAL |
+          (finite_destination ? LOOM_VALUE_FACT_FINITE | LOOM_VALUE_FACT_NOT_INF
+                              : LOOM_VALUE_FACT_INF);
+    }
+
+    // A source format's smallest possible nonzero value bounds the result
+    // away from destination subnormals. A known normal-or-zero source uses
+    // its normal threshold instead. Flushing only adds signed zero; permission
+    // to flush never removes the unflushed alternative from this bound.
+    const int32_t minimum_source_exponent =
+        source_format.minimum_normal_exponent -
+        (loom_value_facts_is_not_subnormal(*input_facts)
+             ? 0
+             : source_format.precision - 1);
+    if (minimum_source_exponent >= result_format.minimum_normal_exponent) {
+      out_result_facts->flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+    }
   }
 
   loom_scalar_type_set_t result_exact_types =
