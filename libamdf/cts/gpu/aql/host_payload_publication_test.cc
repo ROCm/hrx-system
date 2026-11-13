@@ -29,6 +29,17 @@ TEST_F(AqlDispatchTest, NonTemporalLocalPayloadPublicationAcrossReuse) {
        AMDF_USER_QUEUE_CAPABILITY_HOST_NON_TEMPORAL_PUBLICATION) == 0) {
     GTEST_SKIP() << "queue family has no non-temporal payload protocol";
   }
+  amdf_queue_family_placement_info_t placement = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(placement),
+  };
+  ASSERT_EQ(api_->device_query_queue_family_placement_info(
+                device_, family_.ordinal, &placement),
+            AMDF_STATUS_OK);
+  if ((placement.placement_capabilities &
+       AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL) == 0) {
+    GTEST_SKIP() << "live device has no LOCAL queue placement";
+  }
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(
       GpuUserQueueOptions{
