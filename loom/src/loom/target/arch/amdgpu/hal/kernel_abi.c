@@ -1008,6 +1008,29 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_verify_live_ins(
       continue;
     }
 
+    if (properties != NULL) {
+      const bool packed =
+          loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+              properties,
+              LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID);
+      const bool requires_packed =
+          source_info->role ==
+          LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_PACKED_WORKITEM_ID;
+      const bool requires_unpacked =
+          source_info->role ==
+              LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_WORKITEM_ID &&
+          source_info->dimension != 0;
+      if ((requires_packed && !packed) || (requires_unpacked && packed)) {
+        const loom_diagnostic_param_t params[] = {
+            loom_param_string(source_info->name),
+            loom_param_string(packed ? IREE_SV("packed") : IREE_SV("unpacked")),
+        };
+        IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_emit(
+            emitter, live_in_op, LOOM_ERR_AMDGPU_060, params,
+            IREE_ARRAYSIZE(params), NULL, 0, max_errors, result));
+      }
+    }
+
     const iree_host_size_t source_index = (iree_host_size_t)source_kind;
     if (source_info->role ==
         LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_ROLE_FIXED_SGPR) {

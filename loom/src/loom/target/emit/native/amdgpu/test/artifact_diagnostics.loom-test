@@ -82,3 +82,12 @@ low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @entr
   low.func.call noinline @invalid-helper() : ()
   return
 }
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// ERROR@+1: BACKEND/055 {export="local_entry", constraint="default kernel linkage"}
+low.kernel.def target<amdgpu.cdna3.core>(@target) linkage(dso_local) workgroup_size(64, 1, 1) @local_entry() asm {
+  return
+}

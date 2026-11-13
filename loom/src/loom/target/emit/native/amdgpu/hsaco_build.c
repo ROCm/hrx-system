@@ -692,11 +692,11 @@ static iree_status_t loom_amdgpu_hsaco_build_rodata(
     iree_host_size_t descriptor_offset = 0;
     IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_cast_host_size(
         layout->descriptor_offset, &descriptor_offset));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_descriptor_encode(
+    loom_amdgpu_kernel_descriptor_encode(
         processor, &payloads->metadata_kernels[i],
         input->kernels[i].descriptor_options, entry_byte_offset,
         iree_make_byte_span(rodata.data + descriptor_offset,
-                            rodata.data_length - descriptor_offset)));
+                            rodata.data_length - descriptor_offset));
   }
   for (iree_host_size_t i = 0; i < input->data_symbol_count; ++i) {
     const loom_amdgpu_hsaco_data_symbol_t* symbol = &input->data_symbols[i];

@@ -1320,6 +1320,23 @@ ERR_AMDGPU_059 = ErrorDef(
     fix_hint="Correct the kernel's abi_layout parameter contract",
 )
 
+# ERR_AMDGPU_060: Workitem live-in does not match the processor launch ABI.
+ERR_AMDGPU_060 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=60,
+    severity=Severity.ERROR,
+    summary="Workitem live-in does not match the processor launch ABI.",
+    message=(
+        "AMDGPU live-in '{source_name}' requires a different workitem layout; "
+        "the selected processor supplies {workitem_layout} workitem IDs"
+    ),
+    params=(
+        ErrorParam("source_name", ParamKind.STRING),
+        ErrorParam("workitem_layout", ParamKind.STRING),
+    ),
+    fix_hint="Use the selected processor's workitem live-in form",
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1376,4 +1393,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_057,
     ERR_AMDGPU_058,
     ERR_AMDGPU_059,
+    ERR_AMDGPU_060,
 )

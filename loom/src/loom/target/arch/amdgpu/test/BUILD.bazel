@@ -17,6 +17,7 @@ loom_check_test_suite(
         "call_policy.loom-test",
         "execution_choices.loom-test",
         "hal_abi_layout.loom-test",
+        "hal_abi_live_ins.loom-test",
         "integer_division.loom-test",
         "native_invocation_facts.loom-test",
         "register_transfer_diagnostics.loom-test",

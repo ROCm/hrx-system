@@ -25,7 +25,7 @@ typedef struct loom_amdgpu_native_preflight_t loom_amdgpu_native_preflight_t;
 typedef struct loom_amdgpu_kernel_record_options_t {
   // Verified ABI facts captured before allocation.
   const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify;
-  // Optional preflight result captured before kernel record construction.
+  // Preflight result retained by the admitted native function plan.
   const loom_amdgpu_native_preflight_t* preflight;
   // Transitive scalar-register floor required by the complete native program.
   uint32_t minimum_sgpr_count;
