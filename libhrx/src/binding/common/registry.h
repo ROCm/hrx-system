@@ -33,56 +33,6 @@ typedef enum iree_hal_streaming_symbol_type_e {
 } iree_hal_streaming_symbol_type_t;
 
 //===----------------------------------------------------------------------===//
-// Symbol tagging
-//===----------------------------------------------------------------------===//
-//
-// We use pointer tagging to quickly identify symbols returned from our registry
-// vs raw device pointers from the driver API. This avoids the slow lookup path
-// for device pointers.
-//
-// We use bits 48-55 (8 bits) which are safe across x86-64, ARM64, and RISC-V:
-// - x86-64: non-canonical address bits (must be sign-extended from bit 47)
-// - ARM64: top byte ignore (TBI) feature ignores bits 56-63
-// - RISC-V: similar to x86-64 canonical addressing
-//
-// This gives us 8 bits for tagging, which is plenty for our needs.
-
-#define IREE_HAL_STREAMING_SYMBOL_TAG_SHIFT 48
-#define IREE_HAL_STREAMING_SYMBOL_TAG_MASK 0x00FF000000000000ULL
-#define IREE_HAL_STREAMING_SYMBOL_TAG_VALUE 0x00EE000000000000ULL
-
-// Tags a symbol pointer to mark it as coming from our registry.
-static inline iree_hal_streaming_symbol_t* iree_hal_streaming_symbol_tag(
-    iree_hal_streaming_symbol_t* symbol) {
-  uintptr_t ptr = (uintptr_t)symbol;
-  // Clear bits 48-55 and set our tag value.
-  ptr = (ptr & 0xFF00FFFFFFFFFFFFULL) | IREE_HAL_STREAMING_SYMBOL_TAG_VALUE;
-  return (iree_hal_streaming_symbol_t*)ptr;
-}
-
-// Checks if a pointer has our tag.
-static inline bool iree_hal_streaming_symbol_has_tag(const void* ptr) {
-  return ((uintptr_t)ptr & IREE_HAL_STREAMING_SYMBOL_TAG_MASK) ==
-         IREE_HAL_STREAMING_SYMBOL_TAG_VALUE;
-}
-
-// Removes tag to get original pointer.
-static inline iree_hal_streaming_symbol_t* iree_hal_streaming_symbol_untag(
-    const void* ptr) {
-  uintptr_t untagged = (uintptr_t)ptr;
-  // Clear our tag bits (48-55).
-  untagged = untagged & 0xFF00FFFFFFFFFFFFULL;
-  // Restore sign extension: if bit 47 is set, set bits 48-63.
-  if (untagged & 0x0000800000000000ULL) {
-    untagged |= 0xFFFF000000000000ULL;
-  }
-  return (iree_hal_streaming_symbol_t*)untagged;
-}
-
-// Type for tagged symbol pointers to prevent accidental dereferencing.
-typedef uintptr_t iree_hal_streaming_tagged_symbol_ptr_t;
-
-//===----------------------------------------------------------------------===//
 // Symbol registry
 //===----------------------------------------------------------------------===//
 

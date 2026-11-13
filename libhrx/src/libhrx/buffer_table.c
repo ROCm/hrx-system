@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Buffer table: maps device/host pointers to hrx_buffer_t handles.
-// Unified implementation used by both libhrx and the HIP/CUDA bindings.
+// Unified implementation used by libhrx and the HIP binding.
 
 #include "buffer_table.h"
 

@@ -26,7 +26,7 @@ typedef enum iree_hal_streaming_function_attribute_flag_bits_e {
 } iree_hal_streaming_function_attribute_flag_bits_t;
 typedef uint32_t iree_hal_streaming_function_attribute_flags_t;
 
-// Function attributes cached for HIP and CUDA compatibility APIs.
+// Function attributes cached for the HIP compatibility APIs.
 typedef struct iree_hal_streaming_function_attributes_t {
   // Attributes populated from generic HAL function and device information.
   iree_hal_streaming_function_attribute_flags_t provided_flags;

@@ -437,15 +437,6 @@ iree_status_t iree_hal_streaming_memory_memcpy(
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
-// Performs P2P memory transfer.
-// Synchronization: stream or blocking (async if stream, sync if NULL stream).
-iree_status_t iree_hal_streaming_memcpy_peer(
-    iree_hal_streaming_context_t* dst_context,
-    iree_hal_streaming_deviceptr_t dst,
-    iree_hal_streaming_context_t* src_context,
-    iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
-    iree_hal_streaming_stream_t* stream);
-
 // Outside capture, registered sources and small pageable snapshots remain
 // asynchronous when a stream is supplied. Large pageable sources stay borrowed
 // through a blocking transfer. Device endpoints may belong to another context;

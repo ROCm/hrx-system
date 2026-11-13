@@ -445,24 +445,6 @@ iree_status_t iree_hal_streaming_mem_pool_allocate_buffer(
 // Device pool accessors
 //===----------------------------------------------------------------------===//
 
-iree_hal_streaming_mem_pool_t* iree_hal_streaming_device_default_mem_pool(
-    iree_hal_streaming_device_t* device) {
-  IREE_ASSERT_ARGUMENT(device);
-  iree_slim_mutex_lock(&device->primary_context_mutex);
-  iree_hal_streaming_mem_pool_t* pool = device->default_mem_pool;
-  iree_slim_mutex_unlock(&device->primary_context_mutex);
-  return pool;
-}
-
-iree_hal_streaming_mem_pool_t* iree_hal_streaming_device_mem_pool(
-    iree_hal_streaming_device_t* device) {
-  IREE_ASSERT_ARGUMENT(device);
-  iree_slim_mutex_lock(&device->primary_context_mutex);
-  iree_hal_streaming_mem_pool_t* pool = device->current_mem_pool;
-  iree_slim_mutex_unlock(&device->primary_context_mutex);
-  return pool;
-}
-
 iree_hal_streaming_mem_pool_t* iree_hal_streaming_device_retain_mem_pool(
     iree_hal_streaming_device_t* device) {
   IREE_ASSERT_ARGUMENT(device);

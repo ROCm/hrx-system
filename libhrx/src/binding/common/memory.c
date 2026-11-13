@@ -2806,52 +2806,6 @@ iree_status_t iree_hal_streaming_memory_memcpy(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_memcpy_peer(
-    iree_hal_streaming_context_t* dst_context,
-    iree_hal_streaming_deviceptr_t dst,
-    iree_hal_streaming_context_t* src_context,
-    iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
-    iree_hal_streaming_stream_t* stream) {
-  IREE_ASSERT_ARGUMENT(dst_context);
-  IREE_ASSERT_ARGUMENT(src_context);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  bool can_access = 0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_device_can_access_peer(src_context->device_ordinal,
-                                                    dst_context->device_ordinal,
-                                                    &can_access));
-  if (!can_access) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                             "P2P access not supported between devices %" PRIhsz
-                             " and %" PRIhsz,
-                             src_context->device_ordinal,
-                             dst_context->device_ordinal));
-  }
-
-  // Look up buffers from device pointers.
-  iree_hal_streaming_buffer_ref_t dst_ref;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(dst_context, dst, &dst_ref),
-      "resolving `dst` buffer ref %p", (void*)dst);
-  iree_hal_streaming_buffer_ref_t src_ref;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(src_context, src, &src_ref),
-      "resolving `src` buffer ref %p", (void*)src);
-
-  iree_status_t status =
-      stream ? iree_hal_streaming_enqueue_buffer_copy(stream, src_ref, dst_ref,
-                                                      size)
-             : iree_hal_streaming_direct_transfer_d2d(
-                   dst_context, src_ref.buffer->buffer, src_ref.offset,
-                   dst_ref.buffer->buffer, dst_ref.offset, size);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_streaming_enqueue_host_update(
     iree_hal_streaming_stream_t* stream, const void* src,
     iree_hal_streaming_buffer_ref_t dst_ref, iree_device_size_t size) {
