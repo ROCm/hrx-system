@@ -1717,6 +1717,88 @@ TEST_F(HipGraphMemoryApiTest, CapturedCopiesSharePublicEnableAndDeletion) {
   EXPECT_EQ(destination_, untouched);
 }
 
+TEST_F(HipGraphMemoryApiTest, PendingUpdatesChangeStagingAndDependencyOrder) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  for (auto& buffer : host_buffers_) {
+    ASSERT_EQ(hipSuccess, api_.allocate_host(&buffer, source_.size(),
+                                             hipHostMallocDefault));
+  }
+  std::memcpy(host_buffers_[0], replacement_.data(), replacement_.size());
+  std::memset(host_buffers_[1], 0, source_.size());
+  ASSERT_EQ(hipSuccess, api_.graph_create(&clone_, 0));
+  std::array<hipGraph_t, 2> graphs = {graph_, clone_};
+  std::array<std::array<hipGraphNode_t, 96>, 2> roots;
+  std::array<hipGraphNode_t, 2> uploads;
+  for (size_t i = 0; i < graphs.size(); ++i) {
+    for (auto& root : roots[i]) {
+      ASSERT_EQ(hipSuccess, api_.add_empty(&root, graphs[i], nullptr, 0));
+    }
+    // The first template needs hidden staging callbacks, while registered
+    // storage in the replacement is directly accessible to the device. Both
+    // describe the same public operations, with distinct physical node indices.
+    ASSERT_EQ(hipSuccess,
+              api_.add_copy_1d(&uploads[i], graphs[i],
+                               i == 0 ? roots[i].data() : nullptr,
+                               i == 0 ? roots[i].size() : 0, device_,
+                               i == 0 ? source_.data() : host_buffers_[0],
+                               source_.size(), hipMemcpyHostToDevice));
+    if (i == 1) {
+      std::array<hipGraphNode_t, 96> destinations;
+      destinations.fill(uploads[i]);
+      ASSERT_EQ(hipSuccess,
+                api_.add_dependencies(graphs[i], roots[i].data(),
+                                      destinations.data(), roots[i].size()));
+    }
+    hipGraphNode_t download = nullptr;
+    ASSERT_EQ(hipSuccess,
+              api_.add_copy_1d(&download, graphs[i], &uploads[i], 1,
+                               i == 0 ? destination_.data() : host_buffers_[1],
+                               device_, source_.size(), hipMemcpyDeviceToHost));
+  }
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  for (size_t i = 0; i < graphs.size(); ++i) {
+    const size_t next = i ^ 1;
+    HoldStreamAtGate();
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult result;
+    ASSERT_EQ(hipSuccess, api_.update_executable(executable_, graphs[next],
+                                                 &error_node, &result));
+    EXPECT_EQ(result, hipGraphExecUpdateSuccess);
+    EXPECT_EQ(error_node, nullptr);
+    ASSERT_EQ(hipSuccess,
+              api_.remove_dependencies(graphs[next], &roots[next].back(),
+                                       &uploads[next], 1));
+    EXPECT_EQ(hipErrorGraphExecUpdateFailure,
+              api_.update_executable(executable_, graphs[next], &error_node,
+                                     &result));
+    EXPECT_EQ(result, hipGraphExecUpdateErrorTopologyChanged);
+    EXPECT_EQ(error_node, uploads[next]);
+    ASSERT_EQ(hipSuccess,
+              api_.add_dependencies(graphs[next], &roots[next].back(),
+                                    &uploads[next], 1));
+    ReleaseStreamGate();
+    ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    EXPECT_EQ(destination_, source_);
+    if (i == 0) {
+      EXPECT_EQ(
+          0, std::memcmp(host_buffers_[1], observed_.data(), source_.size()));
+    } else {
+      EXPECT_EQ(0, std::memcmp(host_buffers_[1], replacement_.data(),
+                               source_.size()));
+    }
+  }
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(clone_));
+  clone_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+  graph_ = nullptr;
+  destination_.fill(0);
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, source_);
+}
+
 TEST_F(HipGraphMemoryApiTest, RegisteredHostCopiesPreserveCaptureAndUpdates) {
   ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
   for (auto& buffer : host_buffers_) {

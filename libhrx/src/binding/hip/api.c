@@ -19574,57 +19574,6 @@ HIPAPI hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
   HIP_RETURN_ERROR(hipSuccess);
 }
 
-// Updates an executable graph with a modified source graph.
-//
-// Parameters:
-//  - hGraphExec: [IN/OUT] Executable graph to update.
-//  - hGraph: [IN] Modified source graph with updates.
-//  - hErrorNode_out: [OUT] Pointer for the first incompatible node.
-//  - updateResult_out: [OUT] Detailed update compatibility result.
-//
-// Returns:
-//  - hipSuccess: Update successful.
-//  - hipErrorInvalidValue: Invalid parameters.
-//  - hipErrorGraphExecUpdateFailure: Update not possible.
-//
-// Synchronization: This operation is synchronous.
-//
-// Update behavior:
-// - Attempts to update executable without full re-instantiation.
-// - Preserves optimizations when possible.
-// - Faster than destroy + re-instantiate.
-// - May fail if topology changed significantly.
-//
-// Supported updates:
-// - Kernel parameters and launch configuration.
-// - Memory copy parameters (source/dest/size).
-// - Host callback function pointers.
-// - Node enable/disable state.
-//
-// Unsupported updates:
-// - Adding or removing nodes.
-// - Changing node types.
-// - Modifying graph topology/dependencies.
-// - Changing device assignments.
-//
-// Update strategy:
-// - Try update first for performance.
-// - Fall back to re-instantiation if update fails.
-// - Check hErrorNode_out for failure location.
-//
-// Performance optimization:
-// - Update is much faster than re-instantiation.
-// - Preserves device-side optimizations.
-// - Ideal for parameter-only changes.
-//
-// Multi-GPU: Updates must preserve device assignments.
-// Cannot move operations between devices.
-//
-// Warning: Updated executable must not be executing during update.
-// Ensure stream synchronization before updating.
-//
-// See also: hipGraphInstantiate, hipGraphLaunch,
-//           hipGraphExecDestroy.
 static hipGraphExecUpdateResult iree_hip_graph_exec_update_result(
     iree_hal_streaming_graph_exec_update_result_t result) {
   switch (result) {
@@ -19648,6 +19597,29 @@ static hipGraphExecUpdateResult iree_hip_graph_exec_update_result(
   }
 }
 
+// Updates an executable graph with a modified source graph.
+//
+// Parameters:
+//  - hGraphExec: [IN/OUT] Executable graph to update.
+//  - hGraph: [IN] Modified source graph with updates.
+//  - hErrorNode_out: [OUT] Pointer for the first incompatible node.
+//  - updateResult_out: [OUT] Detailed update compatibility result.
+//
+// Returns:
+//  - hipSuccess: Update successful.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorGraphExecUpdateFailure: Update not possible.
+//
+// Synchronization: This operation is synchronous.
+//
+// Updates preserve visible node creation order, dependency sets, node types,
+// device assignments, and copy shapes. Dependency insertion order may differ.
+// Accepted updates rebuild private executable state and preserve original node
+// handles and enable states; rejection leaves the previous executable intact.
+// Pending launches retain their captured parameters and resources, so updating
+// does not require joining their streams. Caller-owned pointer lifetimes remain
+// the application's responsibility.
+//
 HIPAPI hipError_t
 hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
                    hipGraphNode_t* hErrorNode_out,
