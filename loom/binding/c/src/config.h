@@ -80,9 +80,6 @@ typedef struct loomc_config_apply_module_options_t {
   // Result receiving config diagnostics.
   loomc_result_t* result;
 
-  // Diagnostic code used when config-domain statuses become result diagnostics.
-  loomc_string_view_t diagnostic_code;
-
   // Block pool for transient cross-module remapping storage.
   iree_arena_block_pool_t* block_pool;
 } loomc_config_apply_module_options_t;
@@ -110,8 +107,6 @@ typedef struct loomc_config_apply_text_to_module_options_t {
   // Result receiving config diagnostics.
   loomc_result_t* result;
 
-  // Block pool for transient config materialization storage.
-  iree_arena_block_pool_t* block_pool;
 } loomc_config_apply_text_to_module_options_t;
 
 // Checks final configuration resolution and records source-backed diagnostics.

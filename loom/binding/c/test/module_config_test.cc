@@ -12,6 +12,8 @@
 #include "iree/testing/gtest.h"
 #include "loom/config/application.h"
 #include "loom/config/schema.h"
+#include "loom/config/text.h"
+#include "loom/config/text_binding.h"
 #include "loom/util/stream.h"
 #include "loomc/iree.h"
 #include "loomc/pass.h"
@@ -284,7 +286,8 @@ TEST_F(ModuleConfigTest, ReportsInvalidConfigurationAndIrInResults) {
     EXPECT_FALSE(loomc_result_succeeded(result.get()));
     ASSERT_NE(loomc_result_diagnostic_count(result.get()), 0u);
     EXPECT_EQ(ToString(loomc_result_diagnostic_at(result.get(), 0)->code),
-              "CONFIG/INVALID");
+              std::string(json) == R"({"answer":17})" ? "SYMBOL/008"
+                                                      : "CONFIG/INVALID");
     EXPECT_EQ(loomc_module_config_bindings(module.get())->head, nullptr);
   }
   auto invalid = CreateModule("func.def @invalid() -> (i32) { func.return }\n");
@@ -293,6 +296,98 @@ TEST_F(ModuleConfigTest, ReportsInvalidConfigurationAndIrInResults) {
   auto schema = Schema(invalid.get());
   EXPECT_FALSE(loomc_result_succeeded(schema.get()));
   EXPECT_EQ(loomc_result_artifact_count(schema.get()), 0u);
+}
+
+TEST_F(ModuleConfigTest, RejectsOverridesWithoutDiagnosticCallbacks) {
+  for (const char* value : {"17", "9999999999999999999999999"}) {
+    auto module = CreateModule();
+    const auto original_schema = ReadSchema(Schema(module.get()).get());
+    loom_config_text_binding_set_t bindings;
+    loom_config_text_binding_set_initialize(iree_allocator_system(), &bindings);
+    LOOMC_ASSERT_OK(loomc_status_from_iree(loom_config_text_binding_set_append(
+        &bindings, IREE_SV("answer"), iree_make_cstring_view(value))));
+    const loom_config_text_materialize_options_t options = {
+        .binding_set = &bindings,
+    };
+    loom_config_application_result_t result = {};
+    LOOMC_EXPECT_OK(loomc_status_from_iree(loom_config_text_materialize_module(
+        loomc_module_loom_module(module.get()), &options, &result)));
+    EXPECT_EQ(result.error_count, 1u);
+    EXPECT_EQ(result.materialized_count, 0u);
+    EXPECT_EQ(ReadSchema(Schema(module.get()).get()), original_schema);
+    loom_config_text_binding_set_deinitialize(&bindings);
+  }
+  for (const char* provider_text :
+       {"func.def @f() { func.return }\n", "config.def @answer = 16 : i32\n",
+        "config.def @answer = 17 : index\n"}) {
+    auto module = CreateModule();
+    auto provider = CreateModule(provider_text);
+    const auto original_schema = ReadSchema(Schema(module.get()).get());
+    loom_config_application_result_t result = {};
+    LOOMC_EXPECT_OK(loomc_status_from_iree(loom_config_overlay_module(
+        loomc_module_loom_module(module.get()),
+        loomc_module_const_loom_module(provider.get()), {}, {},
+        loomc_module_block_pool(module.get()), &result)));
+    EXPECT_EQ(result.error_count, 1u);
+    EXPECT_EQ(result.materialized_count, 0u);
+    EXPECT_EQ(ReadSchema(Schema(module.get()).get()), original_schema);
+  }
+}
+
+TEST_F(ModuleConfigTest, RetainsDeclarationAndEncodingInputLocations) {
+  struct Case {
+    // Target contract before application.
+    const char* declaration;
+    // Exact text supplied by the caller.
+    const char* value;
+    // Expected contract code, or NULL for an input syntax diagnostic.
+    const char* code;
+  };
+  const Case cases[] = {
+      {"config.decl @value : i8\n", "128", "SYMBOL/011"},
+      {"config.decl @value : i1\n", "2", "SYMBOL/011"},
+      {"config.decl @value : f32\n", "not-a-number", "SYMBOL/011"},
+      {"config.decl @value : encoding<layout>\n", "#ggml.q4_0", "SYMBOL/012"},
+      {"config.decl @value : encoding<layout>\n", "#unknown", nullptr},
+      {"config.decl @value : encoding<layout>\n",
+       "#encoding.layout.dense : encoding<layout>\nconfig.def @injected = 1 : "
+       "index",
+       nullptr},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.value);
+    auto module = CreateModule(test.declaration);
+    const auto original_schema = ReadSchema(Schema(module.get()).get());
+    const loomc_config_binding_t binding = {
+        .key = loomc_make_cstring_view("value"),
+        .value = loomc_make_cstring_view(test.value),
+    };
+    const loomc_module_config_options_t options = {
+        .config = {.bindings = &binding, .binding_count = 1},
+    };
+    auto result = Apply(module.get(), &options);
+    ASSERT_FALSE(loomc_result_succeeded(result.get()));
+    ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+    const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+    ASSERT_NE(diagnostic->range.source, nullptr);
+    EXPECT_EQ(diagnostic->range.start_line, 1u);
+    if (test.code) {
+      EXPECT_EQ(ToString(diagnostic->code), test.code);
+      EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+                "configuration.loom");
+    } else {
+      EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+                "<configuration>");
+      ASSERT_EQ(diagnostic->related_location_count, 1u);
+      const auto& declaration = diagnostic->related_locations[0].range;
+      ASSERT_NE(declaration.source, nullptr);
+      EXPECT_EQ(ToString(loomc_source_identifier(declaration.source)),
+                "configuration.loom");
+      EXPECT_EQ(declaration.start_line, 1u);
+    }
+    EXPECT_EQ(loomc_module_config_bindings(module.get())->head, nullptr);
+    EXPECT_EQ(ReadSchema(Schema(module.get()).get()), original_schema);
+  }
 }
 
 TEST_F(ModuleConfigTest, RejectsInvalidDescriptorsBeforeMutation) {

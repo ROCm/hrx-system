@@ -11,7 +11,6 @@ func.def @read_hidden_size() -> (index) {
 
 // ----
 applied @model36.model.hidden_size = 4096
-status: OK
 materialized: 1
 ignored: 0
 config.def @model36.model.hidden_size = 4096 : %value: index where [range(%value, 0, 8192), multiple_of(%value, 16)]
@@ -31,7 +30,6 @@ config.def @depth = 1 : index
 
 // ----
 applied @depth = 4
-status: OK
 materialized: 1
 ignored: 0
 config.def @depth = 4 : index
@@ -44,7 +42,6 @@ config.def @enabled = false : i1
 
 // ----
 applied @enabled = true
-status: OK
 materialized: 1
 ignored: 0
 config.def @enabled = true : i1
@@ -57,7 +54,6 @@ config.def @scale = 1.0 : f32
 
 // ----
 applied @scale = 0.5
-status: OK
 materialized: 1
 ignored: 0
 config.def @scale = 0.5 : f32
@@ -71,7 +67,6 @@ config.decl @model36.layout : encoding<layout>
 
 // ----
 applied @model36.layout = #encoding.layout.dense
-status: OK
 materialized: 1
 ignored: 0
 config.def @model36.layout = #encoding.layout.dense : encoding<layout>
@@ -87,7 +82,6 @@ func.def @identity(%value: i32) -> (i32) {
 }
 
 // ----
-status: OK
 materialized: 0
 ignored: 1
 func.def @identity(%value: i32) -> (i32) {
@@ -99,10 +93,7 @@ func.def @identity(%value: i32) -> (i32) {
 // RUN: emit config-materialize model36.model.hidden_size=4103
 
 // Contract failures leave the declaration and its constraints intact.
-config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8192), multiple_of(%value, 16)]
-
-// ----
-status: INVALID_ARGUMENT
+// ERROR@+1: SYMBOL/008 "multiple_of"
 config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8192), multiple_of(%value, 16)]
 
 // ====
@@ -110,10 +101,7 @@ config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8
 // RUN: emit config-materialize model36.layout=#ggml.q4_0
 
 // Parsed encoding attributes must match the role declared by the config type.
-config.decl @model36.layout : encoding<layout>
-
-// ----
-status: INVALID_ARGUMENT
+// ERROR@+1: SYMBOL/012 "storage schema"
 config.decl @model36.layout : encoding<layout>
 
 // ====
@@ -121,10 +109,7 @@ config.decl @model36.layout : encoding<layout>
 // RUN: emit config-materialize lanes=128
 
 // Scalar text is rejected when it cannot be represented by the declared type.
-config.decl @lanes : i8
-
-// ----
-status: OUT_OF_RANGE
+// ERROR@+1: SYMBOL/011 "i8"
 config.decl @lanes : i8
 
 // ====
@@ -136,7 +121,6 @@ config.def @lanes = 32 : %value: index where [range(%value, 16, 128), multiple_o
 
 // ----
 applied @lanes = 64
-status: OK
 materialized: 1
 ignored: 0
 config.def @lanes = 64 : %value: index where [range(%value, 16, 128), multiple_of(%value, 16)]
@@ -145,8 +129,5 @@ config.def @lanes = 64 : %value: index where [range(%value, 16, 128), multiple_o
 
 // RUN: emit config-materialize lanes=65
 
-config.def @lanes = 32 : %value: index where [range(%value, 16, 128), multiple_of(%value, 16)]
-
-// ----
-status: INVALID_ARGUMENT
+// ERROR@+1: SYMBOL/008 "multiple_of"
 config.def @lanes = 32 : %value: index where [range(%value, 16, 128), multiple_of(%value, 16)]

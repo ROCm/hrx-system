@@ -121,6 +121,57 @@ ERR_SYMBOL_008 = ErrorDef(
     ),
 )
 
+ERR_SYMBOL_009 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=9,
+    severity=Severity.ERROR,
+    summary="Configuration provider contains a program operation.",
+    message="configuration providers must contain only config.def operations",
+    params=(),
+)
+
+ERR_SYMBOL_010 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=10,
+    severity=Severity.ERROR,
+    summary="Configuration definition has an incompatible type.",
+    message=(
+        "config '@{symbol_name}' requires {expected_type}, "
+        "but the supplied definition has type {actual_type}"
+    ),
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("expected_type", ParamKind.TYPE),
+        ErrorParam("actual_type", ParamKind.TYPE),
+    ),
+)
+
+ERR_SYMBOL_011 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=11,
+    severity=Severity.ERROR,
+    summary="Configuration value cannot be represented by its declared type.",
+    message="config '@{symbol_name}' value '{value}' cannot be represented as {type}",
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("value", ParamKind.STRING),
+        ErrorParam("type", ParamKind.TYPE),
+    ),
+)
+
+ERR_SYMBOL_012 = ErrorDef(
+    domain=ErrorDomain.SYMBOL,
+    code=12,
+    severity=Severity.ERROR,
+    summary="Configuration encoding has an incompatible role.",
+    message="config '@{symbol_name}' expects {expected_role}, got {actual_role}",
+    params=(
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("expected_role", ParamKind.STRING),
+        ErrorParam("actual_role", ParamKind.STRING),
+    ),
+)
+
 ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_001,
     ERR_SYMBOL_002,
@@ -130,4 +181,8 @@ ALL_SYMBOL_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SYMBOL_006,
     ERR_SYMBOL_007,
     ERR_SYMBOL_008,
+    ERR_SYMBOL_009,
+    ERR_SYMBOL_010,
+    ERR_SYMBOL_011,
+    ERR_SYMBOL_012,
 )

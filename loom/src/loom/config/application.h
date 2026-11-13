@@ -48,6 +48,8 @@ typedef struct loom_config_application_result_t {
   iree_host_size_t materialized_count;
   // Number of values ignored because the module has no matching config symbol.
   iree_host_size_t ignored_count;
+  // Number of rejected values, independent of diagnostic callback presence.
+  iree_host_size_t error_count;
 } loom_config_application_result_t;
 
 // Summary of a configuration resolution check.
@@ -84,10 +86,14 @@ iree_status_t loom_config_remap_type_and_value(
 
 // Replaces |old_op| with an exact config.def after checking its contract.
 // Both declarations and definitions retain their constraints after replacement.
+// Rejection leaves |old_op| unchanged, emits its contract diagnostic, and sets
+// |*out_accepted| to false. Status carries infrastructure failures only.
 iree_status_t loom_config_apply_exact_value(loom_module_t* module,
                                             iree_string_view_t key,
                                             loom_op_t* old_op, loom_type_t type,
-                                            loom_attribute_t value);
+                                            loom_attribute_t value,
+                                            iree_diagnostic_emitter_t emitter,
+                                            bool* out_accepted);
 
 // Overlays exact config.def values from |config_module| onto matching config
 // symbols in |module|.
@@ -98,12 +104,14 @@ iree_status_t loom_config_apply_exact_value(loom_module_t* module,
 // program operations are rejected. Definitions without matching config symbols
 // in the target module are ignored so one reusable config module can serve
 // several related programs.
+// Application stops at the first rejected value and records it in |out_result|
+// independently of diagnostic delivery. Earlier successful bindings remain.
 // Only initializer values are overlaid; the target requirements are retained
 // rather than replaced or extended by the config module's own constraints.
 iree_status_t loom_config_overlay_module(
     loom_module_t* module, const loom_module_t* config_module,
     loom_config_applied_value_sink_t applied_value_sink,
-    iree_arena_block_pool_t* block_pool,
+    iree_diagnostic_emitter_t emitter, iree_arena_block_pool_t* block_pool,
     loom_config_application_result_t* out_result);
 
 // Requires that |module| contains no remaining config.decl symbols.

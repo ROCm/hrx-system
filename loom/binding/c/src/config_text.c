@@ -110,15 +110,24 @@ loomc_status_t loomc_config_prepare_text_bindings(
 loomc_status_t loomc_config_apply_text_to_module(
     const loomc_config_apply_text_to_module_options_t* options) {
   loom_config_application_result_t materialize_result = {0};
+  loomc_diagnostic_capture_t capture;
+  loomc_diagnostic_capture_initialize(options->result, NULL, options->module,
+                                      options->source_resolver,
+                                      LOOM_EMITTER_PASS, NULL, &capture);
   const loom_config_text_materialize_options_t materialize_options = {
       .binding_set = options->bindings,
       .applied_value_sink = options->applied_value_sink,
+      .diagnostic_sink = {.fn = loomc_diagnostic_capture,
+                          .user_data = &capture},
+      .source_resolver = options->source_resolver,
   };
   loomc_status_t status =
       loomc_status_from_iree(loom_config_text_materialize_module(
-          options->module, &materialize_options, options->block_pool,
-          &materialize_result));
-  status = loomc_config_report_text_status(options->result, status);
+          options->module, &materialize_options, &materialize_result));
+  if (materialize_result.error_count) {
+    loomc_result_set_status_code(options->result,
+                                 LOOMC_STATUS_FAILED_PRECONDITION);
+  }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(options->result) &&
       materialize_result.materialized_count != 0) {
     status = loomc_result_verify_loom_module(options->context, options->module,
