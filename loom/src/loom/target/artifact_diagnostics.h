@@ -41,6 +41,12 @@ iree_status_t loom_target_artifact_emit_limit(iree_diagnostic_emitter_t emitter,
                                               uint64_t actual,
                                               uint64_t maximum);
 
+// Emits an out-of-bounds symbol offset at the operation requesting its address.
+iree_status_t loom_target_artifact_emit_symbol_offset(
+    iree_diagnostic_emitter_t emitter, const loom_op_t* op,
+    iree_string_view_t format, iree_string_view_t name, uint64_t offset,
+    uint64_t length);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

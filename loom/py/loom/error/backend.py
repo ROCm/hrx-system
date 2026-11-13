@@ -1354,6 +1354,24 @@ ERR_BACKEND_060 = ErrorDef(
     ),
 )
 
+ERR_BACKEND_061 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=61,
+    severity=Severity.ERROR,
+    summary="A symbol address exceeds the artifact's storage extent.",
+    message=(
+        "{format} symbol '{symbol_name}' byte offset {offset} exceeds its "
+        "{length}-byte storage"
+    ),
+    params=(
+        ErrorParam("format", ParamKind.STRING),
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("offset", ParamKind.U64),
+        ErrorParam("length", ParamKind.U64),
+    ),
+)
+
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1406,4 +1424,5 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_058,
     ERR_BACKEND_059,
     ERR_BACKEND_060,
+    ERR_BACKEND_061,
 )

@@ -889,9 +889,15 @@ class LowKernelEmitter {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_data_symbol_directory_build(module_, arena, &data_symbols));
     loom_amdgpu_kernel_emission_result_t emission_result = {};
+    bool emission_accepted = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_emission_build(
         &frame, &plan, &data_symbols, LOOM_AMDGPU_KERNEL_EMISSION_FLAG_NONE,
-        /*target_listing=*/nullptr, arena, &emission_result));
+        /*target_listing=*/nullptr, arena, frame_options.emitter,
+        &emission_accepted, &emission_result));
+    EXPECT_TRUE(emission_accepted);
+    if (!emission_accepted) {
+      return iree_ok_status();
+    }
     const loom_amdgpu_hsaco_input_t hsaco_input = {
         .target_identity = target_profile->identity,
         .kernels = &emission_result.kernel,

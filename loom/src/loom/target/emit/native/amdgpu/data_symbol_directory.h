@@ -11,6 +11,8 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/schedule/types.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/module.h"
 #include "loom/target/emit/native/amdgpu/data_symbol_fixup.h"
 #include "loom/target/emit/native/amdgpu/hsaco_build.h"
@@ -40,8 +42,6 @@ typedef struct loom_amdgpu_data_symbol_directory_t {
   // Final data-symbol ordinal by module-local symbol ID, or
   // LOOM_AMDGPU_DATA_SYMBOL_ORDINAL_INVALID for non-data symbols.
   const uint32_t* ordinals_by_module_symbol;
-  // Number of entries in |ordinals_by_module_symbol|.
-  iree_host_size_t module_symbol_count;
   // Placement contract applied to |symbols|.
   loom_amdgpu_hsaco_data_layout_t layout;
 } loom_amdgpu_data_symbol_directory_t;
@@ -52,11 +52,14 @@ iree_status_t loom_amdgpu_data_symbol_directory_build(
     loom_amdgpu_data_symbol_directory_t* out_directory);
 
 // Binds module-local data-symbol fixups to final HSACO symbol ordinals.
+// Diagnoses missing definitions and out-of-bounds offsets at their retained
+// source node, leaving |out_accepted| false independently of emitter presence.
 iree_status_t loom_amdgpu_data_symbol_directory_bind_fixups(
     const loom_amdgpu_data_symbol_directory_t* directory,
+    const loom_low_schedule_table_t* schedule,
     const loom_amdgpu_data_symbol_fixup_t* fixups, iree_host_size_t fixup_count,
-    iree_arena_allocator_t* arena,
-    const loom_amdgpu_hsaco_text_fixup_t** out_fixups);
+    iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
+    bool* out_accepted, const loom_amdgpu_hsaco_text_fixup_t** out_fixups);
 
 #ifdef __cplusplus
 }  // extern "C"

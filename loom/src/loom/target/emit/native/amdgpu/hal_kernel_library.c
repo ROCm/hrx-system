@@ -679,6 +679,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
     }
   }
   loom_amdgpu_kernel_emission_result_t emission_result = {0};
+  bool emission_accepted = false;
   const loom_amdgpu_kernel_emission_flags_t emission_flags =
       report != NULL
           ? LOOM_AMDGPU_KERNEL_EMISSION_FLAG_CAPTURE_NATIVE_INSERTIONS
@@ -689,22 +690,26 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
             ? loom_amdgpu_program_emission_build(
                   &compilation, artifact_emission, data_symbols, &native_plan,
                   emission_flags, include_artifact_functions_in_listing,
-                  target_listing, table_arena, &emission_result)
-            : loom_amdgpu_kernel_emission_build(&entry_compilation->frame,
-                                                &native_plan, data_symbols,
-                                                emission_flags, target_listing,
-                                                table_arena, &emission_result);
+                  target_listing, table_arena, emitter, &emission_accepted,
+                  &emission_result)
+            : loom_amdgpu_kernel_emission_build(
+                  &entry_compilation->frame, &native_plan, data_symbols,
+                  emission_flags, target_listing, table_arena, emitter,
+                  &emission_accepted, &emission_result);
   }
-  if (iree_status_is_ok(status) && report != NULL) {
+  if (iree_status_is_ok(status) && emission_accepted && report != NULL) {
     status = loom_amdgpu_kernel_report_record_emission(
         report, &entry_compilation->frame, &dynamic_context, &native_plan,
         &emission_result);
   }
-  if (iree_status_is_ok(status) && report != NULL) {
+  if (iree_status_is_ok(status) && emission_accepted && report != NULL) {
     status = loom_amdgpu_program_report_compose_entry(artifact_root, report);
   }
   loom_target_compile_report_low_dynamic_context_deinitialize(&dynamic_context);
   IREE_RETURN_IF_ERROR(status);
+  if (!emission_accepted) {
+    return iree_ok_status();
+  }
   *out_emission = emission_result;
   *out_built = true;
   return iree_ok_status();
@@ -835,9 +840,12 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
       diagnostics_failed = true;
     }
     if (iree_status_is_ok(status) && !diagnostics_failed) {
+      bool artifact_emitted = false;
       status = loom_amdgpu_program_artifact_emission_build(
           &program_artifact, &data_symbols, table_arena,
+          loom_target_entry_emitter(diagnostic_emitter), &artifact_emitted,
           &program_artifact_emission);
+      diagnostics_failed |= !artifact_emitted;
     }
   }
 
