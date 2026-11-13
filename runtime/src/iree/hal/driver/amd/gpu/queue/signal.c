@@ -122,7 +122,7 @@ void iree_hal_amd_gpu_signal_block_attach(
   block->free_head = capacity ? signals : NULL;
   block->domain = domain;
   block->device_address = device_address;
-  block->host_values = (uint8_t*)storage + value_offset;
+  block->host_values = capacity ? (uint8_t*)storage + value_offset : NULL;
   block->stride = stride;
   for (uint32_t i = 0; i < capacity; ++i) {
     const uint64_t offset = (uint64_t)i * stride;

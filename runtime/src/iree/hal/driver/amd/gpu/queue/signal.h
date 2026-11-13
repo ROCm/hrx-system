@@ -128,7 +128,8 @@ typedef struct iree_hal_amd_gpu_signal_block_t {
   iree_atomic_intptr_t frontiers;
   // First native operand's device address, used when recycling logical aliases.
   uint64_t device_address;
-  // First native operand's host value, owned by the enclosing backing.
+  // First native operand's host value, or NULL for an empty block. Owned by the
+  // enclosing backing.
   uint8_t* host_values;
   // Distance between native operands, in bytes.
   uint32_t stride;
@@ -157,6 +158,7 @@ void iree_hal_amd_gpu_signal_block_initialize(
 // host/device visibility, atomicity, and native protocol. Other native fields
 // are initialized by the protocol owner. The existing frontier table, including
 // expansions made before native acquisition completed, remains installed.
+// Empty blocks need no storage and do not form a native value address.
 // The exclusive publisher owns waiting work; attachment does not notify it.
 void iree_hal_amd_gpu_signal_block_attach(
     iree_hal_amd_gpu_signal_pool_t* pool, const void* domain, void* storage,

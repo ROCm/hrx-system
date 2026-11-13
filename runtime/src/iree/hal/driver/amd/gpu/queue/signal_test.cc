@@ -101,9 +101,22 @@ TEST(SignalTest, NativeAttachmentPreservesPreparedFrontiers) {
 }
 
 TEST(SignalTest, EmptyPool) {
-  Storage<0> storage;
-  EXPECT_EQ(iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 0),
-            nullptr);
+  for (uint32_t value_offset : {0u, 8u}) {
+    Pool pool;
+    iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
+    std::array<uint64_t, 2> frontiers;
+    iree_hal_amd_gpu_signal_block_t block;
+    iree_hal_amd_gpu_signal_block_initialize(nullptr, 0, 1, frontiers.data(),
+                                             &block);
+    iree_hal_amd_gpu_signal_block_attach(&pool, nullptr, nullptr, 0,
+                                         value_offset ? 64 : 8, value_offset,
+                                         &block);
+    EXPECT_EQ(block.host_values, nullptr);
+    EXPECT_FALSE(iree_hal_amd_gpu_signal_pool_has_available(&pool));
+    EXPECT_EQ(iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 0), nullptr);
+    EXPECT_TRUE(iree_hal_amd_gpu_signal_block_try_deinitialize(&block));
+    iree_hal_amd_gpu_signal_pool_deinitialize(&pool);
+  }
 }
 
 TEST(SignalTest, ExhaustionAndIndependentReuse) {
